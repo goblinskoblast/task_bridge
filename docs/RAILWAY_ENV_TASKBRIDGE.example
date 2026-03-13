@@ -1,0 +1,30 @@
+﻿# taskbridge-app (Railway)
+BOT_TOKEN=
+USE_WEBHOOK=True
+WEBHOOK_PATH=/webhook
+WEBHOOK_URL=https://<taskbridge-domain>.up.railway.app
+WEB_APP_DOMAIN=https://<taskbridge-domain>.up.railway.app
+MINI_APP_URL=https://<taskbridge-domain>.up.railway.app/webapp/index.html
+HOST=0.0.0.0
+PORT=8000
+DATABASE_URL=
+
+# Start with OpenAI for first stable deploy
+AI_PROVIDER=openai
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
+
+# OpenClaw SDD controls
+OPENCLAW_ENFORCE_SDD_SPEC=True
+OPENCLAW_SDD_SPEC_PATH=docs/sdd/specs/SPEC-OC-001-openclaw-agent.md
+OPENCLAW_SDD_MAX_CHARS=24000
+
+# When OpenClaw service is validated, switch:
+# AI_PROVIDER=openclaw
+# OPENCLAW_BASE_URL=
+# OPENCLAW_MODEL=openai/gpt-4o
+# OPENCLAW_TIMEOUT=60
+
+# optional
+LOG_LEVEL=INFO
+TIMEZONE=Europe/Moscow
