@@ -109,8 +109,11 @@ async def start_bot_webhook():
         logger.info(f"Webhook set to {WEBHOOK_URL + WEBHOOK_PATH}")
         
         
+        import os
+        web_port = int(os.environ.get("PORT", PORT))
         loop = asyncio.get_event_loop()
-        loop.create_task(uvicorn.Server(uvicorn.Config(webapp_app, host=HOST, port=8080)))
+        server = uvicorn.Server(uvicorn.Config(webapp_app, host=HOST, port=web_port))
+        loop.create_task(server.serve())
         
       
         await dp.start_polling(bot)
