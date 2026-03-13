@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  taskbridge:
+    build: .
+    container_name: taskbridge_bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - USE_WEBHOOK=False
+      - DATABASE_URL=sqlite:///./data/taskbridge.db
+      - PORT=8000
+      - MINI_APP_URL=${MINI_APP_URL:-http://localhost:8000/webapp/index.html}
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8000:8000"

@@ -1,0 +1,73 @@
+﻿Отчет 2: Анализ папки task_bridge-main (демо-версия)
+Дата: 2026-03-04
+
+1) Общая картина реализации
+В директории находится рабочая кодовая база full-stack прототипа:
+- Telegram bot на aiogram;
+- FastAPI backend;
+- React WebApp (Vite + axios + lucide-react);
+- SQLAlchemy модели (SQLite/PostgreSQL);
+- email-модули (IMAP + AI extraction);
+- модуль AI-поддержки с Vision-анализом скриншотов.
+
+2) Что реально реализовано в коде
+2.1 Bot/Task core
+- Парсинг задач из групповых сообщений через OpenAI (bot/ai_extractor.py).
+- Создание pending-задач и подтверждение через inline-кнопки (bot/handlers.py).
+- Множественные исполнители (many-to-many через task_assignees).
+- Назначения, статусы, уведомления, прикрепления файлов, комментарии.
+
+2.2 Web API
+В webapp/app.py реализованы endpoints:
+- /api/tasks (+ фильтры assigned_to/created_by)
+- /api/tasks/{id}, /status, /files, /comments
+- /api/categories, /api/users, /api/stats
+- /api/tasks/{id}/assignees (add/remove)
+- /api/email-accounts (CRUD + test connection)
+- /api/email-accounts/{id}/messages
+
+2.3 Frontend
+React-интерфейс включает:
+- вкладки "Мои задачи" / "Назначенные мной" / "Email";
+- фильтры, карточки задач, детальный экран;
+- управление исполнителями;
+- комментарии;
+- экран email-аккаунтов и тест IMAP подключения.
+
+2.4 Email integration
+Реально присутствуют:
+- IMAP подключение и чтение писем;
+- фильтры отправителей/тем;
+- AI-анализ текста письма;
+- создание Task/PendingTask из письма;
+- периодическая проверка почты scheduler'ом.
+
+2.5 Поддержка (Support)
+- Диалог поддержки с AI-консультантом;
+- сохранение сессий/сообщений/вложений в БД;
+- Vision-анализ скриншотов через OpenAI;
+- форвард в Telegram разработчика при наличии DEVELOPER_TELEGRAM_ID.
+
+3) Технические признаки зрелости
+Плюсы:
+- Проект не "пустой": есть связанный end-to-end поток.
+- Реализована основная data-модель и API-слой.
+- Есть деплойные артефакты (Dockerfile, Procfile, render/supabase docs).
+
+Минусы/риски (важно):
+- Критический долг в архитектуре: очень крупный bot/handlers.py (~1000+ строк).
+- В репозитории лежат legacy/backup версии handlers (old/backup), что повышает риск рассинхрона.
+- Есть явные TODO в email-флоу (например уведомления после создания задач из email).
+- Несоответствие документации и кода по безопасности email-паролей:
+  - docs описывают шифрование,
+  - но в основной модели/потоке используется imap_password (в текущем виде без прозрачного применения encryption.py).
+- Нет признаков полноценного автоматического тестового покрытия (unit/integration/e2e).
+
+4) Найденные несогласованности/узкие места
+- start_all.bat и start_all.sh запускают `python bot/main.py`, но файла bot/main.py в дереве нет.
+- В webapp/app.py есть вызов `from bot.main import bot` в add_task_assignee; при отсутствии bot/main.py это потенциально проблемное место.
+- В режиме webhook в main.py код выглядит неоднородно (set_webhook + start_polling), требует верификации под production.
+- Часть docs (например email workflow) описывает более широкую реализацию, чем подтверждается кодом.
+
+5) Итог по папке task_bridge-main
+Это не концепт, а реально работающая демо-MVP кодовая база с расширениями (email + support AI), но с заметным техдолгом, неполной прод-готовностью и несогласованностями между docs и фактической реализацией.

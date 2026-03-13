@@ -1,0 +1,16 @@
+﻿# TASKS for SPEC-XXXX: <Название>
+
+## Status legend
+- [ ] todo
+- [~] in progress
+- [x] done
+- [!] blocked
+
+## Work items
+- [ ] T1 ...
+- [ ] T2 ...
+- [ ] T3 ...
+
+## Verification
+- [ ] V1 ...
+- [ ] V2 ...
