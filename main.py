@@ -24,12 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 async def set_bot_commands(bot: Bot):
-    """Устанавливает меню команд бота."""
+    """РЈСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ РјРµРЅСЋ РєРѕРјР°РЅРґ Р±РѕС‚Р°"""
     commands = [
-        BotCommand(command="start", description="Начать работу с ботом"),
-        BotCommand(command="panel", description="Открыть панель задач"),
-        BotCommand(command="support", description="Чат поддержки"),
-        BotCommand(command="help", description="Справка и инструкции")
+        BotCommand(command="start", description="рџљЂ РќР°С‡Р°С‚СЊ СЂР°Р±РѕС‚Сѓ СЃ Р±РѕС‚РѕРј"),
+        BotCommand(command="panel", description="рџ“± РћС‚РєСЂС‹С‚СЊ РїР°РЅРµР»СЊ Р·Р°РґР°С‡"),
+        BotCommand(command="support", description="рџ’¬ Р§Р°С‚ РїРѕРґРґРµСЂР¶РєРё"),
+        BotCommand(command="help", description="вќ“ РЎРїСЂР°РІРєР° Рё РёРЅСЃС‚СЂСѓРєС†РёРё")
     ]
     await bot.set_my_commands(commands, BotCommandScopeDefault())
     logger.info("Bot commands menu set successfully")
