@@ -25,21 +25,6 @@ app = FastAPI(title="TaskBridge API")
 import logging
 logger = logging.getLogger(__name__)
 
-
-@app.get("/api/version")
-async def api_version():
-    """Runtime deployment/version diagnostics."""
-    return {
-        "app": "taskbridge",
-        "git_commit": (
-            os.getenv("RAILWAY_GIT_COMMIT_SHA")
-            or os.getenv("GIT_COMMIT")
-            or "unknown"
-        ),
-        "railway_deployment_id": os.getenv("RAILWAY_DEPLOYMENT_ID", "unknown"),
-        "railway_environment": os.getenv("RAILWAY_ENVIRONMENT", "unknown"),
-    }
-
 GOOGLE_OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
