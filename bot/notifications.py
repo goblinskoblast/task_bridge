@@ -4,15 +4,27 @@
 """
 import logging
 from typing import Optional
+from urllib.parse import urlencode
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from aiogram.exceptions import TelegramForbiddenError
 from sqlalchemy.orm import Session
 
 from db.models import Task, User
-from config import WEB_APP_DOMAIN, BOT_TOKEN
+from config import WEB_APP_DOMAIN, BOT_TOKEN, WEBAPP_BUILD_TAG
 
 logger = logging.getLogger(__name__)
+
+def build_webapp_url(mode: str = "executor", user_id: Optional[int] = None, task_id: Optional[int] = None) -> str:
+    base = f"{WEB_APP_DOMAIN}/webapp/index.html"
+    params = {"v": WEBAPP_BUILD_TAG}
+    if mode:
+        params["mode"] = mode
+    if user_id is not None:
+        params["user_id"] = str(user_id)
+    if task_id is not None:
+        params["task_id"] = str(task_id)
+    return f"{base}?{urlencode(params)}"
 
 # Глобальный экземпляр бота для уведомлений
 _bot_instance: Optional[Bot] = None
@@ -71,7 +83,7 @@ async def notify_comment_added(task_id: int, comment_author_id: int, comment_tex
         for participant in participants:
             if participant.telegram_id and participant.telegram_id != -1:
                 try:
-                    webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={participant.id}&task_id={task.id}"
+                    webapp_url = build_webapp_url(mode="executor", user_id=participant.id, task_id=task.id)
                     keyboard = InlineKeyboardMarkup(inline_keyboard=[
                         [
                             InlineKeyboardButton(
@@ -168,7 +180,7 @@ async def notify_status_changed(
         for participant in participants:
             if participant.telegram_id and participant.telegram_id != -1:
                 try:
-                    webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={participant.id}&task_id={task.id}"
+                    webapp_url = build_webapp_url(mode="executor", user_id=participant.id, task_id=task.id)
                     keyboard = InlineKeyboardMarkup(inline_keyboard=[
                         [
                             InlineKeyboardButton(

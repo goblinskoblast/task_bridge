@@ -1,5 +1,6 @@
-﻿import logging
+import logging
 import re
+from urllib.parse import urlencode
 from typing import List, Optional
 from datetime import datetime
 from aiogram import Bot, Router, F
@@ -12,7 +13,7 @@ from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from sqlalchemy.orm import Session
 
-from config import TASK_KEYWORDS, MINI_APP_URL, HOST, PORT, WEB_APP_DOMAIN
+from config import TASK_KEYWORDS, MINI_APP_URL, HOST, PORT, WEB_APP_DOMAIN, WEBAPP_BUILD_TAG
 from db.models import User, Message as MessageModel, Task, Category, PendingTask, TaskFile, Chat
 from db.database import get_db_session
 from bot.ai_extractor import analyze_message
@@ -20,6 +21,17 @@ from bot.ai_extractor import analyze_message
 logger = logging.getLogger(__name__)
 
 router = Router()
+
+def build_webapp_url(mode: str = "executor", user_id: Optional[int] = None, task_id: Optional[int] = None) -> str:
+    base = f"{WEB_APP_DOMAIN}/webapp/index.html"
+    params = {"v": WEBAPP_BUILD_TAG}
+    if mode:
+        params["mode"] = mode
+    if user_id is not None:
+        params["user_id"] = str(user_id)
+    if task_id is not None:
+        params["task_id"] = str(task_id)
+    return f"{base}?{urlencode(params)}"
 
 
 def init_default_categories(db: Session):
@@ -209,7 +221,7 @@ async def notify_comment_added(bot: Bot, task_id: int, comment_author_id: int, c
         for participant in participants:
             if participant.telegram_id and participant.telegram_id != -1:
                 try:
-                    webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={participant.id}&task_id={task.id}"
+                    webapp_url = build_webapp_url(mode="executor", user_id=participant.id, task_id=task.id)
                     keyboard = InlineKeyboardMarkup(inline_keyboard=[
                         [
                             InlineKeyboardButton(
@@ -279,7 +291,7 @@ async def notify_assigned_user(bot: Bot, task_id: int, db: Session, assignee: Us
         notification += f"<b>РЎС‚Р°С‚СѓСЃ:</b> {task.status}\n"
 
         # РљРЅРѕРїРєРё
-        webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={assignee.id}"
+        webapp_url = build_webapp_url(mode="executor", user_id=assignee.id)
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
@@ -354,7 +366,7 @@ async def cmd_start(message: Message):
         # РћС‚РїСЂР°РІР»СЏРµРј СѓРІРµРґРѕРјР»РµРЅРёСЏ Рѕ РЅРµР·Р°РІРµСЂС€РµРЅРЅС‹С… Р·Р°РґР°С‡Р°С…
         if pending_tasks:
             for task in pending_tasks:
-                task_webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}&task_id={task.id}"
+                task_webapp_url = build_webapp_url(mode="executor", user_id=user.id, task_id=task.id)
                 task_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(
@@ -376,7 +388,7 @@ async def cmd_start(message: Message):
 
                 await message.answer(notification, reply_markup=task_keyboard, parse_mode="HTML")
 
-        webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}"
+        webapp_url = build_webapp_url(mode="executor", user_id=user.id)
 
         # Р¤РѕСЂРјРёСЂСѓРµРј РїСЂРёРІРµС‚СЃС‚РІРµРЅРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ
         if is_first_auth and pending_tasks:
@@ -466,7 +478,7 @@ async def cmd_panel(message: Message):
             db=db
         )
 
-        webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}"
+        webapp_url = build_webapp_url(mode="executor", user_id=user.id)
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
@@ -777,7 +789,7 @@ async def handle_confirm_task(callback: CallbackQuery):
 
         
         creator = db.query(User).filter(User.id == pending_task.created_by_id).first()
-        webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=manager&user_id={creator.id}" if creator else f"{WEB_APP_DOMAIN}/webapp/index.html"
+        webapp_url = build_webapp_url(mode="manager", user_id=creator.id) if creator else build_webapp_url(mode=None)
 
         
         manager_keyboard = InlineKeyboardMarkup(inline_keyboard=[
