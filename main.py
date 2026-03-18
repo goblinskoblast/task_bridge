@@ -8,7 +8,6 @@ from aiogram.types import BotCommand, BotCommandScopeDefault
 
 from config import BOT_TOKEN, USE_WEBHOOK, WEBHOOK_PATH, WEBHOOK_URL, HOST, PORT
 from bot.handlers import router, init_default_categories
-from bot.email_registration import router as email_router
 from bot.support_handlers import router as support_router
 from bot.reminders import start_reminder_scheduler, stop_reminder_scheduler
 from db.database import init_db, get_db_session
@@ -24,12 +23,12 @@ logger = logging.getLogger(__name__)
 
 
 async def set_bot_commands(bot: Bot):
-    """РЈСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ РјРµРЅСЋ РєРѕРјР°РЅРґ Р±РѕС‚Р°"""
+    """Устанавливает меню команд бота."""
     commands = [
-        BotCommand(command="start", description="рџљЂ РќР°С‡Р°С‚СЊ СЂР°Р±РѕС‚Сѓ СЃ Р±РѕС‚РѕРј"),
-        BotCommand(command="panel", description="рџ“± РћС‚РєСЂС‹С‚СЊ РїР°РЅРµР»СЊ Р·Р°РґР°С‡"),
-        BotCommand(command="support", description="рџ’¬ Р§Р°С‚ РїРѕРґРґРµСЂР¶РєРё"),
-        BotCommand(command="help", description="вќ“ РЎРїСЂР°РІРєР° Рё РёРЅСЃС‚СЂСѓРєС†РёРё")
+        BotCommand(command="start", description="Начать работу с ботом"),
+        BotCommand(command="panel", description="Открыть панель задач"),
+        BotCommand(command="support", description="Чат поддержки"),
+        BotCommand(command="help", description="Справка и инструкции"),
     ]
     await bot.set_my_commands(commands, BotCommandScopeDefault())
     logger.info("Bot commands menu set successfully")
@@ -54,8 +53,7 @@ async def start_bot_polling():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
-    # Р РµРіРёСЃС‚СЂРёСЂСѓРµРј СЂРѕСѓС‚РµСЂС‹ (email_router Рё support_router РџР•Р Р’Р«РњР РґР»СЏ РїСЂРёРѕСЂРёС‚РµС‚Р° FSM)
-    dp.include_router(email_router)
+    # Р РµРіРёСЃС‚СЂРёСЂСѓРµРј СЂРѕСѓС‚РµСЂС‹
     dp.include_router(support_router)
     dp.include_router(router)
 
@@ -101,8 +99,7 @@ async def start_bot_webhook():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
-    # Р РµРіРёСЃС‚СЂРёСЂСѓРµРј СЂРѕСѓС‚РµСЂС‹ (email_router Рё support_router РџР•Р Р’Р«РњР РґР»СЏ РїСЂРёРѕСЂРёС‚РµС‚Р° FSM)
-    dp.include_router(email_router)
+    # Р РµРіРёСЃС‚СЂРёСЂСѓРµРј СЂРѕСѓС‚РµСЂС‹
     dp.include_router(support_router)
     dp.include_router(router)
 
