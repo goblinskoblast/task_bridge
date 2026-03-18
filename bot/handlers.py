@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import re
 from typing import List, Optional
 from datetime import datetime
@@ -23,36 +23,36 @@ router = Router()
 
 
 def init_default_categories(db: Session):
-    """Инициализация стандартных категорий задач"""
+    """РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ СЃС‚Р°РЅРґР°СЂС‚РЅС‹С… РєР°С‚РµРіРѕСЂРёР№ Р·Р°РґР°С‡"""
     default_categories = [
         {
-            "name": "Разработка",
-            "description": "Задачи по разработке и программированию",
-            "keywords": ["код", "программ", "разработ", "git", "commit", "repo", "repository", "bug", "issue", "pull request", "merge", "deploy", "dev", "development", "backend", "frontend", "api", "endpoint", "database", "sql", "query"]
+            "name": "Р Р°Р·СЂР°Р±РѕС‚РєР°",
+            "description": "Р—Р°РґР°С‡Рё РїРѕ СЂР°Р·СЂР°Р±РѕС‚РєРµ Рё РїСЂРѕРіСЂР°РјРјРёСЂРѕРІР°РЅРёСЋ",
+            "keywords": ["РєРѕРґ", "РїСЂРѕРіСЂР°РјРј", "СЂР°Р·СЂР°Р±РѕС‚", "git", "commit", "repo", "repository", "bug", "issue", "pull request", "merge", "deploy", "dev", "development", "backend", "frontend", "api", "endpoint", "database", "sql", "query"]
         },
         {
-            "name": "Дизайн",
-            "description": "Задачи по дизайну и визуализации",
-            "keywords": ["дизайн", "макет", "ui", "ux", "рисун", "эскиз", "mockup", "wireframe", "prototype", "figma", "sketch", "illustration", "graphics", "visual", "interface"]
+            "name": "Р”РёР·Р°Р№РЅ",
+            "description": "Р—Р°РґР°С‡Рё РїРѕ РґРёР·Р°Р№РЅСѓ Рё РІРёР·СѓР°Р»РёР·Р°С†РёРё",
+            "keywords": ["РґРёР·Р°Р№РЅ", "РјР°РєРµС‚", "ui", "ux", "СЂРёСЃСѓРЅ", "СЌСЃРєРёР·", "mockup", "wireframe", "prototype", "figma", "sketch", "illustration", "graphics", "visual", "interface"]
         },
         {
-            "name": "Маркетинг",
-            "description": "Маркетинговые задачи и SMM",
-            "keywords": ["маркетинг", "реклам", "пост", "smm", "контент", "соцсети", "social", "campaign", "promotion", "advertising", "conversion", "seo", "crm"]
+            "name": "РњР°СЂРєРµС‚РёРЅРі",
+            "description": "РњР°СЂРєРµС‚РёРЅРіРѕРІС‹Рµ Р·Р°РґР°С‡Рё Рё SMM",
+            "keywords": ["РјР°СЂРєРµС‚РёРЅРі", "СЂРµРєР»Р°Рј", "РїРѕСЃС‚", "smm", "РєРѕРЅС‚РµРЅС‚", "СЃРѕС†СЃРµС‚Рё", "social", "campaign", "promotion", "advertising", "conversion", "seo", "crm"]
         },
         {
-            "name": "Аналитика",
-            "description": "Аналитические и отчетные задачи",
-            "keywords": ["аналитик", "отчет", "статистик", "metric", "dashboard", "kpi", "analytics", "data", "metric", "report", "analysis"]
+            "name": "РђРЅР°Р»РёС‚РёРєР°",
+            "description": "РђРЅР°Р»РёС‚РёС‡РµСЃРєРёРµ Рё РѕС‚С‡РµС‚РЅС‹Рµ Р·Р°РґР°С‡Рё",
+            "keywords": ["Р°РЅР°Р»РёС‚РёРє", "РѕС‚С‡РµС‚", "СЃС‚Р°С‚РёСЃС‚РёРє", "metric", "dashboard", "kpi", "analytics", "data", "metric", "report", "analysis"]
         },
         {
-            "name": "Встречи",
-            "description": "Встречи и переговоры",
-            "keywords": ["встреч", "собрание", "звонок", "онлайн", "meeting", "call", "conference", "presentation"]
+            "name": "Р’СЃС‚СЂРµС‡Рё",
+            "description": "Р’СЃС‚СЂРµС‡Рё Рё РїРµСЂРµРіРѕРІРѕСЂС‹",
+            "keywords": ["РІСЃС‚СЂРµС‡", "СЃРѕР±СЂР°РЅРёРµ", "Р·РІРѕРЅРѕРє", "РѕРЅР»Р°Р№РЅ", "meeting", "call", "conference", "presentation"]
         },
         {
             "name": "uncategorized",
-            "description": "Задачи без определенной категории",
+            "description": "Р—Р°РґР°С‡Рё Р±РµР· РѕРїСЂРµРґРµР»РµРЅРЅРѕР№ РєР°С‚РµРіРѕСЂРёРё",
             "keywords": []
         }
     ]
@@ -97,7 +97,7 @@ def classify_task(text: str, db: Session) -> Optional[int]:
 async def get_or_create_user(bot: Bot, telegram_id: int, username: str = None,
                               first_name: str = None, last_name: str = None,
                               is_bot: bool = False, db: Session = None) -> User:
-    """Получает пользователя из БД или создает нового"""
+    """РџРѕР»СѓС‡Р°РµС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РёР· Р‘Р” РёР»Рё СЃРѕР·РґР°РµС‚ РЅРѕРІРѕРіРѕ"""
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
 
     if not user:
@@ -136,7 +136,7 @@ async def get_or_create_user_by_username(db: Session, username: str) -> User:
 
 async def get_or_create_chat(chat_id: int, chat_type: str, title: str = None,
                               username: str = None, db: Session = None) -> Chat:
-    """Получает чат из БД или создает новый"""
+    """РџРѕР»СѓС‡Р°РµС‚ С‡Р°С‚ РёР· Р‘Р” РёР»Рё СЃРѕР·РґР°РµС‚ РЅРѕРІС‹Р№"""
     chat = db.query(Chat).filter(Chat.chat_id == chat_id).first()
 
     if not chat:
@@ -152,7 +152,7 @@ async def get_or_create_chat(chat_id: int, chat_type: str, title: str = None,
         db.refresh(chat)
         logger.info(f"Registered new chat: {chat_id} ({chat_type}) - {title}")
     else:
-        # Обновляем информацию о чате, если изменилась
+        # РћР±РЅРѕРІР»СЏРµРј РёРЅС„РѕСЂРјР°С†РёСЋ Рѕ С‡Р°С‚Рµ, РµСЃР»Рё РёР·РјРµРЅРёР»Р°СЃСЊ
         updated = False
         if chat.title != title and title:
             chat.title = title
@@ -174,8 +174,8 @@ async def get_or_create_chat(chat_id: int, chat_type: str, title: str = None,
 
 async def notify_comment_added(bot: Bot, task_id: int, comment_author_id: int, comment_text: str, db: Session) -> None:
     """
-    Отправляет уведомления о новом комментарии всем участникам задачи
-    (создателю и исполнителям), кроме автора комментария.
+    РћС‚РїСЂР°РІР»СЏРµС‚ СѓРІРµРґРѕРјР»РµРЅРёСЏ Рѕ РЅРѕРІРѕРј РєРѕРјРјРµРЅС‚Р°СЂРёРё РІСЃРµРј СѓС‡Р°СЃС‚РЅРёРєР°Рј Р·Р°РґР°С‡Рё
+    (СЃРѕР·РґР°С‚РµР»СЋ Рё РёСЃРїРѕР»РЅРёС‚РµР»СЏРј), РєСЂРѕРјРµ Р°РІС‚РѕСЂР° РєРѕРјРјРµРЅС‚Р°СЂРёСЏ.
     """
     try:
         task = db.query(Task).filter(Task.id == task_id).first()
@@ -185,27 +185,27 @@ async def notify_comment_added(bot: Bot, task_id: int, comment_author_id: int, c
 
         comment_author = db.query(User).filter(User.id == comment_author_id).first()
 
-        # Собираем всех участников задачи (создатель + исполнители)
+        # РЎРѕР±РёСЂР°РµРј РІСЃРµС… СѓС‡Р°СЃС‚РЅРёРєРѕРІ Р·Р°РґР°С‡Рё (СЃРѕР·РґР°С‚РµР»СЊ + РёСЃРїРѕР»РЅРёС‚РµР»Рё)
         participants = set()
 
-        # Добавляем создателя задачи
+        # Р”РѕР±Р°РІР»СЏРµРј СЃРѕР·РґР°С‚РµР»СЏ Р·Р°РґР°С‡Рё
         if task.creator and task.creator.id != comment_author_id:
             participants.add(task.creator)
 
-        # Добавляем всех исполнителей
+        # Р”РѕР±Р°РІР»СЏРµРј РІСЃРµС… РёСЃРїРѕР»РЅРёС‚РµР»РµР№
         for assignee in task.assignees:
             if assignee.id != comment_author_id:
                 participants.add(assignee)
 
-        # Формируем уведомление
+        # Р¤РѕСЂРјРёСЂСѓРµРј СѓРІРµРґРѕРјР»РµРЅРёРµ
         notification = (
-            f"💬 <b>Новый комментарий к задаче</b>\n\n"
-            f"<b>Задача:</b> {task.title}\n"
-            f"<b>Автор:</b> {comment_author.first_name or comment_author.username}\n"
-            f"<b>Комментарий:</b> {comment_text[:200]}{'...' if len(comment_text) > 200 else ''}\n"
+            f"рџ’¬ <b>РќРѕРІС‹Р№ РєРѕРјРјРµРЅС‚Р°СЂРёР№ Рє Р·Р°РґР°С‡Рµ</b>\n\n"
+            f"<b>Р—Р°РґР°С‡Р°:</b> {task.title}\n"
+            f"<b>РђРІС‚РѕСЂ:</b> {comment_author.first_name or comment_author.username}\n"
+            f"<b>РљРѕРјРјРµРЅС‚Р°СЂРёР№:</b> {comment_text[:200]}{'...' if len(comment_text) > 200 else ''}\n"
         )
 
-        # Отправляем уведомления всем участникам
+        # РћС‚РїСЂР°РІР»СЏРµРј СѓРІРµРґРѕРјР»РµРЅРёСЏ РІСЃРµРј СѓС‡Р°СЃС‚РЅРёРєР°Рј
         for participant in participants:
             if participant.telegram_id and participant.telegram_id != -1:
                 try:
@@ -213,7 +213,7 @@ async def notify_comment_added(bot: Bot, task_id: int, comment_author_id: int, c
                     keyboard = InlineKeyboardMarkup(inline_keyboard=[
                         [
                             InlineKeyboardButton(
-                                text="📱 Открыть задачу",
+                                text="рџ“± РћС‚РєСЂС‹С‚СЊ Р·Р°РґР°С‡Сѓ",
                                 web_app=WebAppInfo(url=webapp_url)
                             )
                         ]
@@ -236,8 +236,8 @@ async def notify_comment_added(bot: Bot, task_id: int, comment_author_id: int, c
 
 async def notify_assigned_user(bot: Bot, task_id: int, db: Session, assignee: User = None) -> bool:
     """
-    Отправляет уведомление исполнителю о назначении задачи.
-    Если assignee не указан, берет первого исполнителя из task.assignees (для обратной совместимости).
+    РћС‚РїСЂР°РІР»СЏРµС‚ СѓРІРµРґРѕРјР»РµРЅРёРµ РёСЃРїРѕР»РЅРёС‚РµР»СЋ Рѕ РЅР°Р·РЅР°С‡РµРЅРёРё Р·Р°РґР°С‡Рё.
+    Р•СЃР»Рё assignee РЅРµ СѓРєР°Р·Р°РЅ, Р±РµСЂРµС‚ РїРµСЂРІРѕРіРѕ РёСЃРїРѕР»РЅРёС‚РµР»СЏ РёР· task.assignees (РґР»СЏ РѕР±СЂР°С‚РЅРѕР№ СЃРѕРІРјРµСЃС‚РёРјРѕСЃС‚Рё).
     """
     try:
         task = db.query(Task).filter(Task.id == task_id).first()
@@ -245,7 +245,7 @@ async def notify_assigned_user(bot: Bot, task_id: int, db: Session, assignee: Us
             logger.warning(f"Task {task_id} not found")
             return False
 
-        # Если исполнитель не передан, берем из связей задачи
+        # Р•СЃР»Рё РёСЃРїРѕР»РЅРёС‚РµР»СЊ РЅРµ РїРµСЂРµРґР°РЅ, Р±РµСЂРµРј РёР· СЃРІСЏР·РµР№ Р·Р°РґР°С‡Рё
         if not assignee:
             if task.assignees:
                 assignee = task.assignees[0]
@@ -253,55 +253,55 @@ async def notify_assigned_user(bot: Bot, task_id: int, db: Session, assignee: Us
                 logger.warning(f"Task {task_id} has no assignees")
                 return False
 
-        # Проверяем, что у пользователя есть telegram_id
+        # РџСЂРѕРІРµСЂСЏРµРј, С‡С‚Рѕ Сѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РµСЃС‚СЊ telegram_id
         if assignee.telegram_id == -1 or assignee.telegram_id is None:
             logger.warning(f"User @{assignee.username} hasn't started a chat with the bot")
             return False
 
-        # Формируем уведомление
+        # Р¤РѕСЂРјРёСЂСѓРµРј СѓРІРµРґРѕРјР»РµРЅРёРµ
         notification = (
-            f"🔔 <b>Вам назначена новая задача</b>\n\n"
-            f"<b>Задача:</b> {task.title}\n"
+            f"рџ”” <b>Р’Р°Рј РЅР°Р·РЅР°С‡РµРЅР° РЅРѕРІР°СЏ Р·Р°РґР°С‡Р°</b>\n\n"
+            f"<b>Р—Р°РґР°С‡Р°:</b> {task.title}\n"
         )
 
         if task.description and task.description != task.title:
-            notification += f"<b>Описание:</b> {task.description}\n"
+            notification += f"<b>РћРїРёСЃР°РЅРёРµ:</b> {task.description}\n"
 
-        # Показываем всех исполнителей, если их несколько
+        # РџРѕРєР°Р·С‹РІР°РµРј РІСЃРµС… РёСЃРїРѕР»РЅРёС‚РµР»РµР№, РµСЃР»Рё РёС… РЅРµСЃРєРѕР»СЊРєРѕ
         if len(task.assignees) > 1:
             assignees_str = ", ".join([f"@{a.username}" for a in task.assignees if a.username])
-            notification += f"<b>Исполнители:</b> {assignees_str}\n"
+            notification += f"<b>РСЃРїРѕР»РЅРёС‚РµР»Рё:</b> {assignees_str}\n"
 
         if task.due_date:
-            notification += f"<b>Срок:</b> {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+            notification += f"<b>РЎСЂРѕРє:</b> {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
 
-        notification += f"<b>Приоритет:</b> {task.priority}\n"
-        notification += f"<b>Статус:</b> {task.status}\n"
+        notification += f"<b>РџСЂРёРѕСЂРёС‚РµС‚:</b> {task.priority}\n"
+        notification += f"<b>РЎС‚Р°С‚СѓСЃ:</b> {task.status}\n"
 
-        # Кнопки
+        # РљРЅРѕРїРєРё
         webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={assignee.id}"
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="📱 Открыть панель",
+                    text="рџ“± РћС‚РєСЂС‹С‚СЊ РїР°РЅРµР»СЊ",
                     web_app=WebAppInfo(url=webapp_url)
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="▶️ Начать выполнение",
+                    text="в–¶пёЏ РќР°С‡Р°С‚СЊ РІС‹РїРѕР»РЅРµРЅРёРµ",
                     callback_data=f"task_start:{task.id}"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="✅ Выполнено",
+                    text="вњ… Р’С‹РїРѕР»РЅРµРЅРѕ",
                     callback_data=f"task_complete:{task.id}"
                 )
             ]
         ])
 
-        # Отправляем сообщение
+        # РћС‚РїСЂР°РІР»СЏРµРј СЃРѕРѕР±С‰РµРЅРёРµ
         await bot.send_message(
             chat_id=assignee.telegram_id,
             text=notification,
@@ -322,7 +322,7 @@ async def notify_assigned_user(bot: Bot, task_id: int, db: Session, assignee: Us
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
-    """Обработчик команды /start"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РєРѕРјР°РЅРґС‹ /start"""
     db = get_db_session()
 
     try:
@@ -336,93 +336,93 @@ async def cmd_start(message: Message):
             db=db
         )
 
-        # Флаг первой авторизации - если пользователь был создан по username без telegram_id
+        # Р¤Р»Р°Рі РїРµСЂРІРѕР№ Р°РІС‚РѕСЂРёР·Р°С†РёРё - РµСЃР»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р±С‹Р» СЃРѕР·РґР°РЅ РїРѕ username Р±РµР· telegram_id
         is_first_auth = (user.telegram_id == -1 or user.telegram_id != message.from_user.id)
 
-        # Обновляем telegram_id если пользователь ранее был создан по username
+        # РћР±РЅРѕРІР»СЏРµРј telegram_id РµСЃР»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЂР°РЅРµРµ Р±С‹Р» СЃРѕР·РґР°РЅ РїРѕ username
         if is_first_auth:
             user.telegram_id = message.from_user.id
             db.commit()
             logger.info(f"Updated telegram_id for user @{user.username} (ID: {user.id})")
 
-        # Проверяем незавершенные задачи пользователя
+        # РџСЂРѕРІРµСЂСЏРµРј РЅРµР·Р°РІРµСЂС€РµРЅРЅС‹Рµ Р·Р°РґР°С‡Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
         pending_tasks = db.query(Task).join(Task.assignees).filter(
             User.id == user.id,
             Task.status.in_(["pending", "in_progress"])
         ).all()
 
-        # Отправляем уведомления о незавершенных задачах
+        # РћС‚РїСЂР°РІР»СЏРµРј СѓРІРµРґРѕРјР»РµРЅРёСЏ Рѕ РЅРµР·Р°РІРµСЂС€РµРЅРЅС‹С… Р·Р°РґР°С‡Р°С…
         if pending_tasks:
             for task in pending_tasks:
                 task_webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}&task_id={task.id}"
                 task_keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(
-                            text="📱 Открыть задачу",
+                            text="рџ“± РћС‚РєСЂС‹С‚СЊ Р·Р°РґР°С‡Сѓ",
                             web_app=WebAppInfo(url=task_webapp_url)
                         )
                     ]
                 ])
 
                 notification = (
-                    f"📋 <b>У вас есть незавершенная задача</b>\n\n"
+                    f"рџ“‹ <b>РЈ РІР°СЃ РµСЃС‚СЊ РЅРµР·Р°РІРµСЂС€РµРЅРЅР°СЏ Р·Р°РґР°С‡Р°</b>\n\n"
                     f"<b>{task.title}</b>\n"
-                    f"Статус: {task.status}\n"
-                    f"Приоритет: {task.priority}\n"
+                    f"РЎС‚Р°С‚СѓСЃ: {task.status}\n"
+                    f"РџСЂРёРѕСЂРёС‚РµС‚: {task.priority}\n"
                 )
 
                 if task.due_date:
-                    notification += f"Срок: {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+                    notification += f"РЎСЂРѕРє: {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
 
                 await message.answer(notification, reply_markup=task_keyboard, parse_mode="HTML")
 
         webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}"
 
-        # Формируем приветственное сообщение
+        # Р¤РѕСЂРјРёСЂСѓРµРј РїСЂРёРІРµС‚СЃС‚РІРµРЅРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ
         if is_first_auth and pending_tasks:
             welcome_message = (
-                f"✅ Добро пожаловать! Вам было назначено {len(pending_tasks)} задач.\n\n"
-                "Вы можете открыть панель задач через кнопку ниже или использовать постоянную кнопку над клавиатурой."
+                f"вњ… Р”РѕР±СЂРѕ РїРѕР¶Р°Р»РѕРІР°С‚СЊ! Р’Р°Рј Р±С‹Р»Рѕ РЅР°Р·РЅР°С‡РµРЅРѕ {len(pending_tasks)} Р·Р°РґР°С‡.\n\n"
+                "Р’С‹ РјРѕР¶РµС‚Рµ РѕС‚РєСЂС‹С‚СЊ РїР°РЅРµР»СЊ Р·Р°РґР°С‡ С‡РµСЂРµР· РєРЅРѕРїРєСѓ РЅРёР¶Рµ РёР»Рё РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ РїРѕСЃС‚РѕСЏРЅРЅСѓСЋ РєРЅРѕРїРєСѓ РЅР°Рґ РєР»Р°РІРёР°С‚СѓСЂРѕР№."
             )
         elif pending_tasks:
             welcome_message = (
-                f"✅ С возвращением! У вас {len(pending_tasks)} незавершенных задач.\n\n"
-                "Используйте кнопку ниже или постоянную кнопку для доступа к панели задач."
+                f"вњ… РЎ РІРѕР·РІСЂР°С‰РµРЅРёРµРј! РЈ РІР°СЃ {len(pending_tasks)} РЅРµР·Р°РІРµСЂС€РµРЅРЅС‹С… Р·Р°РґР°С‡.\n\n"
+                "РСЃРїРѕР»СЊР·СѓР№С‚Рµ РєРЅРѕРїРєСѓ РЅРёР¶Рµ РёР»Рё РїРѕСЃС‚РѕСЏРЅРЅСѓСЋ РєРЅРѕРїРєСѓ РґР»СЏ РґРѕСЃС‚СѓРїР° Рє РїР°РЅРµР»Рё Р·Р°РґР°С‡."
             )
         else:
             welcome_message = (
-                "✅ Отлично! Теперь вы будете получать уведомления о задачах.\n\n"
-                "🤖 TaskBridge использует AI для автоматического извлечения задач из чатов.\n\n"
-                "Добавьте меня в групповой чат, чтобы я начал анализировать сообщения.\n\n"
-                "Используйте кнопку \"📱 Панель задач\" для быстрого доступа к вашим задачам."
+                "вњ… РћС‚Р»РёС‡РЅРѕ! РўРµРїРµСЂСЊ РІС‹ Р±СѓРґРµС‚Рµ РїРѕР»СѓС‡Р°С‚СЊ СѓРІРµРґРѕРјР»РµРЅРёСЏ Рѕ Р·Р°РґР°С‡Р°С….\n\n"
+                "рџ¤– TaskBridge РёСЃРїРѕР»СЊР·СѓРµС‚ AI РґР»СЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРѕРіРѕ РёР·РІР»РµС‡РµРЅРёСЏ Р·Р°РґР°С‡ РёР· С‡Р°С‚РѕРІ.\n\n"
+                "Р”РѕР±Р°РІСЊС‚Рµ РјРµРЅСЏ РІ РіСЂСѓРїРїРѕРІРѕР№ С‡Р°С‚, С‡С‚РѕР±С‹ СЏ РЅР°С‡Р°Р» Р°РЅР°Р»РёР·РёСЂРѕРІР°С‚СЊ СЃРѕРѕР±С‰РµРЅРёСЏ.\n\n"
+                "РСЃРїРѕР»СЊР·СѓР№С‚Рµ РєРЅРѕРїРєСѓ \"рџ“± РџР°РЅРµР»СЊ Р·Р°РґР°С‡\" РґР»СЏ Р±С‹СЃС‚СЂРѕРіРѕ РґРѕСЃС‚СѓРїР° Рє РІР°С€РёРј Р·Р°РґР°С‡Р°Рј."
             )
 
-        # Inline кнопка для одноразового использования
+        # Inline РєРЅРѕРїРєР° РґР»СЏ РѕРґРЅРѕСЂР°Р·РѕРІРѕРіРѕ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ
         inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="📱 Открыть мою панель задач",
+                    text="рџ“± РћС‚РєСЂС‹С‚СЊ РјРѕСЋ РїР°РЅРµР»СЊ Р·Р°РґР°С‡",
                     web_app=WebAppInfo(url=webapp_url)
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="📧 Зарегистрировать Email",
+                    text="рџ“§ Р—Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°С‚СЊ Email",
                     callback_data="register_email"
                 ),
                 InlineKeyboardButton(
-                    text="💬 Чат поддержки",
+                    text="рџ’¬ Р§Р°С‚ РїРѕРґРґРµСЂР¶РєРё",
                     callback_data="support_start"
                 )
             ]
         ])
 
-        # Постоянная клавиатура с кнопкой быстрого доступа
+        # РџРѕСЃС‚РѕСЏРЅРЅР°СЏ РєР»Р°РІРёР°С‚СѓСЂР° СЃ РєРЅРѕРїРєРѕР№ Р±С‹СЃС‚СЂРѕРіРѕ РґРѕСЃС‚СѓРїР°
         reply_keyboard = ReplyKeyboardMarkup(
             keyboard=[
                 [
                     KeyboardButton(
-                        text="📱 Панель задач",
+                        text="рџ“± РџР°РЅРµР»СЊ Р·Р°РґР°С‡",
                         web_app=WebAppInfo(url=webapp_url)
                     )
                 ]
@@ -437,22 +437,22 @@ async def cmd_start(message: Message):
             parse_mode="HTML"
         )
 
-        # Отправляем отдельное сообщение с постоянной клавиатурой
+        # РћС‚РїСЂР°РІР»СЏРµРј РѕС‚РґРµР»СЊРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ СЃ РїРѕСЃС‚РѕСЏРЅРЅРѕР№ РєР»Р°РІРёР°С‚СѓСЂРѕР№
         await message.answer(
-            "Используйте кнопку ниже для быстрого доступа:",
+            "РСЃРїРѕР»СЊР·СѓР№С‚Рµ РєРЅРѕРїРєСѓ РЅРёР¶Рµ РґР»СЏ Р±С‹СЃС‚СЂРѕРіРѕ РґРѕСЃС‚СѓРїР°:",
             reply_markup=reply_keyboard
         )
 
     except Exception as e:
         logger.error(f"Error in /start command: {e}", exc_info=True)
-        await message.answer("Произошла ошибка. Попробуйте позже.")
+        await message.answer("РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.")
     finally:
         db.close()
 
 
 @router.message(Command("panel"))
 async def cmd_panel(message: Message):
-    """Обработчик команды /panel - открыть панель задач"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РєРѕРјР°РЅРґС‹ /panel - РѕС‚РєСЂС‹С‚СЊ РїР°РЅРµР»СЊ Р·Р°РґР°С‡"""
     db = get_db_session()
 
     try:
@@ -471,66 +471,66 @@ async def cmd_panel(message: Message):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="📱 Открыть панель задач",
+                    text="рџ“± РћС‚РєСЂС‹С‚СЊ РїР°РЅРµР»СЊ Р·Р°РґР°С‡",
                     web_app=WebAppInfo(url=webapp_url)
                 )
             ]
         ])
 
-        await message.answer("Нажмите кнопку ниже для доступа к панели задач:", reply_markup=keyboard)
+        await message.answer("РќР°Р¶РјРёС‚Рµ РєРЅРѕРїРєСѓ РЅРёР¶Рµ РґР»СЏ РґРѕСЃС‚СѓРїР° Рє РїР°РЅРµР»Рё Р·Р°РґР°С‡:", reply_markup=keyboard)
 
     except Exception as e:
         logger.error(f"Error in /panel command: {e}", exc_info=True)
-        await message.answer("Произошла ошибка. Попробуйте позже.")
+        await message.answer("РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.")
     finally:
         db.close()
 
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    """Обработчик команды /help"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РєРѕРјР°РЅРґС‹ /help"""
     help_text = (
-        "📋 <b>TaskBridge - AI-управление задачами</b>\n\n"
-        "<b>Команды:</b>\n"
-        "/start - Начать работу и открыть панель задач\n"
-        "/panel - Открыть панель задач\n"
-        "/help - Показать справку\n\n"
-        "<b>Как использовать:</b>\n"
-        "1. Добавьте бота в групповой чат\n"
-        "2. Пишите сообщения с задачами, например:\n"
-        "   • <i>@alex сделай отчет до завтра</i>\n"
-        "   • <i>Саша, срочно исправь баг к вечеру</i>\n"
-        "3. Бот автоматически извлечет задачу с помощью AI\n"
-        "4. Подтвердите задачу или отредактируйте её\n"
-        "5. Исполнитель получит уведомление\n\n"
-        "🤖 <b>AI автоматически определяет:</b>\n"
-        "• Описание задачи\n"
-        "• Исполнителя (@username или имя)\n"
-        "• Срок выполнения (до вечера, до обеда, конкретные даты)\n"
-        "• Приоритет\n\n"
-        "📧 <b>Регистрация Email аккаунта:</b>\n"
-        "1. Нажмите кнопку \"📧 Зарегистрировать Email\" в /start\n"
-        "2. Введите ваш email адрес (например: name@gmail.com)\n"
-        "3. Получите пароль приложения:\n\n"
+        "рџ“‹ <b>TaskBridge - AI-СѓРїСЂР°РІР»РµРЅРёРµ Р·Р°РґР°С‡Р°РјРё</b>\n\n"
+        "<b>РљРѕРјР°РЅРґС‹:</b>\n"
+        "/start - РќР°С‡Р°С‚СЊ СЂР°Р±РѕС‚Сѓ Рё РѕС‚РєСЂС‹С‚СЊ РїР°РЅРµР»СЊ Р·Р°РґР°С‡\n"
+        "/panel - РћС‚РєСЂС‹С‚СЊ РїР°РЅРµР»СЊ Р·Р°РґР°С‡\n"
+        "/help - РџРѕРєР°Р·Р°С‚СЊ СЃРїСЂР°РІРєСѓ\n\n"
+        "<b>РљР°Рє РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ:</b>\n"
+        "1. Р”РѕР±Р°РІСЊС‚Рµ Р±РѕС‚Р° РІ РіСЂСѓРїРїРѕРІРѕР№ С‡Р°С‚\n"
+        "2. РџРёС€РёС‚Рµ СЃРѕРѕР±С‰РµРЅРёСЏ СЃ Р·Р°РґР°С‡Р°РјРё, РЅР°РїСЂРёРјРµСЂ:\n"
+        "   вЂў <i>@alex СЃРґРµР»Р°Р№ РѕС‚С‡РµС‚ РґРѕ Р·Р°РІС‚СЂР°</i>\n"
+        "   вЂў <i>РЎР°С€Р°, СЃСЂРѕС‡РЅРѕ РёСЃРїСЂР°РІСЊ Р±Р°Рі Рє РІРµС‡РµСЂСѓ</i>\n"
+        "3. Р‘РѕС‚ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РёР·РІР»РµС‡РµС‚ Р·Р°РґР°С‡Сѓ СЃ РїРѕРјРѕС‰СЊСЋ AI\n"
+        "4. РџРѕРґС‚РІРµСЂРґРёС‚Рµ Р·Р°РґР°С‡Сѓ РёР»Рё РѕС‚СЂРµРґР°РєС‚РёСЂСѓР№С‚Рµ РµС‘\n"
+        "5. РСЃРїРѕР»РЅРёС‚РµР»СЊ РїРѕР»СѓС‡РёС‚ СѓРІРµРґРѕРјР»РµРЅРёРµ\n\n"
+        "рџ¤– <b>AI Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё РѕРїСЂРµРґРµР»СЏРµС‚:</b>\n"
+        "вЂў РћРїРёСЃР°РЅРёРµ Р·Р°РґР°С‡Рё\n"
+        "вЂў РСЃРїРѕР»РЅРёС‚РµР»СЏ (@username РёР»Рё РёРјСЏ)\n"
+        "вЂў РЎСЂРѕРє РІС‹РїРѕР»РЅРµРЅРёСЏ (РґРѕ РІРµС‡РµСЂР°, РґРѕ РѕР±РµРґР°, РєРѕРЅРєСЂРµС‚РЅС‹Рµ РґР°С‚С‹)\n"
+        "вЂў РџСЂРёРѕСЂРёС‚РµС‚\n\n"
+        "рџ“§ <b>Р РµРіРёСЃС‚СЂР°С†РёСЏ Email Р°РєРєР°СѓРЅС‚Р°:</b>\n"
+        "1. РќР°Р¶РјРёС‚Рµ РєРЅРѕРїРєСѓ \"рџ“§ Р—Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°С‚СЊ Email\" РІ /start\n"
+        "2. Р’РІРµРґРёС‚Рµ РІР°С€ email Р°РґСЂРµСЃ (РЅР°РїСЂРёРјРµСЂ: name@gmail.com)\n"
+        "3. РџРѕР»СѓС‡РёС‚Рµ РїР°СЂРѕР»СЊ РїСЂРёР»РѕР¶РµРЅРёСЏ:\n\n"
         "   <b>Gmail:</b>\n"
-        "   • Включите двухфакторную аутентификацию в настройках Google\n"
-        "   • Перейдите: myaccount.google.com/apppasswords\n"
-        "   • Создайте пароль приложения для \"Почта\"\n\n"
+        "   вЂў Р’РєР»СЋС‡РёС‚Рµ РґРІСѓС…С„Р°РєС‚РѕСЂРЅСѓСЋ Р°СѓС‚РµРЅС‚РёС„РёРєР°С†РёСЋ РІ РЅР°СЃС‚СЂРѕР№РєР°С… Google\n"
+        "   вЂў РџРµСЂРµР№РґРёС‚Рµ: myaccount.google.com/apppasswords\n"
+        "   вЂў РЎРѕР·РґР°Р№С‚Рµ РїР°СЂРѕР»СЊ РїСЂРёР»РѕР¶РµРЅРёСЏ РґР»СЏ \"РџРѕС‡С‚Р°\"\n\n"
         "   <b>Yandex:</b>\n"
-        "   • Включите IMAP в настройках почты\n"
-        "   • Перейдите: id.yandex.ru/security/app-passwords\n"
-        "   • Создайте пароль для почтовой программы\n\n"
+        "   вЂў Р’РєР»СЋС‡РёС‚Рµ IMAP РІ РЅР°СЃС‚СЂРѕР№РєР°С… РїРѕС‡С‚С‹\n"
+        "   вЂў РџРµСЂРµР№РґРёС‚Рµ: id.yandex.ru/security/app-passwords\n"
+        "   вЂў РЎРѕР·РґР°Р№С‚Рµ РїР°СЂРѕР»СЊ РґР»СЏ РїРѕС‡С‚РѕРІРѕР№ РїСЂРѕРіСЂР°РјРјС‹\n\n"
         "   <b>Outlook/Hotmail:</b>\n"
-        "   • Включите двухфакторную аутентификацию\n"
-        "   • Перейдите: account.microsoft.com/security\n"
-        "   • Создайте пароль приложения\n\n"
+        "   вЂў Р’РєР»СЋС‡РёС‚Рµ РґРІСѓС…С„Р°РєС‚РѕСЂРЅСѓСЋ Р°СѓС‚РµРЅС‚РёС„РёРєР°С†РёСЋ\n"
+        "   вЂў РџРµСЂРµР№РґРёС‚Рµ: account.microsoft.com/security\n"
+        "   вЂў РЎРѕР·РґР°Р№С‚Рµ РїР°СЂРѕР»СЊ РїСЂРёР»РѕР¶РµРЅРёСЏ\n\n"
         "   <b>Mail.ru:</b>\n"
-        "   • Включите IMAP в настройках почты\n"
-        "   • Перейдите: e.mail.ru/settings/security\n"
-        "   • Создайте пароль для внешних приложений\n\n"
-        "4. Вставьте полученный пароль в бот\n"
-        "5. Готово! Письма будут проверяться каждые 10 минут\n\n"
-        "💡 Бот автоматически создаст задачи из входящих писем с помощью AI"
+        "   вЂў Р’РєР»СЋС‡РёС‚Рµ IMAP РІ РЅР°СЃС‚СЂРѕР№РєР°С… РїРѕС‡С‚С‹\n"
+        "   вЂў РџРµСЂРµР№РґРёС‚Рµ: e.mail.ru/settings/security\n"
+        "   вЂў РЎРѕР·РґР°Р№С‚Рµ РїР°СЂРѕР»СЊ РґР»СЏ РІРЅРµС€РЅРёС… РїСЂРёР»РѕР¶РµРЅРёР№\n\n"
+        "4. Р’СЃС‚Р°РІСЊС‚Рµ РїРѕР»СѓС‡РµРЅРЅС‹Р№ РїР°СЂРѕР»СЊ РІ Р±РѕС‚\n"
+        "5. Р“РѕС‚РѕРІРѕ! РџРёСЃСЊРјР° Р±СѓРґСѓС‚ РїСЂРѕРІРµСЂСЏС‚СЊСЃСЏ РєР°Р¶РґС‹Рµ 10 РјРёРЅСѓС‚\n\n"
+        "рџ’Ў Р‘РѕС‚ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СЃРѕР·РґР°СЃС‚ Р·Р°РґР°С‡Рё РёР· РІС…РѕРґСЏС‰РёС… РїРёСЃРµРј СЃ РїРѕРјРѕС‰СЊСЋ AI"
     )
 
     await message.answer(help_text, parse_mode="HTML")
@@ -540,7 +540,7 @@ async def cmd_help(message: Message):
 
 @router.callback_query(F.data.startswith("task_start:"))
 async def handle_task_start(callback: CallbackQuery):
-    """Обработчик начала выполнения задачи"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РЅР°С‡Р°Р»Р° РІС‹РїРѕР»РЅРµРЅРёСЏ Р·Р°РґР°С‡Рё"""
     db = get_db_session()
 
     try:
@@ -548,11 +548,11 @@ async def handle_task_start(callback: CallbackQuery):
         task = db.query(Task).filter(Task.id == task_id).first()
 
         if not task:
-            await callback.answer("Задача не найдена", show_alert=True)
+            await callback.answer("Р—Р°РґР°С‡Р° РЅРµ РЅР°Р№РґРµРЅР°", show_alert=True)
             return
 
         if task.status == "completed":
-            await callback.answer("Задача уже выполнена", show_alert=True)
+            await callback.answer("Р—Р°РґР°С‡Р° СѓР¶Рµ РІС‹РїРѕР»РЅРµРЅР°", show_alert=True)
             return
 
         
@@ -561,123 +561,123 @@ async def handle_task_start(callback: CallbackQuery):
 
         
         notification = (
-            f"▶️ <b>Задача в процессе выполнения</b>\n\n"
-            f"<b>Задача:</b> {task.title}\n"
+            f"в–¶пёЏ <b>Р—Р°РґР°С‡Р° РІ РїСЂРѕС†РµСЃСЃРµ РІС‹РїРѕР»РЅРµРЅРёСЏ</b>\n\n"
+            f"<b>Р—Р°РґР°С‡Р°:</b> {task.title}\n"
         )
 
         if task.description and task.description != task.title:
-            notification += f"<b>Описание:</b> {task.description}\n"
+            notification += f"<b>РћРїРёСЃР°РЅРёРµ:</b> {task.description}\n"
 
         if task.due_date:
-            notification += f"<b>Срок:</b> {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+            notification += f"<b>РЎСЂРѕРє:</b> {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
 
-        notification += f"<b>Приоритет:</b> {task.priority}\n"
-        notification += f"<b>Статус:</b> в процессе\n"
-        notification += f"\n📎 Можете отправить фото/файлы как отчёт"
+        notification += f"<b>РџСЂРёРѕСЂРёС‚РµС‚:</b> {task.priority}\n"
+        notification += f"<b>РЎС‚Р°С‚СѓСЃ:</b> РІ РїСЂРѕС†РµСЃСЃРµ\n"
+        notification += f"\nрџ“Ћ РњРѕР¶РµС‚Рµ РѕС‚РїСЂР°РІРёС‚СЊ С„РѕС‚Рѕ/С„Р°Р№Р»С‹ РєР°Рє РѕС‚С‡С‘С‚"
 
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Выполнено",
+                    text="вњ… Р’С‹РїРѕР»РЅРµРЅРѕ",
                     callback_data=f"task_complete:{task.id}"
                 )
             ]
         ])
 
         await callback.message.edit_text(notification, reply_markup=keyboard, parse_mode="HTML")
-        await callback.answer("Статус изменён на 'в процессе' ✅")
+        await callback.answer("РЎС‚Р°С‚СѓСЃ РёР·РјРµРЅС‘РЅ РЅР° 'РІ РїСЂРѕС†РµСЃСЃРµ' вњ…")
 
     except Exception as e:
         logger.error(f"Error starting task: {e}", exc_info=True)
-        await callback.answer("Произошла ошибка", show_alert=True)
+        await callback.answer("РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР°", show_alert=True)
     finally:
         db.close()
 
 
 @router.callback_query(F.data.startswith("assign_user:"))
 async def handle_assign_user(callback: CallbackQuery):
-    """Обработчик выбора исполнителя из группового чата"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РІС‹Р±РѕСЂР° РёСЃРїРѕР»РЅРёС‚РµР»СЏ РёР· РіСЂСѓРїРїРѕРІРѕРіРѕ С‡Р°С‚Р°"""
     db = get_db_session()
 
     try:
-        # Парсим callback data: assign_user:{pending_task_id}:{telegram_user_id}
+        # РџР°СЂСЃРёРј callback data: assign_user:{pending_task_id}:{telegram_user_id}
         parts = callback.data.split(":")
         if len(parts) != 3:
-            await callback.answer("Ошибка: неверный формат данных", show_alert=True)
+            await callback.answer("РћС€РёР±РєР°: РЅРµРІРµСЂРЅС‹Р№ С„РѕСЂРјР°С‚ РґР°РЅРЅС‹С…", show_alert=True)
             return
 
         pending_task_id = int(parts[1])
         selected_telegram_id = int(parts[2])
 
-        # Проверяем что callback вызван создателем задачи
+        # РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ callback РІС‹Р·РІР°РЅ СЃРѕР·РґР°С‚РµР»РµРј Р·Р°РґР°С‡Рё
         pending_task = db.query(PendingTask).filter(PendingTask.id == pending_task_id).first()
         if not pending_task:
-            await callback.answer("Задача не найдена", show_alert=True)
+            await callback.answer("Р—Р°РґР°С‡Р° РЅРµ РЅР°Р№РґРµРЅР°", show_alert=True)
             return
 
         creator = db.query(User).filter(User.id == pending_task.created_by_id).first()
         if not creator or creator.telegram_id != callback.from_user.id:
-            await callback.answer("Только создатель задачи может выбрать исполнителя", show_alert=True)
+            await callback.answer("РўРѕР»СЊРєРѕ СЃРѕР·РґР°С‚РµР»СЊ Р·Р°РґР°С‡Рё РјРѕР¶РµС‚ РІС‹Р±СЂР°С‚СЊ РёСЃРїРѕР»РЅРёС‚РµР»СЏ", show_alert=True)
             return
 
-        # Находим или создаем пользователя-исполнителя
+        # РќР°С…РѕРґРёРј РёР»Рё СЃРѕР·РґР°РµРј РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ-РёСЃРїРѕР»РЅРёС‚РµР»СЏ
         assignee = db.query(User).filter(User.telegram_id == selected_telegram_id).first()
         if not assignee:
-            # Создаем временного пользователя (будет обновлен когда он запустит бота)
+            # РЎРѕР·РґР°РµРј РІСЂРµРјРµРЅРЅРѕРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ (Р±СѓРґРµС‚ РѕР±РЅРѕРІР»РµРЅ РєРѕРіРґР° РѕРЅ Р·Р°РїСѓСЃС‚РёС‚ Р±РѕС‚Р°)
             assignee = User(
                 telegram_id=selected_telegram_id,
-                username=callback.message.reply_markup.inline_keyboard[0][0].text,  # Берем имя из кнопки
+                username=callback.message.reply_markup.inline_keyboard[0][0].text,  # Р‘РµСЂРµРј РёРјСЏ РёР· РєРЅРѕРїРєРё
                 is_bot=False
             )
             db.add(assignee)
             db.commit()
             db.refresh(assignee)
 
-        # Обновляем pending_task с выбранным исполнителем
+        # РћР±РЅРѕРІР»СЏРµРј pending_task СЃ РІС‹Р±СЂР°РЅРЅС‹Рј РёСЃРїРѕР»РЅРёС‚РµР»РµРј
         pending_task.assignee_usernames = [assignee.username] if assignee.username else []
         pending_task.assignee_username = assignee.username
         db.commit()
 
-        # Удаляем сообщение с кнопками из группы
+        # РЈРґР°Р»СЏРµРј СЃРѕРѕР±С‰РµРЅРёРµ СЃ РєРЅРѕРїРєР°РјРё РёР· РіСЂСѓРїРїС‹
         try:
             await callback.message.delete()
         except:
             pass
 
-        # Отправляем подтверждение В ЛИЧНЫЕ СООБЩЕНИЯ создателю
+        # РћС‚РїСЂР°РІР»СЏРµРј РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ Р’ Р›РР§РќР«Р• РЎРћРћР‘Р©Р•РќРРЇ СЃРѕР·РґР°С‚РµР»СЋ
         assignee_name = assignee.first_name or assignee.username or f"User {assignee.telegram_id}"
 
         confirmation_text = (
-            f"✅ <b>Исполнитель выбран!</b>\n\n"
-            f"<b>Задача:</b> {pending_task.title}\n"
-            f"<b>Исполнитель:</b> {assignee_name}\n"
+            f"вњ… <b>РСЃРїРѕР»РЅРёС‚РµР»СЊ РІС‹Р±СЂР°РЅ!</b>\n\n"
+            f"<b>Р—Р°РґР°С‡Р°:</b> {pending_task.title}\n"
+            f"<b>РСЃРїРѕР»РЅРёС‚РµР»СЊ:</b> {assignee_name}\n"
         )
 
         if pending_task.description:
-            confirmation_text += f"<b>Описание:</b> {pending_task.description}\n"
+            confirmation_text += f"<b>РћРїРёСЃР°РЅРёРµ:</b> {pending_task.description}\n"
 
         if pending_task.due_date:
-            confirmation_text += f"<b>Срок:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+            confirmation_text += f"<b>РЎСЂРѕРє:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
 
-        confirmation_text += f"<b>Приоритет:</b> {pending_task.priority}\n\n"
-        confirmation_text += "Подтвердите создание задачи:"
+        confirmation_text += f"<b>РџСЂРёРѕСЂРёС‚РµС‚:</b> {pending_task.priority}\n\n"
+        confirmation_text += "РџРѕРґС‚РІРµСЂРґРёС‚Рµ СЃРѕР·РґР°РЅРёРµ Р·Р°РґР°С‡Рё:"
 
-        # Кнопки подтверждения
+        # РљРЅРѕРїРєРё РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Подтвердить",
+                    text="вњ… РџРѕРґС‚РІРµСЂРґРёС‚СЊ",
                     callback_data=f"confirm_task:{pending_task.id}"
                 ),
                 InlineKeyboardButton(
-                    text="❌ Отклонить",
+                    text="вќЊ РћС‚РєР»РѕРЅРёС‚СЊ",
                     callback_data=f"reject_task:{pending_task.id}"
                 )
             ]
         ])
 
-        # Отправляем в личные сообщения
+        # РћС‚РїСЂР°РІР»СЏРµРј РІ Р»РёС‡РЅС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ
         await callback.bot.send_message(
             chat_id=creator.telegram_id,
             text=confirmation_text,
@@ -685,24 +685,24 @@ async def handle_assign_user(callback: CallbackQuery):
             parse_mode="HTML"
         )
 
-        await callback.answer(f"Исполнитель назначен: {assignee_name}")
+        await callback.answer(f"РСЃРїРѕР»РЅРёС‚РµР»СЊ РЅР°Р·РЅР°С‡РµРЅ: {assignee_name}")
         logger.info(f"User {assignee.telegram_id} assigned to pending_task {pending_task.id}")
 
     except TelegramForbiddenError:
         await callback.answer(
-            "Не могу отправить подтверждение в личные сообщения. Начните чат с ботом командой /start",
+            "РќРµ РјРѕРіСѓ РѕС‚РїСЂР°РІРёС‚СЊ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ РІ Р»РёС‡РЅС‹Рµ СЃРѕРѕР±С‰РµРЅРёСЏ. РќР°С‡РЅРёС‚Рµ С‡Р°С‚ СЃ Р±РѕС‚РѕРј РєРѕРјР°РЅРґРѕР№ /start",
             show_alert=True
         )
     except Exception as e:
         logger.error(f"Error in assign_user callback: {e}", exc_info=True)
-        await callback.answer("Произошла ошибка", show_alert=True)
+        await callback.answer("РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР°", show_alert=True)
     finally:
         db.close()
 
 
 @router.callback_query(F.data.startswith("confirm_task:"))
 async def handle_confirm_task(callback: CallbackQuery):
-    """Обработчик подтверждения задачи"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ Р·Р°РґР°С‡Рё"""
     db = get_db_session()
 
     try:
@@ -710,32 +710,32 @@ async def handle_confirm_task(callback: CallbackQuery):
         pending_task = db.query(PendingTask).filter(PendingTask.id == pending_task_id).first()
 
         if not pending_task:
-            await callback.answer("Задача не найдена", show_alert=True)
+            await callback.answer("Р—Р°РґР°С‡Р° РЅРµ РЅР°Р№РґРµРЅР°", show_alert=True)
             return
 
         if pending_task.status != "pending":
-            await callback.answer("Задача уже обработана", show_alert=True)
+            await callback.answer("Р—Р°РґР°С‡Р° СѓР¶Рµ РѕР±СЂР°Р±РѕС‚Р°РЅР°", show_alert=True)
             return
 
-        # Определяем исполнителей (поддержка нового и старого формата)
+        # РћРїСЂРµРґРµР»СЏРµРј РёСЃРїРѕР»РЅРёС‚РµР»РµР№ (РїРѕРґРґРµСЂР¶РєР° РЅРѕРІРѕРіРѕ Рё СЃС‚Р°СЂРѕРіРѕ С„РѕСЂРјР°С‚Р°)
         assignee_usernames = pending_task.assignee_usernames or []
         if not assignee_usernames and pending_task.assignee_username:
             assignee_usernames = [pending_task.assignee_username]
 
-        # Классифицируем задачу
+        # РљР»Р°СЃСЃРёС„РёС†РёСЂСѓРµРј Р·Р°РґР°С‡Сѓ
         category_id = classify_task(pending_task.description or pending_task.title, db)
 
-        # Если дедлайн не указан, ставим +24 часа от текущего времени
+        # Р•СЃР»Рё РґРµРґР»Р°Р№РЅ РЅРµ СѓРєР°Р·Р°РЅ, СЃС‚Р°РІРёРј +24 С‡Р°СЃР° РѕС‚ С‚РµРєСѓС‰РµРіРѕ РІСЂРµРјРµРЅРё
         due_date = pending_task.due_date
         if not due_date:
             from datetime import datetime, timedelta
             due_date = datetime.now() + timedelta(hours=24)
 
-        # Создаем задачу
+        # РЎРѕР·РґР°РµРј Р·Р°РґР°С‡Сѓ
         task = Task(
             message_id=pending_task.message_id,
             category_id=category_id,
-            created_by=pending_task.created_by_id,  # Сохраняем создателя
+            created_by=pending_task.created_by_id,  # РЎРѕС…СЂР°РЅСЏРµРј СЃРѕР·РґР°С‚РµР»СЏ
             title=pending_task.title,
             description=pending_task.description,
             status="pending",
@@ -747,29 +747,29 @@ async def handle_confirm_task(callback: CallbackQuery):
         db.commit()
         db.refresh(task)
 
-        # Назначаем исполнителей (many-to-many)
+        # РќР°Р·РЅР°С‡Р°РµРј РёСЃРїРѕР»РЅРёС‚РµР»РµР№ (many-to-many)
         if assignee_usernames:
             for username in assignee_usernames:
                 assignee = await get_or_create_user_by_username(db, username)
                 task.assignees.append(assignee)
             db.commit()
 
-        # Отмечаем pending task как подтвержденный
+        # РћС‚РјРµС‡Р°РµРј pending task РєР°Рє РїРѕРґС‚РІРµСЂР¶РґРµРЅРЅС‹Р№
         pending_task.status = "confirmed"
         db.commit()
 
-        # Уведомляем всех исполнителей
+        # РЈРІРµРґРѕРјР»СЏРµРј РІСЃРµС… РёСЃРїРѕР»РЅРёС‚РµР»РµР№
         if task.assignees:
             for assignee in task.assignees:
-                # Отправляем личное уведомление конкретному исполнителю
+                # РћС‚РїСЂР°РІР»СЏРµРј Р»РёС‡РЅРѕРµ СѓРІРµРґРѕРјР»РµРЅРёРµ РєРѕРЅРєСЂРµС‚РЅРѕРјСѓ РёСЃРїРѕР»РЅРёС‚РµР»СЋ
                 notification_sent = await notify_assigned_user(callback.bot, task.id, db, assignee=assignee)
 
-                # Если уведомление не отправлено (пользователь не начал чат с ботом)
+                # Р•СЃР»Рё СѓРІРµРґРѕРјР»РµРЅРёРµ РЅРµ РѕС‚РїСЂР°РІР»РµРЅРѕ (РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅРµ РЅР°С‡Р°Р» С‡Р°С‚ СЃ Р±РѕС‚РѕРј)
                 if not notification_sent and assignee.username:
                     try:
                         await callback.bot.send_message(
                             chat_id=pending_task.chat_id,
-                            text=f"@{assignee.username}, вам назначена задача: <b>{task.title}</b>\n\n",
+                            text=f"@{assignee.username}, РІР°Рј РЅР°Р·РЅР°С‡РµРЅР° Р·Р°РґР°С‡Р°: <b>{task.title}</b>\n\n",
                             parse_mode="HTML"
                         )
                     except Exception as e:
@@ -783,29 +783,29 @@ async def handle_confirm_task(callback: CallbackQuery):
         manager_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="📱 Открыть панель управления",
+                    text="рџ“± РћС‚РєСЂС‹С‚СЊ РїР°РЅРµР»СЊ СѓРїСЂР°РІР»РµРЅРёСЏ",
                     web_app=WebAppInfo(url=webapp_url)
                 )
             ]
         ])
 
-        # Формируем текст с исполнителями
+        # Р¤РѕСЂРјРёСЂСѓРµРј С‚РµРєСЃС‚ СЃ РёСЃРїРѕР»РЅРёС‚РµР»СЏРјРё
         confirmation_msg = (
-            f"✅ <b>Задача подтверждена и отправлена!</b>\n\n"
-            f"<b>Задача:</b> {task.title}\n"
+            f"вњ… <b>Р—Р°РґР°С‡Р° РїРѕРґС‚РІРµСЂР¶РґРµРЅР° Рё РѕС‚РїСЂР°РІР»РµРЅР°!</b>\n\n"
+            f"<b>Р—Р°РґР°С‡Р°:</b> {task.title}\n"
         )
 
         if task.assignees:
             if len(task.assignees) == 1:
-                confirmation_msg += f"<b>Исполнитель:</b> @{task.assignees[0].username}\n"
+                confirmation_msg += f"<b>РСЃРїРѕР»РЅРёС‚РµР»СЊ:</b> @{task.assignees[0].username}\n"
             else:
                 assignees_str = ", ".join([f"@{a.username}" for a in task.assignees if a.username])
-                confirmation_msg += f"<b>Исполнители:</b> {assignees_str}\n"
+                confirmation_msg += f"<b>РСЃРїРѕР»РЅРёС‚РµР»Рё:</b> {assignees_str}\n"
         else:
-            confirmation_msg += f"<b>Исполнитель:</b> не указан\n"
+            confirmation_msg += f"<b>РСЃРїРѕР»РЅРёС‚РµР»СЊ:</b> РЅРµ СѓРєР°Р·Р°РЅ\n"
 
-        confirmation_msg += f"<b>Срок:</b> {task.due_date.strftime('%d.%m.%Y %H:%M') if task.due_date else 'не указан'}\n"
-        confirmation_msg += f"<b>Приоритет:</b> {task.priority}"
+        confirmation_msg += f"<b>РЎСЂРѕРє:</b> {task.due_date.strftime('%d.%m.%Y %H:%M') if task.due_date else 'РЅРµ СѓРєР°Р·Р°РЅ'}\n"
+        confirmation_msg += f"<b>РџСЂРёРѕСЂРёС‚РµС‚:</b> {task.priority}"
 
         await callback.message.edit_text(
             confirmation_msg,
@@ -813,18 +813,18 @@ async def handle_confirm_task(callback: CallbackQuery):
             parse_mode="HTML"
         )
 
-        await callback.answer("Задача создана! ✅")
+        await callback.answer("Р—Р°РґР°С‡Р° СЃРѕР·РґР°РЅР°! вњ…")
 
     except Exception as e:
         logger.error(f"Error confirming task: {e}", exc_info=True)
-        await callback.answer("Произошла ошибка", show_alert=True)
+        await callback.answer("РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР°", show_alert=True)
     finally:
         db.close()
 
 
 @router.callback_query(F.data.startswith("reject_task:"))
 async def handle_reject_task(callback: CallbackQuery):
-    """Обработчик отклонения задачи"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РѕС‚РєР»РѕРЅРµРЅРёСЏ Р·Р°РґР°С‡Рё"""
     db = get_db_session()
 
     try:
@@ -832,34 +832,34 @@ async def handle_reject_task(callback: CallbackQuery):
         pending_task = db.query(PendingTask).filter(PendingTask.id == pending_task_id).first()
 
         if not pending_task:
-            await callback.answer("Задача не найдена", show_alert=True)
+            await callback.answer("Р—Р°РґР°С‡Р° РЅРµ РЅР°Р№РґРµРЅР°", show_alert=True)
             return
 
         if pending_task.status != "pending":
-            await callback.answer("Задача уже обработана", show_alert=True)
+            await callback.answer("Р—Р°РґР°С‡Р° СѓР¶Рµ РѕР±СЂР°Р±РѕС‚Р°РЅР°", show_alert=True)
             return
 
         pending_task.status = "rejected"
         db.commit()
 
         await callback.message.edit_text(
-            f"❌ <b>Задача отклонена</b>\n\n"
-            f"Задача: {pending_task.title}",
+            f"вќЊ <b>Р—Р°РґР°С‡Р° РѕС‚РєР»РѕРЅРµРЅР°</b>\n\n"
+            f"Р—Р°РґР°С‡Р°: {pending_task.title}",
             parse_mode="HTML"
         )
 
-        await callback.answer("Задача отклонена")
+        await callback.answer("Р—Р°РґР°С‡Р° РѕС‚РєР»РѕРЅРµРЅР°")
 
     except Exception as e:
         logger.error(f"Error rejecting task: {e}", exc_info=True)
-        await callback.answer("Произошла ошибка", show_alert=True)
+        await callback.answer("РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР°", show_alert=True)
     finally:
         db.close()
 
 
 @router.callback_query(F.data.startswith("task_complete:"))
 async def handle_task_complete(callback: CallbackQuery):
-    """Обработчик отметки задачи как выполненной"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РѕС‚РјРµС‚РєРё Р·Р°РґР°С‡Рё РєР°Рє РІС‹РїРѕР»РЅРµРЅРЅРѕР№"""
     db = get_db_session()
 
     try:
@@ -867,35 +867,35 @@ async def handle_task_complete(callback: CallbackQuery):
         task = db.query(Task).filter(Task.id == task_id).first()
 
         if not task:
-            await callback.answer("Задача не найдена", show_alert=True)
+            await callback.answer("Р—Р°РґР°С‡Р° РЅРµ РЅР°Р№РґРµРЅР°", show_alert=True)
             return
 
         if task.status == "completed":
-            await callback.answer("Задача уже выполнена", show_alert=True)
+            await callback.answer("Р—Р°РґР°С‡Р° СѓР¶Рµ РІС‹РїРѕР»РЅРµРЅР°", show_alert=True)
             return
 
         task.status = "completed"
         db.commit()
 
         await callback.message.edit_text(
-            f"✅ <b>Задача выполнена!</b>\n\n"
-            f"<b>Задача:</b> {task.title}\n"
-            f"<b>Завершена:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+            f"вњ… <b>Р—Р°РґР°С‡Р° РІС‹РїРѕР»РЅРµРЅР°!</b>\n\n"
+            f"<b>Р—Р°РґР°С‡Р°:</b> {task.title}\n"
+            f"<b>Р—Р°РІРµСЂС€РµРЅР°:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}",
             parse_mode="HTML"
         )
 
-        await callback.answer("Отлично! Задача отмечена как выполненная ✅")
+        await callback.answer("РћС‚Р»РёС‡РЅРѕ! Р—Р°РґР°С‡Р° РѕС‚РјРµС‡РµРЅР° РєР°Рє РІС‹РїРѕР»РЅРµРЅРЅР°СЏ вњ…")
 
     except Exception as e:
         logger.error(f"Error completing task: {e}", exc_info=True)
-        await callback.answer("Произошла ошибка", show_alert=True)
+        await callback.answer("РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР°", show_alert=True)
     finally:
         db.close()
 
 
 @router.message(F.chat.type.in_(["group", "supergroup"]))
 async def handle_group_message(message: Message):
-    """Обработчик сообщений из групповых чатов с AI-извлечением задач"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє СЃРѕРѕР±С‰РµРЅРёР№ РёР· РіСЂСѓРїРїРѕРІС‹С… С‡Р°С‚РѕРІ СЃ AI-РёР·РІР»РµС‡РµРЅРёРµРј Р·Р°РґР°С‡"""
     db = get_db_session()
 
     try:
@@ -903,7 +903,7 @@ async def handle_group_message(message: Message):
         if message.from_user.is_bot:
             return
 
-        # Регистрируем/обновляем чат в базе данных
+        # Р РµРіРёСЃС‚СЂРёСЂСѓРµРј/РѕР±РЅРѕРІР»СЏРµРј С‡Р°С‚ РІ Р±Р°Р·Рµ РґР°РЅРЅС‹С…
         chat = await get_or_create_chat(
             chat_id=message.chat.id,
             chat_type=message.chat.type,
@@ -956,25 +956,25 @@ async def handle_group_message(message: Message):
 
         task_data = ai_result.get("task", {})
 
-        # Логируем данные от AI
+        # Р›РѕРіРёСЂСѓРµРј РґР°РЅРЅС‹Рµ РѕС‚ AI
         logger.info(f"Task data from AI: {task_data}")
 
-        # Извлекаем список исполнителей (новый формат) или fallback на старый
+        # РР·РІР»РµРєР°РµРј СЃРїРёСЃРѕРє РёСЃРїРѕР»РЅРёС‚РµР»РµР№ (РЅРѕРІС‹Р№ С„РѕСЂРјР°С‚) РёР»Рё fallback РЅР° СЃС‚Р°СЂС‹Р№
         assignee_usernames = task_data.get("assignee_usernames", [])
         if not assignee_usernames:
-            # Fallback на старое поле для обратной совместимости
+            # Fallback РЅР° СЃС‚Р°СЂРѕРµ РїРѕР»Рµ РґР»СЏ РѕР±СЂР°С‚РЅРѕР№ СЃРѕРІРјРµСЃС‚РёРјРѕСЃС‚Рё
             old_assignee = task_data.get("assignee_username")
             if old_assignee:
                 assignee_usernames = [old_assignee]
 
         logger.info(f"Assignee usernames from AI: {assignee_usernames}")
 
-        # НОВАЯ ЛОГИКА: Если нет исполнителя - спрашиваем в ГРУППОВОМ чате
+        # РќРћР’РђРЇ Р›РћР“РРљРђ: Р•СЃР»Рё РЅРµС‚ РёСЃРїРѕР»РЅРёС‚РµР»СЏ - СЃРїСЂР°С€РёРІР°РµРј РІ Р“Р РЈРџРџРћР’РћРњ С‡Р°С‚Рµ
         if not assignee_usernames:
-            logger.info("No assignee found - asking in group chat")
+            logger.info("No assignee found - asking in private chat")
 
             try:
-                # Получаем участников чата
+                # РџРѕР»СѓС‡Р°РµРј СѓС‡Р°СЃС‚РЅРёРєРѕРІ С‡Р°С‚Р°
                 chat_admins = await message.bot.get_chat_administrators(message.chat.id)
                 chat_members = []
 
@@ -987,7 +987,7 @@ async def handle_group_message(message: Message):
                             'first_name': user_obj.first_name
                         })
 
-                # Добавляем автора сообщения если его нет в списке
+                # Р”РѕР±Р°РІР»СЏРµРј Р°РІС‚РѕСЂР° СЃРѕРѕР±С‰РµРЅРёСЏ РµСЃР»Рё РµРіРѕ РЅРµС‚ РІ СЃРїРёСЃРєРµ
                 author_in_list = any(m['id'] == message.from_user.id for m in chat_members)
                 if not author_in_list and not message.from_user.is_bot:
                     chat_members.append({
@@ -998,18 +998,18 @@ async def handle_group_message(message: Message):
 
                 if not chat_members:
                     logger.warning("No chat members found, cannot ask for assignee")
-                    # Пропускаем создание задачи если нет участников
+                    # РџСЂРѕРїСѓСЃРєР°РµРј СЃРѕР·РґР°РЅРёРµ Р·Р°РґР°С‡Рё РµСЃР»Рё РЅРµС‚ СѓС‡Р°СЃС‚РЅРёРєРѕРІ
                     return
 
-                # Создаем временный pending task БЕЗ исполнителя
-                # но сохраняем его для последующего выбора
+                # РЎРѕР·РґР°РµРј РІСЂРµРјРµРЅРЅС‹Р№ pending task Р‘Р•Р— РёСЃРїРѕР»РЅРёС‚РµР»СЏ
+                # РЅРѕ СЃРѕС…СЂР°РЅСЏРµРј РµРіРѕ РґР»СЏ РїРѕСЃР»РµРґСѓСЋС‰РµРіРѕ РІС‹Р±РѕСЂР°
                 pending_task = PendingTask(
                     message_id=message_obj.id,
                     chat_id=message.chat.id,
                     created_by_id=user.id,
-                    title=task_data.get("title", "Без названия"),
+                    title=task_data.get("title", "Р‘РµР· РЅР°Р·РІР°РЅРёСЏ"),
                     description=task_data.get("description"),
-                    assignee_usernames=None,  # Будет назначен после выбора
+                    assignee_usernames=None,  # Р‘СѓРґРµС‚ РЅР°Р·РЅР°С‡РµРЅ РїРѕСЃР»Рµ РІС‹Р±РѕСЂР°
                     due_date=task_data.get("due_date_parsed"),
                     priority=task_data.get("priority", "normal"),
                     status="pending"
@@ -1019,24 +1019,24 @@ async def handle_group_message(message: Message):
                 db.commit()
                 db.refresh(pending_task)
 
-                # Формируем сообщение с кнопками выбора исполнителя В ГРУППЕ
+                # Р¤РѕСЂРјРёСЂСѓРµРј СЃРѕРѕР±С‰РµРЅРёРµ СЃ РєРЅРѕРїРєР°РјРё РІС‹Р±РѕСЂР° РёСЃРїРѕР»РЅРёС‚РµР»СЏ Р’ Р“Р РЈРџРџР•
                 ask_text = (
-                    f"🤖 <b>Обнаружена задача без исполнителя</b>\n\n"
-                    f"<b>Задача:</b> {pending_task.title}\n"
+                    f"рџ¤– <b>РћР±РЅР°СЂСѓР¶РµРЅР° Р·Р°РґР°С‡Р° Р±РµР· РёСЃРїРѕР»РЅРёС‚РµР»СЏ</b>\n\n"
+                    f"<b>Р—Р°РґР°С‡Р°:</b> {pending_task.title}\n"
                 )
 
                 if pending_task.description:
-                    ask_text += f"<b>Описание:</b> {pending_task.description}\n"
+                    ask_text += f"<b>РћРїРёСЃР°РЅРёРµ:</b> {pending_task.description}\n"
 
-                ask_text += f"\n{message.from_user.first_name}, кому назначить эту задачу?"
+                ask_text += f"\n{message.from_user.first_name}, РєРѕРјСѓ РЅР°Р·РЅР°С‡РёС‚СЊ СЌС‚Сѓ Р·Р°РґР°С‡Сѓ?"
 
-                # Создаем кнопки с участниками (максимум 2 в ряд)
+                # РЎРѕР·РґР°РµРј РєРЅРѕРїРєРё СЃ СѓС‡Р°СЃС‚РЅРёРєР°РјРё (РјР°РєСЃРёРјСѓРј 2 РІ СЂСЏРґ)
                 buttons = []
                 row = []
                 for member in chat_members:
                     display_name = member['first_name'] or member['username'] or f"User {member['id']}"
                     row.append(InlineKeyboardButton(
-                        text=display_name[:20],  # Ограничиваем длину
+                        text=display_name[:20],  # РћРіСЂР°РЅРёС‡РёРІР°РµРј РґР»РёРЅСѓ
                         callback_data=f"assign_user:{pending_task.id}:{member['id']}"
                     ))
 
@@ -1044,44 +1044,45 @@ async def handle_group_message(message: Message):
                         buttons.append(row)
                         row = []
 
-                # Добавляем остаток
+                # Р”РѕР±Р°РІР»СЏРµРј РѕСЃС‚Р°С‚РѕРє
                 if row:
                     buttons.append(row)
 
-                # Кнопка отмены
+                # РљРЅРѕРїРєР° РѕС‚РјРµРЅС‹
                 buttons.append([
                     InlineKeyboardButton(
-                        text="❌ Отменить задачу",
+                        text="вќЊ РћС‚РјРµРЅРёС‚СЊ Р·Р°РґР°С‡Сѓ",
                         callback_data=f"reject_task:{pending_task.id}"
                     )
                 ])
 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
-                # Отправляем ПРЯМО В ГРУППУ
-                await message.answer(
-                    ask_text,
+                # РћС‚РїСЂР°РІР»СЏРµРј РџР РЇРњРћ Р’ Р“Р РЈРџРџРЈ
+                await message.bot.send_message(
+                    chat_id=message.from_user.id,
+                    text=ask_text,
                     reply_markup=keyboard,
                     parse_mode="HTML"
                 )
 
-                logger.info(f"Sent assignee selection to group chat {message.chat.id}")
-                return  # Выходим, не создаем обычный pending task
+                logger.info(f"Sent assignee selection to private chat for user {message.from_user.id}")
+                return  # Р’С‹С…РѕРґРёРј, РЅРµ СЃРѕР·РґР°РµРј РѕР±С‹С‡РЅС‹Р№ pending task
 
             except Exception as e:
                 logger.error(f"Error asking for assignee: {e}", exc_info=True)
-                # Если не смогли спросить - создаем задачу без исполнителя
+                # Р•СЃР»Рё РЅРµ СЃРјРѕРіР»Рё СЃРїСЂРѕСЃРёС‚СЊ - СЃРѕР·РґР°РµРј Р·Р°РґР°С‡Сѓ Р±РµР· РёСЃРїРѕР»РЅРёС‚РµР»СЏ
                 assignee_usernames = []
 
-        # Создаем pending task (только если исполнитель УЖЕ известен)
+        # РЎРѕР·РґР°РµРј pending task (С‚РѕР»СЊРєРѕ РµСЃР»Рё РёСЃРїРѕР»РЅРёС‚РµР»СЊ РЈР–Р• РёР·РІРµСЃС‚РµРЅ)
         pending_task = PendingTask(
             message_id=message_obj.id,
             chat_id=message.chat.id,
             created_by_id=user.id,
-            title=task_data.get("title", "Без названия"),
+            title=task_data.get("title", "Р‘РµР· РЅР°Р·РІР°РЅРёСЏ"),
             description=task_data.get("description"),
             assignee_usernames=assignee_usernames if assignee_usernames else None,
-            assignee_username=assignee_usernames[0] if assignee_usernames else None,  # Для обратной совместимости
+            assignee_username=assignee_usernames[0] if assignee_usernames else None,  # Р”Р»СЏ РѕР±СЂР°С‚РЅРѕР№ СЃРѕРІРјРµСЃС‚РёРјРѕСЃС‚Рё
             due_date=task_data.get("due_date_parsed"),
             priority=task_data.get("priority", "normal"),
             status="pending"
@@ -1093,41 +1094,41 @@ async def handle_group_message(message: Message):
         db.commit()
         db.refresh(pending_task)
 
-        # Формируем текст подтверждения
+        # Р¤РѕСЂРјРёСЂСѓРµРј С‚РµРєСЃС‚ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ
         confirmation_text = (
-            f"🤖 <b>AI обнаружил задачу!</b>\n\n"
-            f"<b>Задача:</b> {pending_task.title}\n"
+            f"рџ¤– <b>AI РѕР±РЅР°СЂСѓР¶РёР» Р·Р°РґР°С‡Сѓ!</b>\n\n"
+            f"<b>Р—Р°РґР°С‡Р°:</b> {pending_task.title}\n"
         )
 
         if pending_task.description and pending_task.description != pending_task.title:
-            confirmation_text += f"<b>Описание:</b> {pending_task.description}\n"
+            confirmation_text += f"<b>РћРїРёСЃР°РЅРёРµ:</b> {pending_task.description}\n"
 
-        # Показываем всех исполнителей
+        # РџРѕРєР°Р·С‹РІР°РµРј РІСЃРµС… РёСЃРїРѕР»РЅРёС‚РµР»РµР№
         if pending_task.assignee_usernames:
             if len(pending_task.assignee_usernames) == 1:
-                confirmation_text += f"<b>Исполнитель:</b> @{pending_task.assignee_usernames[0]}\n"
+                confirmation_text += f"<b>РСЃРїРѕР»РЅРёС‚РµР»СЊ:</b> @{pending_task.assignee_usernames[0]}\n"
             else:
                 assignees_str = ", ".join([f"@{u}" for u in pending_task.assignee_usernames])
-                confirmation_text += f"<b>Исполнители:</b> {assignees_str}\n"
+                confirmation_text += f"<b>РСЃРїРѕР»РЅРёС‚РµР»Рё:</b> {assignees_str}\n"
         elif pending_task.assignee_username:
-            # Fallback на старое поле
-            confirmation_text += f"<b>Исполнитель:</b> @{pending_task.assignee_username}\n"
+            # Fallback РЅР° СЃС‚Р°СЂРѕРµ РїРѕР»Рµ
+            confirmation_text += f"<b>РСЃРїРѕР»РЅРёС‚РµР»СЊ:</b> @{pending_task.assignee_username}\n"
 
         if pending_task.due_date:
-            confirmation_text += f"<b>Срок:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+            confirmation_text += f"<b>РЎСЂРѕРє:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
 
-        confirmation_text += f"<b>Приоритет:</b> {pending_task.priority}\n\n"
-        confirmation_text += "Подтвердите создание задачи:"
+        confirmation_text += f"<b>РџСЂРёРѕСЂРёС‚РµС‚:</b> {pending_task.priority}\n\n"
+        confirmation_text += "РџРѕРґС‚РІРµСЂРґРёС‚Рµ СЃРѕР·РґР°РЅРёРµ Р·Р°РґР°С‡Рё:"
 
        
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Подтвердить",
+                    text="вњ… РџРѕРґС‚РІРµСЂРґРёС‚СЊ",
                     callback_data=f"confirm_task:{pending_task.id}"
                 ),
                 InlineKeyboardButton(
-                    text="❌ Отклонить",
+                    text="вќЊ РћС‚РєР»РѕРЅРёС‚СЊ",
                     callback_data=f"reject_task:{pending_task.id}"
                 )
             ]
@@ -1148,14 +1149,7 @@ async def handle_group_message(message: Message):
         logger.info(f"Task confirmation sent to user {user.telegram_id}")
 
     except TelegramForbiddenError:
-        logger.warning(f"User hasn't started the bot, cannot send confirmation")
-        try:
-            await message.answer(
-                f"👋 {message.from_user.first_name}, пожалуйста, начните чат со мной (/start), "
-                f"чтобы подтверждать задачи!"
-            )
-        except:
-            pass
+        logger.warning(f"User hasn't started the bot, cannot send confirmation in private chat")
     except Exception as e:
         logger.error(f"Error handling group message: {e}", exc_info=True)
     finally:
@@ -1164,7 +1158,7 @@ async def handle_group_message(message: Message):
 
 @router.message(F.photo | F.document)
 async def handle_file_upload(message: Message):
-    """Обработчик загрузки файлов (фото, документы) как отчёт по задаче"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє Р·Р°РіСЂСѓР·РєРё С„Р°Р№Р»РѕРІ (С„РѕС‚Рѕ, РґРѕРєСѓРјРµРЅС‚С‹) РєР°Рє РѕС‚С‡С‘С‚ РїРѕ Р·Р°РґР°С‡Рµ"""
     db = get_db_session()
 
     try:
@@ -1179,7 +1173,7 @@ async def handle_file_upload(message: Message):
             db=db
         )
 
-        # Находим активные задачи пользователя (через many-to-many связь)
+        # РќР°С…РѕРґРёРј Р°РєС‚РёРІРЅС‹Рµ Р·Р°РґР°С‡Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ (С‡РµСЂРµР· many-to-many СЃРІСЏР·СЊ)
         active_tasks = db.query(Task).join(
             Task.assignees
         ).filter(
@@ -1189,8 +1183,8 @@ async def handle_file_upload(message: Message):
 
         if not active_tasks:
             await message.answer(
-                "❌ У вас нет задач в процессе выполнения.\n\n"
-                "Сначала начните выполнение задачи, нажав кнопку '▶️ Начать выполнение'."
+                "вќЊ РЈ РІР°СЃ РЅРµС‚ Р·Р°РґР°С‡ РІ РїСЂРѕС†РµСЃСЃРµ РІС‹РїРѕР»РЅРµРЅРёСЏ.\n\n"
+                "РЎРЅР°С‡Р°Р»Р° РЅР°С‡РЅРёС‚Рµ РІС‹РїРѕР»РЅРµРЅРёРµ Р·Р°РґР°С‡Рё, РЅР°Р¶Р°РІ РєРЅРѕРїРєСѓ 'в–¶пёЏ РќР°С‡Р°С‚СЊ РІС‹РїРѕР»РЅРµРЅРёРµ'."
             )
             return
 
@@ -1243,19 +1237,19 @@ async def handle_file_upload(message: Message):
 
         
         confirmation = (
-            f"✅ <b>Файл прикреплён к задаче!</b>\n\n"
-            f"<b>Задача:</b> {task.title}\n"
-            f"<b>Файл:</b> {file_name}\n"
+            f"вњ… <b>Р¤Р°Р№Р» РїСЂРёРєСЂРµРїР»С‘РЅ Рє Р·Р°РґР°С‡Рµ!</b>\n\n"
+            f"<b>Р—Р°РґР°С‡Р°:</b> {task.title}\n"
+            f"<b>Р¤Р°Р№Р»:</b> {file_name}\n"
         )
 
         if file_size:
             size_mb = file_size / 1024 / 1024
-            confirmation += f"<b>Размер:</b> {size_mb:.2f} МБ\n"
+            confirmation += f"<b>Р Р°Р·РјРµСЂ:</b> {size_mb:.2f} РњР‘\n"
 
         if caption:
-            confirmation += f"<b>Описание:</b> {caption}\n"
+            confirmation += f"<b>РћРїРёСЃР°РЅРёРµ:</b> {caption}\n"
 
-        confirmation += f"\n📋 Руководитель сможет просмотреть отчёт в веб-панели"
+        confirmation += f"\nрџ“‹ Р СѓРєРѕРІРѕРґРёС‚РµР»СЊ СЃРјРѕР¶РµС‚ РїСЂРѕСЃРјРѕС‚СЂРµС‚СЊ РѕС‚С‡С‘С‚ РІ РІРµР±-РїР°РЅРµР»Рё"
 
         await message.answer(confirmation, parse_mode="HTML")
 
@@ -1263,17 +1257,20 @@ async def handle_file_upload(message: Message):
 
     except Exception as e:
         logger.error(f"Error handling file upload: {e}", exc_info=True)
-        await message.answer("❌ Произошла ошибка при загрузке файла. Попробуйте позже.")
+        await message.answer("вќЊ РџСЂРѕРёР·РѕС€Р»Р° РѕС€РёР±РєР° РїСЂРё Р·Р°РіСЂСѓР·РєРµ С„Р°Р№Р»Р°. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.")
     finally:
         db.close()
 
 
 @router.message()
 async def handle_other_message(message: Message):
-    """Обработчик остальных сообщений"""
+    """РћР±СЂР°Р±РѕС‚С‡РёРє РѕСЃС‚Р°Р»СЊРЅС‹С… СЃРѕРѕР±С‰РµРЅРёР№"""
     if message.chat.type == "private":
         await message.answer(
-            "Привет! 👋\n\n"
-            "Я работаю в групповых чатах. Добавьте меня в группу, чтобы я начал анализировать задачи.\n\n"
-            "Используйте /help для получения справки."
+            "РџСЂРёРІРµС‚! рџ‘‹\n\n"
+            "РЇ СЂР°Р±РѕС‚Р°СЋ РІ РіСЂСѓРїРїРѕРІС‹С… С‡Р°С‚Р°С…. Р”РѕР±Р°РІСЊС‚Рµ РјРµРЅСЏ РІ РіСЂСѓРїРїСѓ, С‡С‚РѕР±С‹ СЏ РЅР°С‡Р°Р» Р°РЅР°Р»РёР·РёСЂРѕРІР°С‚СЊ Р·Р°РґР°С‡Рё.\n\n"
+            "РСЃРїРѕР»СЊР·СѓР№С‚Рµ /help РґР»СЏ РїРѕР»СѓС‡РµРЅРёСЏ СЃРїСЂР°РІРєРё."
         )
+
+
+

@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Depends, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+﻿from fastapi import FastAPI, Depends, HTTPException
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, or_
@@ -11,23 +11,147 @@ from pydantic import BaseModel
 import os
 from pathlib import Path
 from datetime import datetime
+import base64
+import hashlib
+import hmac
+import json
+import secrets
+import time
+from urllib import parse as urlparse
+from urllib import request as urlrequest
 
 app = FastAPI(title="TaskBridge API")
 
 import logging
 logger = logging.getLogger(__name__)
 
+GOOGLE_OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
+GOOGLE_REFRESH_PREFIX = "oauth_refresh:"
+OAUTH_STATE_TTL_SECONDS = 900
+
+GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+GOOGLE_OAUTH_REDIRECT_URI = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "").strip()
+OAUTH_STATE_SECRET = os.getenv("OAUTH_STATE_SECRET", os.getenv("BOT_TOKEN", ""))
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _build_oauth_state(user_id: int) -> str:
+    payload = {
+        "uid": user_id,
+        "ts": int(time.time()),
+        "nonce": secrets.token_urlsafe(8),
+    }
+    payload_part = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sign = hmac.new(OAUTH_STATE_SECRET.encode("utf-8"), payload_part.encode("utf-8"), hashlib.sha256).digest()
+    sign_part = _b64url_encode(sign)
+    return f"{payload_part}.{sign_part}"
+
+
+def _verify_oauth_state(state: str) -> int:
+    if not OAUTH_STATE_SECRET:
+        raise ValueError("OAUTH_STATE_SECRET is not configured")
+
+    try:
+        payload_part, sign_part = state.split(".", 1)
+    except ValueError as exc:
+        raise ValueError("Invalid OAuth state format") from exc
+
+    expected_sign = hmac.new(OAUTH_STATE_SECRET.encode("utf-8"), payload_part.encode("utf-8"), hashlib.sha256).digest()
+    provided_sign = _b64url_decode(sign_part)
+
+    if not hmac.compare_digest(expected_sign, provided_sign):
+        raise ValueError("Invalid OAuth state signature")
+
+    payload = json.loads(_b64url_decode(payload_part).decode("utf-8"))
+    created_ts = int(payload.get("ts", 0))
+    if int(time.time()) - created_ts > OAUTH_STATE_TTL_SECONDS:
+        raise ValueError("OAuth state expired")
+
+    uid = int(payload.get("uid", 0))
+    if uid <= 0:
+        raise ValueError("Invalid OAuth state user")
+
+    return uid
+
+
+def _exchange_google_code(code: str) -> dict:
+    if not GOOGLE_OAUTH_CLIENT_ID or not GOOGLE_OAUTH_CLIENT_SECRET or not GOOGLE_OAUTH_REDIRECT_URI:
+        raise ValueError("Google OAuth is not configured")
+
+    payload = urlparse.urlencode({
+        "code": code,
+        "client_id": GOOGLE_OAUTH_CLIENT_ID,
+        "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+        "redirect_uri": GOOGLE_OAUTH_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }).encode("utf-8")
+
+    req = urlrequest.Request(
+        GOOGLE_OAUTH_TOKEN_URL,
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    with urlrequest.urlopen(req, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _fetch_google_email(access_token: str) -> str:
+    req = urlrequest.Request(
+        GOOGLE_USERINFO_URL,
+        headers={"Authorization": f"Bearer {access_token}"},
+        method="GET",
+    )
+
+    with urlrequest.urlopen(req, timeout=20) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    email = (payload.get("email") or "").strip().lower()
+    if not email:
+        raise ValueError("Google userinfo does not contain email")
+
+    return email
+
+
+def _oauth_result_html(ok: bool, message: str) -> HTMLResponse:
+    status = "Успешно" if ok else "Ошибка"
+    color = "#1a7f37" if ok else "#b42318"
+    body = f"""
+    <html><head><meta charset=\"utf-8\" /><title>{status}</title></head>
+    <body style=\"font-family:Arial,sans-serif;padding:24px;\">
+      <h2 style=\"color:{color};\">{status}</h2>
+      <p>{message}</p>
+      <p><a href=\"/webapp/index.html\">Вернуться в панель</a></p>
+      <script>
+        setTimeout(function() {{ window.location.href = '/webapp/index.html'; }}, 1800);
+      </script>
+    </body></html>
+    """
+    return HTMLResponse(content=body)
+
 
 def format_datetime_utc(dt):
     """
-    Форматирует datetime в ISO формат с UTC timezone.
-    Добавляет 'Z' в конец для обозначения UTC.
+    Р¤РѕСЂРјР°С‚РёСЂСѓРµС‚ datetime РІ ISO С„РѕСЂРјР°С‚ СЃ UTC timezone.
+    Р”РѕР±Р°РІР»СЏРµС‚ 'Z' РІ РєРѕРЅРµС† РґР»СЏ РѕР±РѕР·РЅР°С‡РµРЅРёСЏ UTC.
     """
     if dt is None:
         return None
     return dt.isoformat() + 'Z'
 
-# Определяем пути к файлам
+# РћРїСЂРµРґРµР»СЏРµРј РїСѓС‚Рё Рє С„Р°Р№Р»Р°Рј
 webapp_dir = Path(__file__).parent.resolve()
 dist_dir = webapp_dir / "dist"
 index_html_path = dist_dir / "index.html"
@@ -38,7 +162,7 @@ logger.info(f"Dist directory: {dist_dir}")
 logger.info(f"Index.html path: {index_html_path}")
 logger.info(f"Index.html exists: {index_html_path.exists()}")
 
-# Проверяем что React приложение собрано
+# РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ React РїСЂРёР»РѕР¶РµРЅРёРµ СЃРѕР±СЂР°РЅРѕ
 if not dist_dir.exists() or not index_html_path.exists():
     logger.error(f"React app not built! Please run 'npm run build' in webapp/ directory")
     logger.error(f"Expected dist directory at: {dist_dir}")
@@ -51,7 +175,7 @@ if not dist_dir.exists() or not index_html_path.exists():
 assets_dir = dist_dir / "assets"
 if assets_dir.exists():
     app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-    logger.info(f"✓ Mounted assets directory: {assets_dir}")
+    logger.info(f"вњ“ Mounted assets directory: {assets_dir}")
 else:
     logger.error(f"Assets directory not found at {assets_dir}")
     raise RuntimeError(f"React assets not found at {assets_dir}")
@@ -59,7 +183,7 @@ else:
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
-    """Главная страница - показываем index.html из dist"""
+    """Р“Р»Р°РІРЅР°СЏ СЃС‚СЂР°РЅРёС†Р° - РїРѕРєР°Р·С‹РІР°РµРј index.html РёР· dist"""
     logger.info(f"GET / - Attempting to serve index.html")
     logger.info(f"index_html_path: {index_html_path}")
     logger.info(f"index_html_path.exists(): {index_html_path.exists()}")
@@ -78,7 +202,7 @@ async def read_root():
 
 @app.get("/webapp/index.html", response_class=HTMLResponse)
 async def read_webapp():
-    """Отображение веб-приложения (для совместимости с WebApp кнопками)"""
+    """РћС‚РѕР±СЂР°Р¶РµРЅРёРµ РІРµР±-РїСЂРёР»РѕР¶РµРЅРёСЏ (РґР»СЏ СЃРѕРІРјРµСЃС‚РёРјРѕСЃС‚Рё СЃ WebApp РєРЅРѕРїРєР°РјРё)"""
     if not index_html_path.exists():
         logger.error(f"index.html NOT FOUND at {index_html_path}")
         raise HTTPException(status_code=404, detail=f"index.html not found at {index_html_path}")
@@ -88,7 +212,7 @@ async def read_webapp():
 
 @app.get("//webapp/index.html", response_class=HTMLResponse)
 async def read_webapp_double_slash():
-    """Fallback для двойного слэша (если WEB_APP_DOMAIN заканчивается на /)"""
+    """Fallback РґР»СЏ РґРІРѕР№РЅРѕРіРѕ СЃР»СЌС€Р° (РµСЃР»Рё WEB_APP_DOMAIN Р·Р°РєР°РЅС‡РёРІР°РµС‚СЃСЏ РЅР° /)"""
     logger.warning("Request with double slash! Check WEB_APP_DOMAIN configuration")
     if not index_html_path.exists():
         logger.error(f"index.html NOT FOUND at {index_html_path}")
@@ -99,7 +223,7 @@ async def read_webapp_double_slash():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint для мониторинга и пробуждения (Render.com + cron-job.org)"""
+    """Health check endpoint РґР»СЏ РјРѕРЅРёС‚РѕСЂРёРЅРіР° Рё РїСЂРѕР±СѓР¶РґРµРЅРёСЏ (Render.com + cron-job.org)"""
     return {
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat(),
@@ -116,17 +240,17 @@ async def get_tasks(
     db: Session = Depends(get_db)
 ):
     """
-    Получить список задач
+    РџРѕР»СѓС‡РёС‚СЊ СЃРїРёСЃРѕРє Р·Р°РґР°С‡
 
-    Параметры фильтрации:
-    - status: Статус задачи (pending, in_progress, completed, cancelled)
-    - category_id: ID категории
-    - assigned_to: ID исполнителя (фильтр по одному из исполнителей)
-    - created_by: ID создателя задачи
+    РџР°СЂР°РјРµС‚СЂС‹ С„РёР»СЊС‚СЂР°С†РёРё:
+    - status: РЎС‚Р°С‚СѓСЃ Р·Р°РґР°С‡Рё (pending, in_progress, completed, cancelled)
+    - category_id: ID РєР°С‚РµРіРѕСЂРёРё
+    - assigned_to: ID РёСЃРїРѕР»РЅРёС‚РµР»СЏ (С„РёР»СЊС‚СЂ РїРѕ РѕРґРЅРѕРјСѓ РёР· РёСЃРїРѕР»РЅРёС‚РµР»РµР№)
+    - created_by: ID СЃРѕР·РґР°С‚РµР»СЏ Р·Р°РґР°С‡Рё
 
-    ВАЖНО: Должен быть указан хотя бы один из фильтров assigned_to или created_by
+    Р’РђР–РќРћ: Р”РѕР»Р¶РµРЅ Р±С‹С‚СЊ СѓРєР°Р·Р°РЅ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ РёР· С„РёР»СЊС‚СЂРѕРІ assigned_to РёР»Рё created_by
     """
-    # Защита от получения всех задач - требуем обязательно assigned_to или created_by
+    # Р—Р°С‰РёС‚Р° РѕС‚ РїРѕР»СѓС‡РµРЅРёСЏ РІСЃРµС… Р·Р°РґР°С‡ - С‚СЂРµР±СѓРµРј РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ assigned_to РёР»Рё created_by
     if not assigned_to and not created_by:
         logger.error(f"API /tasks called without assigned_to or created_by filters!")
         raise HTTPException(
@@ -138,26 +262,26 @@ async def get_tasks(
 
     query = db.query(Task)
 
-    # Базовые фильтры
+    # Р‘Р°Р·РѕРІС‹Рµ С„РёР»СЊС‚СЂС‹
     if status:
         query = query.filter(Task.status == status)
     if category_id:
         query = query.filter(Task.category_id == category_id)
 
-    # Критичная логика фильтрации по пользователю
-    # Если указаны ОБА параметра - показываем задачи где пользователь ЛИБО создатель ЛИБО исполнитель
+    # РљСЂРёС‚РёС‡РЅР°СЏ Р»РѕРіРёРєР° С„РёР»СЊС‚СЂР°С†РёРё РїРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ
+    # Р•СЃР»Рё СѓРєР°Р·Р°РЅС‹ РћР‘Рђ РїР°СЂР°РјРµС‚СЂР° - РїРѕРєР°Р·С‹РІР°РµРј Р·Р°РґР°С‡Рё РіРґРµ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р›РР‘Рћ СЃРѕР·РґР°С‚РµР»СЊ Р›РР‘Рћ РёСЃРїРѕР»РЅРёС‚РµР»СЊ
     if assigned_to and created_by:
-        # OR условие - задачи где пользователь либо создал, либо назначен исполнителем
+        # OR СѓСЃР»РѕРІРёРµ - Р·Р°РґР°С‡Рё РіРґРµ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ Р»РёР±Рѕ СЃРѕР·РґР°Р», Р»РёР±Рѕ РЅР°Р·РЅР°С‡РµРЅ РёСЃРїРѕР»РЅРёС‚РµР»РµРј
         query = query.outerjoin(Task.assignees).filter(
             or_(
                 Task.created_by == created_by,
                 User.id == assigned_to
             )
         ).distinct()
-    # Если только created_by - только созданные пользователем
+    # Р•СЃР»Рё С‚РѕР»СЊРєРѕ created_by - С‚РѕР»СЊРєРѕ СЃРѕР·РґР°РЅРЅС‹Рµ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј
     elif created_by:
         query = query.filter(Task.created_by == created_by)
-    # Если только assigned_to - только назначенные на пользователя
+    # Р•СЃР»Рё С‚РѕР»СЊРєРѕ assigned_to - С‚РѕР»СЊРєРѕ РЅР°Р·РЅР°С‡РµРЅРЅС‹Рµ РЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
     elif assigned_to:
         query = query.join(Task.assignees).filter(User.id == assigned_to)
 
@@ -167,7 +291,7 @@ async def get_tasks(
 
     result = []
     for task in tasks:
-        # Собираем всех исполнителей
+        # РЎРѕР±РёСЂР°РµРј РІСЃРµС… РёСЃРїРѕР»РЅРёС‚РµР»РµР№
         assignees = []
         for assignee in task.assignees:
             assignees.append({
@@ -177,7 +301,7 @@ async def get_tasks(
                 "first_name": assignee.first_name
             })
 
-        # Создатель задачи
+        # РЎРѕР·РґР°С‚РµР»СЊ Р·Р°РґР°С‡Рё
         creator = None
         if task.creator:
             creator = {
@@ -205,12 +329,12 @@ async def get_tasks(
             "due_date": format_datetime_utc(task.due_date),
             "created_at": format_datetime_utc(task.created_at),
             "updated_at": format_datetime_utc(task.updated_at),
-            "assignees": assignees,  # Множественные исполнители
-            "creator": creator,  # Создатель задачи
+            "assignees": assignees,  # РњРЅРѕР¶РµСЃС‚РІРµРЅРЅС‹Рµ РёСЃРїРѕР»РЅРёС‚РµР»Рё
+            "creator": creator,  # РЎРѕР·РґР°С‚РµР»СЊ Р·Р°РґР°С‡Рё
             "category": category
         })
 
-    # Логируем каждую возвращаемую задачу для отладки
+    # Р›РѕРіРёСЂСѓРµРј РєР°Р¶РґСѓСЋ РІРѕР·РІСЂР°С‰Р°РµРјСѓСЋ Р·Р°РґР°С‡Сѓ РґР»СЏ РѕС‚Р»Р°РґРєРё
     for task_data in result:
         logger.info(f"  Task #{task_data['id']}: '{task_data['title']}' - created_by={task_data['creator']['id'] if task_data['creator'] else None}, assignees={[a['id'] for a in task_data['assignees']]}")
 
@@ -219,13 +343,13 @@ async def get_tasks(
 
 @app.get("/api/tasks/{task_id}", response_model=dict)
 async def get_task(task_id: int, db: Session = Depends(get_db)):
-    """Получить задачу по ID"""
+    """РџРѕР»СѓС‡РёС‚СЊ Р·Р°РґР°С‡Сѓ РїРѕ ID"""
     task = db.query(Task).filter(Task.id == task_id).first()
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Собираем всех исполнителей
+    # РЎРѕР±РёСЂР°РµРј РІСЃРµС… РёСЃРїРѕР»РЅРёС‚РµР»РµР№
     assignees = []
     for assignee in task.assignees:
         assignees.append({
@@ -235,7 +359,7 @@ async def get_task(task_id: int, db: Session = Depends(get_db)):
             "first_name": assignee.first_name
         })
 
-    # Создатель задачи
+    # РЎРѕР·РґР°С‚РµР»СЊ Р·Р°РґР°С‡Рё
     creator = None
     if task.creator:
         creator = {
@@ -263,8 +387,8 @@ async def get_task(task_id: int, db: Session = Depends(get_db)):
         "due_date": format_datetime_utc(task.due_date),
         "created_at": format_datetime_utc(task.created_at),
         "updated_at": format_datetime_utc(task.updated_at),
-        "assignees": assignees,  # Множественные исполнители
-        "creator": creator,  # Создатель задачи
+        "assignees": assignees,  # РњРЅРѕР¶РµСЃС‚РІРµРЅРЅС‹Рµ РёСЃРїРѕР»РЅРёС‚РµР»Рё
+        "creator": creator,  # РЎРѕР·РґР°С‚РµР»СЊ Р·Р°РґР°С‡Рё
         "category": category
     }
 
@@ -276,7 +400,7 @@ async def update_task_status(
     user_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """Обновить статус задачи"""
+    """РћР±РЅРѕРІРёС‚СЊ СЃС‚Р°С‚СѓСЃ Р·Р°РґР°С‡Рё"""
     task = db.query(Task).filter(Task.id == task_id).first()
 
     if not task:
@@ -285,14 +409,14 @@ async def update_task_status(
     if status not in ["pending", "in_progress", "completed", "cancelled"]:
         raise HTTPException(status_code=400, detail="Invalid status")
 
-    # Сохраняем старый статус для уведомления
+    # РЎРѕС…СЂР°РЅСЏРµРј СЃС‚Р°СЂС‹Р№ СЃС‚Р°С‚СѓСЃ РґР»СЏ СѓРІРµРґРѕРјР»РµРЅРёСЏ
     old_status = task.status
 
-    # Обновляем статус
+    # РћР±РЅРѕРІР»СЏРµРј СЃС‚Р°С‚СѓСЃ
     task.status = status
     db.commit()
 
-    # Отправляем уведомления если статус действительно изменился и известен user_id
+    # РћС‚РїСЂР°РІР»СЏРµРј СѓРІРµРґРѕРјР»РµРЅРёСЏ РµСЃР»Рё СЃС‚Р°С‚СѓСЃ РґРµР№СЃС‚РІРёС‚РµР»СЊРЅРѕ РёР·РјРµРЅРёР»СЃСЏ Рё РёР·РІРµСЃС‚РµРЅ user_id
     if old_status != status and user_id:
         try:
             from bot.notifications import notify_status_changed
@@ -308,14 +432,14 @@ async def update_task_status(
             )
         except Exception as e:
             logger.error(f"Failed to send status change notifications: {e}")
-            # Не прерываем выполнение, уведомление не критично
+            # РќРµ РїСЂРµСЂС‹РІР°РµРј РІС‹РїРѕР»РЅРµРЅРёРµ, СѓРІРµРґРѕРјР»РµРЅРёРµ РЅРµ РєСЂРёС‚РёС‡РЅРѕ
 
     return {"id": task.id, "status": task.status}
 
 
 @app.delete("/api/tasks/{task_id}")
 async def delete_task(task_id: int, db: Session = Depends(get_db)):
-    """Удалить задачу"""
+    """РЈРґР°Р»РёС‚СЊ Р·Р°РґР°С‡Сѓ"""
     task = db.query(Task).filter(Task.id == task_id).first()
 
     if not task:
@@ -329,7 +453,7 @@ async def delete_task(task_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/categories", response_model=List[dict])
 async def get_categories(db: Session = Depends(get_db)):
-    """Получить список категорий"""
+    """РџРѕР»СѓС‡РёС‚СЊ СЃРїРёСЃРѕРє РєР°С‚РµРіРѕСЂРёР№"""
     categories = db.query(Category).all()
     
     result = []
@@ -349,26 +473,26 @@ async def get_categories(db: Session = Depends(get_db)):
 @app.get("/api/users", response_model=List[dict])
 async def get_users(current_user_id: Optional[int] = None, db: Session = Depends(get_db)):
     """
-    Получить список пользователей
+    РџРѕР»СѓС‡РёС‚СЊ СЃРїРёСЃРѕРє РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№
 
-    SECURITY: Если указан current_user_id, возвращает только пользователей из общих чатов.
-    Это предотвращает утечку данных о пользователях из других чатов.
+    SECURITY: Р•СЃР»Рё СѓРєР°Р·Р°РЅ current_user_id, РІРѕР·РІСЂР°С‰Р°РµС‚ С‚РѕР»СЊРєРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ РёР· РѕР±С‰РёС… С‡Р°С‚РѕРІ.
+    Р­С‚Рѕ РїСЂРµРґРѕС‚РІСЂР°С‰Р°РµС‚ СѓС‚РµС‡РєСѓ РґР°РЅРЅС‹С… Рѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏС… РёР· РґСЂСѓРіРёС… С‡Р°С‚РѕРІ.
     """
 
-    # SECURITY FIX: Фильтруем пользователей по общим чатам
+    # SECURITY FIX: Р¤РёР»СЊС‚СЂСѓРµРј РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№ РїРѕ РѕР±С‰РёРј С‡Р°С‚Р°Рј
     if current_user_id:
-        # Шаг 1: Находим все chat_id где есть сообщения от текущего пользователя
+        # РЁР°Рі 1: РќР°С…РѕРґРёРј РІСЃРµ chat_id РіРґРµ РµСЃС‚СЊ СЃРѕРѕР±С‰РµРЅРёСЏ РѕС‚ С‚РµРєСѓС‰РµРіРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
         current_user_chats = db.query(MessageModel.chat_id).filter(
             MessageModel.user_id == current_user_id
         ).distinct().subquery()
 
-        # Шаг 2: Находим всех пользователей, которые писали в этих чатах
+        # РЁР°Рі 2: РќР°С…РѕРґРёРј РІСЃРµС… РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№, РєРѕС‚РѕСЂС‹Рµ РїРёСЃР°Р»Рё РІ СЌС‚РёС… С‡Р°С‚Р°С…
         users_in_common_chats = db.query(MessageModel.user_id).filter(
             MessageModel.chat_id.in_(current_user_chats),
             MessageModel.user_id.isnot(None)
         ).distinct().subquery()
 
-        # Шаг 3: Получаем User объекты только для этих пользователей
+        # РЁР°Рі 3: РџРѕР»СѓС‡Р°РµРј User РѕР±СЉРµРєС‚С‹ С‚РѕР»СЊРєРѕ РґР»СЏ СЌС‚РёС… РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№
         users = db.query(User).filter(
             User.id.in_(users_in_common_chats),
             User.is_bot == False
@@ -376,14 +500,14 @@ async def get_users(current_user_id: Optional[int] = None, db: Session = Depends
 
         logger.info(f"Filtered users for user_id={current_user_id}: {len(users)} users from common chats")
     else:
-        # Если не указан current_user_id - возвращаем всех (для обратной совместимости)
-        # НО это небезопасно! Рекомендуется всегда передавать current_user_id
+        # Р•СЃР»Рё РЅРµ СѓРєР°Р·Р°РЅ current_user_id - РІРѕР·РІСЂР°С‰Р°РµРј РІСЃРµС… (РґР»СЏ РѕР±СЂР°С‚РЅРѕР№ СЃРѕРІРјРµСЃС‚РёРјРѕСЃС‚Рё)
+        # РќРћ СЌС‚Рѕ РЅРµР±РµР·РѕРїР°СЃРЅРѕ! Р РµРєРѕРјРµРЅРґСѓРµС‚СЃСЏ РІСЃРµРіРґР° РїРµСЂРµРґР°РІР°С‚СЊ current_user_id
         logger.warning("GET /api/users called without current_user_id - returning all users (INSECURE)")
         users = db.query(User).filter(User.is_bot == False).all()
 
     result = []
     for user in users:
-        # Подсчитываем задачи через many-to-many связь
+        # РџРѕРґСЃС‡РёС‚С‹РІР°РµРј Р·Р°РґР°С‡Рё С‡РµСЂРµР· many-to-many СЃРІСЏР·СЊ
         task_count = db.query(func.count(Task.id)).join(
             task_assignees
         ).filter(
@@ -409,15 +533,15 @@ async def get_stats(
     db: Session = Depends(get_db)
 ):
     """
-    Получить статистику задач
+    РџРѕР»СѓС‡РёС‚СЊ СЃС‚Р°С‚РёСЃС‚РёРєСѓ Р·Р°РґР°С‡
 
-    Параметры:
-    - created_by: ID создателя (для вкладки "Назначенные мной")
-    - assigned_to: ID исполнителя (для вкладки "Мои задачи")
+    РџР°СЂР°РјРµС‚СЂС‹:
+    - created_by: ID СЃРѕР·РґР°С‚РµР»СЏ (РґР»СЏ РІРєР»Р°РґРєРё "РќР°Р·РЅР°С‡РµРЅРЅС‹Рµ РјРЅРѕР№")
+    - assigned_to: ID РёСЃРїРѕР»РЅРёС‚РµР»СЏ (РґР»СЏ РІРєР»Р°РґРєРё "РњРѕРё Р·Р°РґР°С‡Рё")
     """
     query = db.query(Task)
 
-    # Фильтруем по создателю или исполнителю
+    # Р¤РёР»СЊС‚СЂСѓРµРј РїРѕ СЃРѕР·РґР°С‚РµР»СЋ РёР»Рё РёСЃРїРѕР»РЅРёС‚РµР»СЋ
     if created_by:
         query = query.filter(Task.created_by == created_by)
     elif assigned_to:
@@ -438,10 +562,10 @@ async def get_stats(
     }
 
 
-# Файлы задач
+# Р¤Р°Р№Р»С‹ Р·Р°РґР°С‡
 @app.get("/api/tasks/{task_id}/files", response_model=List[dict])
 async def get_task_files(task_id: int, db: Session = Depends(get_db)):
-    """Получить список файлов задачи"""
+    """РџРѕР»СѓС‡РёС‚СЊ СЃРїРёСЃРѕРє С„Р°Р№Р»РѕРІ Р·Р°РґР°С‡Рё"""
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -482,7 +606,7 @@ class AssigneeUpdate(BaseModel):
 
 @app.get("/api/tasks/{task_id}/comments", response_model=List[dict])
 async def get_task_comments(task_id: int, db: Session = Depends(get_db)):
-    """Получить список комментариев задачи"""
+    """РџРѕР»СѓС‡РёС‚СЊ СЃРїРёСЃРѕРє РєРѕРјРјРµРЅС‚Р°СЂРёРµРІ Р·Р°РґР°С‡Рё"""
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -508,7 +632,7 @@ async def get_task_comments(task_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/tasks/{task_id}/comments", response_model=dict)
 async def create_task_comment(task_id: int, comment_data: CommentCreate, db: Session = Depends(get_db)):
-    """Создать комментарий к задаче"""
+    """РЎРѕР·РґР°С‚СЊ РєРѕРјРјРµРЅС‚Р°СЂРёР№ Рє Р·Р°РґР°С‡Рµ"""
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -527,16 +651,16 @@ async def create_task_comment(task_id: int, comment_data: CommentCreate, db: Ses
     db.commit()
     db.refresh(comment)
 
-    # Отправляем уведомления о новом комментарии
+    # РћС‚РїСЂР°РІР»СЏРµРј СѓРІРµРґРѕРјР»РµРЅРёСЏ Рѕ РЅРѕРІРѕРј РєРѕРјРјРµРЅС‚Р°СЂРёРё
     try:
         from bot.notifications import notify_comment_added
         import asyncio
 
-        # Запускаем отправку уведомлений в фоне
+        # Р—Р°РїСѓСЃРєР°РµРј РѕС‚РїСЂР°РІРєСѓ СѓРІРµРґРѕРјР»РµРЅРёР№ РІ С„РѕРЅРµ
         asyncio.create_task(notify_comment_added(task_id, comment_data.user_id, comment_data.text, db))
     except Exception as e:
         logger.error(f"Failed to send comment notifications: {e}")
-        # Не падаем, если уведомления не отправились
+        # РќРµ РїР°РґР°РµРј, РµСЃР»Рё СѓРІРµРґРѕРјР»РµРЅРёСЏ РЅРµ РѕС‚РїСЂР°РІРёР»РёСЃСЊ
 
     return {
         "id": comment.id,
@@ -552,7 +676,7 @@ async def create_task_comment(task_id: int, comment_data: CommentCreate, db: Ses
 
 @app.post("/api/tasks/{task_id}/assignees")
 async def add_task_assignee(task_id: int, assignee_data: AssigneeUpdate, db: Session = Depends(get_db)):
-    """Добавить исполнителя к задаче"""
+    """Р”РѕР±Р°РІРёС‚СЊ РёСЃРїРѕР»РЅРёС‚РµР»СЏ Рє Р·Р°РґР°С‡Рµ"""
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -561,15 +685,15 @@ async def add_task_assignee(task_id: int, assignee_data: AssigneeUpdate, db: Ses
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Проверяем, не назначен ли уже этот пользователь
+    # РџСЂРѕРІРµСЂСЏРµРј, РЅРµ РЅР°Р·РЅР°С‡РµРЅ Р»Рё СѓР¶Рµ СЌС‚РѕС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ
     if user in task.assignees:
         raise HTTPException(status_code=400, detail="User already assigned to this task")
 
-    # Добавляем исполнителя
+    # Р”РѕР±Р°РІР»СЏРµРј РёСЃРїРѕР»РЅРёС‚РµР»СЏ
     task.assignees.append(user)
     db.commit()
 
-    # Отправляем уведомление новому исполнителю
+    # РћС‚РїСЂР°РІР»СЏРµРј СѓРІРµРґРѕРјР»РµРЅРёРµ РЅРѕРІРѕРјСѓ РёСЃРїРѕР»РЅРёС‚РµР»СЋ
     try:
         from bot.handlers import notify_assigned_user
         from bot.main import bot
@@ -589,7 +713,7 @@ async def add_task_assignee(task_id: int, assignee_data: AssigneeUpdate, db: Ses
 
 @app.delete("/api/tasks/{task_id}/assignees/{user_id}")
 async def remove_task_assignee(task_id: int, user_id: int, db: Session = Depends(get_db)):
-    """Удалить исполнителя из задачи"""
+    """РЈРґР°Р»РёС‚СЊ РёСЃРїРѕР»РЅРёС‚РµР»СЏ РёР· Р·Р°РґР°С‡Рё"""
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -598,11 +722,11 @@ async def remove_task_assignee(task_id: int, user_id: int, db: Session = Depends
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Проверяем, назначен ли этот пользователь
+    # РџСЂРѕРІРµСЂСЏРµРј, РЅР°Р·РЅР°С‡РµРЅ Р»Рё СЌС‚РѕС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ
     if user not in task.assignees:
         raise HTTPException(status_code=400, detail="User is not assigned to this task")
 
-    # Удаляем исполнителя
+    # РЈРґР°Р»СЏРµРј РёСЃРїРѕР»РЅРёС‚РµР»СЏ
     task.assignees.remove(user)
     db.commit()
 
@@ -610,11 +734,126 @@ async def remove_task_assignee(task_id: int, user_id: int, db: Session = Depends
 
 
 # ============================================================
+# Google OAuth (Web-first email connect)
+# ============================================================
+
+@app.get("/api/oauth/google/start")
+async def google_oauth_start(user_id: int, db: Session = Depends(get_db)):
+    if not GOOGLE_OAUTH_CLIENT_ID or not GOOGLE_OAUTH_CLIENT_SECRET or not GOOGLE_OAUTH_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Google OAuth is not configured")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    state = _build_oauth_state(user_id)
+    params = urlparse.urlencode({
+        "client_id": GOOGLE_OAUTH_CLIENT_ID,
+        "redirect_uri": GOOGLE_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email https://mail.google.com/",
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state,
+    })
+
+    return RedirectResponse(url=f"{GOOGLE_OAUTH_AUTH_URL}?{params}")
+
+
+@app.get("/api/oauth/google/callback", response_class=HTMLResponse)
+async def google_oauth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    if error:
+        return _oauth_result_html(False, f"Google OAuth error: {error}")
+
+    if not code or not state:
+        return _oauth_result_html(False, "Missing OAuth parameters")
+
+    try:
+        user_id = _verify_oauth_state(state)
+    except Exception as e:
+        logger.error(f"OAuth state validation failed: {e}")
+        return _oauth_result_html(False, "OAuth state is invalid or expired")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return _oauth_result_html(False, "User not found")
+
+    try:
+        token_payload = _exchange_google_code(code)
+    except Exception as e:
+        logger.error(f"Google token exchange failed: {e}")
+        return _oauth_result_html(False, "Failed to exchange OAuth code")
+
+    access_token = token_payload.get("access_token")
+    refresh_token = token_payload.get("refresh_token")
+    if not access_token:
+        return _oauth_result_html(False, "Google did not return access_token")
+
+    try:
+        email_address = _fetch_google_email(access_token)
+    except Exception as e:
+        logger.error(f"Failed to fetch Google profile email: {e}")
+        return _oauth_result_html(False, "Failed to read Google account email")
+
+    try:
+        existing = db.query(EmailAccount).filter(EmailAccount.email_address == email_address).first()
+
+        if existing and existing.user_id != user.id:
+            return _oauth_result_html(False, "This Google email is already linked to another user")
+
+        if existing:
+            if refresh_token:
+                existing.imap_password = f"{GOOGLE_REFRESH_PREFIX}{refresh_token}"
+            existing.imap_server = "imap.gmail.com"
+            existing.imap_port = 993
+            existing.imap_username = email_address
+            existing.use_ssl = True
+            existing.folder = "INBOX"
+            existing.is_active = True
+            existing.updated_at = datetime.utcnow()
+            db.commit()
+            return _oauth_result_html(True, f"Почта {email_address} подключена")
+
+        if not refresh_token:
+            return _oauth_result_html(False, "Google did not return refresh_token. Try connect again.")
+
+        accounts_count = db.query(EmailAccount).filter(EmailAccount.user_id == user.id).count()
+        if accounts_count >= 5:
+            return _oauth_result_html(False, "Maximum 5 email accounts per user")
+
+        account = EmailAccount(
+            user_id=user.id,
+            email_address=email_address,
+            imap_server="imap.gmail.com",
+            imap_port=993,
+            imap_username=email_address,
+            imap_password=f"{GOOGLE_REFRESH_PREFIX}{refresh_token}",
+            use_ssl=True,
+            folder="INBOX",
+            is_active=True,
+            auto_confirm=False,
+            last_uid=0,
+        )
+        db.add(account)
+        db.commit()
+
+        logger.info(f"Google OAuth account connected: {email_address} for user_id={user.id}")
+        return _oauth_result_html(True, f"Почта {email_address} успешно подключена")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to save Google OAuth account: {e}", exc_info=True)
+        return _oauth_result_html(False, "Failed to save account")
+# ============================================================
 # Email Account Management API
 # ============================================================
 
 class EmailAccountCreate(BaseModel):
-    """Модель для создания email аккаунта"""
+    """РњРѕРґРµР»СЊ РґР»СЏ СЃРѕР·РґР°РЅРёСЏ email Р°РєРєР°СѓРЅС‚Р°"""
     email_address: str
     imap_server: str
     imap_port: int = 993
@@ -628,7 +867,7 @@ class EmailAccountCreate(BaseModel):
 
 
 class EmailAccountUpdate(BaseModel):
-    """Модель для обновления email аккаунта"""
+    """РњРѕРґРµР»СЊ РґР»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏ email Р°РєРєР°СѓРЅС‚Р°"""
     is_active: Optional[bool] = None
     auto_confirm: Optional[bool] = None
     folder: Optional[str] = None
@@ -638,7 +877,7 @@ class EmailAccountUpdate(BaseModel):
 
 
 class EmailAccountTest(BaseModel):
-    """Модель для тестирования подключения"""
+    """РњРѕРґРµР»СЊ РґР»СЏ С‚РµСЃС‚РёСЂРѕРІР°РЅРёСЏ РїРѕРґРєР»СЋС‡РµРЅРёСЏ"""
     email_address: str
     imap_server: str
     imap_port: int = 993
@@ -650,7 +889,7 @@ class EmailAccountTest(BaseModel):
 @app.get("/api/email-accounts", response_model=List[dict])
 async def get_email_accounts(user_id: Optional[int] = None, db: Session = Depends(get_db)):
     """
-    Получить все email аккаунты пользователя
+    РџРѕР»СѓС‡РёС‚СЊ РІСЃРµ email Р°РєРєР°СѓРЅС‚С‹ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
     """
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id parameter is required")
@@ -659,7 +898,7 @@ async def get_email_accounts(user_id: Optional[int] = None, db: Session = Depend
 
     result = []
     for account in accounts:
-        # Подсчитываем статистику
+        # РџРѕРґСЃС‡РёС‚С‹РІР°РµРј СЃС‚Р°С‚РёСЃС‚РёРєСѓ
         total_messages = db.query(EmailMessage).filter(
             EmailMessage.email_account_id == account.id
         ).count()
@@ -703,14 +942,14 @@ async def get_email_accounts(user_id: Optional[int] = None, db: Session = Depend
 @app.post("/api/email-accounts", response_model=dict)
 async def create_email_account(account_data: EmailAccountCreate, user_id: int, db: Session = Depends(get_db)):
     """
-    Создать новый email аккаунт
+    РЎРѕР·РґР°С‚СЊ РЅРѕРІС‹Р№ email Р°РєРєР°СѓРЅС‚
     """
-    # Проверяем существование пользователя
+    # РџСЂРѕРІРµСЂСЏРµРј СЃСѓС‰РµСЃС‚РІРѕРІР°РЅРёРµ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Проверяем не существует ли уже такой email
+    # РџСЂРѕРІРµСЂСЏРµРј РЅРµ СЃСѓС‰РµСЃС‚РІСѓРµС‚ Р»Рё СѓР¶Рµ С‚Р°РєРѕР№ email
     existing = db.query(EmailAccount).filter(
         EmailAccount.email_address == account_data.email_address
     ).first()
@@ -718,12 +957,13 @@ async def create_email_account(account_data: EmailAccountCreate, user_id: int, d
     if existing:
         raise HTTPException(status_code=400, detail="Email account already exists")
 
-    # Проверяем лимит (5 аккаунтов на пользователя)
     accounts_count = db.query(EmailAccount).filter(EmailAccount.user_id == user_id).count()
     if accounts_count >= 5:
         raise HTTPException(status_code=400, detail="Maximum 5 email accounts per user")
 
-    # Тестируем подключение перед сохранением
+    # РџСЂРѕРІРµСЂСЏРµРј Р»РёРјРёС‚ (5 Р°РєРєР°СѓРЅС‚РѕРІ РЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ)
+
+    # РўРµСЃС‚РёСЂСѓРµРј РїРѕРґРєР»СЋС‡РµРЅРёРµ РїРµСЂРµРґ СЃРѕС…СЂР°РЅРµРЅРёРµРј
     from bot.email_handler import test_imap_connection
 
     success, error_message = test_imap_connection(
@@ -737,7 +977,7 @@ async def create_email_account(account_data: EmailAccountCreate, user_id: int, d
     if not success:
         raise HTTPException(status_code=400, detail=f"IMAP connection failed: {error_message}")
 
-    # Создаем аккаунт
+    # РЎРѕР·РґР°РµРј Р°РєРєР°СѓРЅС‚
     new_account = EmailAccount(
         user_id=user_id,
         email_address=account_data.email_address,
@@ -772,13 +1012,13 @@ async def update_email_account(
     db: Session = Depends(get_db)
 ):
     """
-    Обновить настройки email аккаунта
+    РћР±РЅРѕРІРёС‚СЊ РЅР°СЃС‚СЂРѕР№РєРё email Р°РєРєР°СѓРЅС‚Р°
     """
     account = db.query(EmailAccount).filter(EmailAccount.id == account_id).first()
     if not account:
         raise HTTPException(status_code=404, detail="Email account not found")
 
-    # Обновляем поля
+    # РћР±РЅРѕРІР»СЏРµРј РїРѕР»СЏ
     if account_data.is_active is not None:
         account.is_active = account_data.is_active
 
@@ -795,7 +1035,7 @@ async def update_email_account(
         account.subject_keywords = account_data.subject_keywords
 
     if account_data.imap_password is not None:
-        # Если меняется пароль - тестируем подключение
+        # Р•СЃР»Рё РјРµРЅСЏРµС‚СЃСЏ РїР°СЂРѕР»СЊ - С‚РµСЃС‚РёСЂСѓРµРј РїРѕРґРєР»СЋС‡РµРЅРёРµ
         from bot.email_handler import test_imap_connection
 
         success, error_message = test_imap_connection(
@@ -819,7 +1059,7 @@ async def update_email_account(
 @app.delete("/api/email-accounts/{account_id}")
 async def delete_email_account(account_id: int, db: Session = Depends(get_db)):
     """
-    Удалить email аккаунт
+    РЈРґР°Р»РёС‚СЊ email Р°РєРєР°СѓРЅС‚
     """
     account = db.query(EmailAccount).filter(EmailAccount.id == account_id).first()
     if not account:
@@ -834,7 +1074,7 @@ async def delete_email_account(account_id: int, db: Session = Depends(get_db)):
 @app.post("/api/email-accounts/test", response_model=dict)
 async def test_email_connection(test_data: EmailAccountTest):
     """
-    Тестировать IMAP подключение без сохранения
+    РўРµСЃС‚РёСЂРѕРІР°С‚СЊ IMAP РїРѕРґРєР»СЋС‡РµРЅРёРµ Р±РµР· СЃРѕС…СЂР°РЅРµРЅРёСЏ
     """
     from bot.email_handler import test_imap_connection
 
@@ -866,7 +1106,7 @@ async def get_email_messages(
     db: Session = Depends(get_db)
 ):
     """
-    Получить историю обработанных email сообщений
+    РџРѕР»СѓС‡РёС‚СЊ РёСЃС‚РѕСЂРёСЋ РѕР±СЂР°Р±РѕС‚Р°РЅРЅС‹С… email СЃРѕРѕР±С‰РµРЅРёР№
     """
     account = db.query(EmailAccount).filter(EmailAccount.id == account_id).first()
     if not account:
@@ -894,3 +1134,13 @@ async def get_email_messages(
         })
 
     return result
+
+
+
+
+
+
+
+
+
+
