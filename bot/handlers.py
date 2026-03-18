@@ -443,8 +443,6 @@ async def cmd_start(message: Message):
             persistent=True
         )
 
-        welcome_message += f"\n\n<code>build:{WEBAPP_BUILD_TAG}</code>"
-
         await message.answer(
             welcome_message,
             reply_markup=inline_keyboard,
