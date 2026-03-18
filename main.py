@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -24,19 +24,19 @@ logger = logging.getLogger(__name__)
 
 
 async def set_bot_commands(bot: Bot):
-    """Устанавливает меню команд бота"""
+    """РЈСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ РјРµРЅСЋ РєРѕРјР°РЅРґ Р±РѕС‚Р°"""
     commands = [
-        BotCommand(command="start", description="🚀 Начать работу с ботом"),
-        BotCommand(command="panel", description="📱 Открыть панель задач"),
-        BotCommand(command="support", description="💬 Чат поддержки"),
-        BotCommand(command="help", description="❓ Справка и инструкции")
+        BotCommand(command="start", description="рџљЂ РќР°С‡Р°С‚СЊ СЂР°Р±РѕС‚Сѓ СЃ Р±РѕС‚РѕРј"),
+        BotCommand(command="panel", description="рџ“± РћС‚РєСЂС‹С‚СЊ РїР°РЅРµР»СЊ Р·Р°РґР°С‡"),
+        BotCommand(command="support", description="рџ’¬ Р§Р°С‚ РїРѕРґРґРµСЂР¶РєРё"),
+        BotCommand(command="help", description="вќ“ РЎРїСЂР°РІРєР° Рё РёРЅСЃС‚СЂСѓРєС†РёРё")
     ]
     await bot.set_my_commands(commands, BotCommandScopeDefault())
     logger.info("Bot commands menu set successfully")
 
 
 async def start_bot_polling():
-    """Запуск бота в режиме polling (для разработки)"""
+    """Р—Р°РїСѓСЃРє Р±РѕС‚Р° РІ СЂРµР¶РёРјРµ polling (РґР»СЏ СЂР°Р·СЂР°Р±РѕС‚РєРё)"""
 
     init_db()
     logger.info("Database initialized")
@@ -54,16 +54,22 @@ async def start_bot_polling():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
-    # Регистрируем роутеры (email_router и support_router ПЕРВЫМИ для приоритета FSM)
+    # Р РµРіРёСЃС‚СЂРёСЂСѓРµРј СЂРѕСѓС‚РµСЂС‹ (email_router Рё support_router РџР•Р Р’Р«РњР РґР»СЏ РїСЂРёРѕСЂРёС‚РµС‚Р° FSM)
     dp.include_router(email_router)
     dp.include_router(support_router)
     dp.include_router(router)
 
-    # Устанавливаем меню команд
+    # РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј РјРµРЅСЋ РєРѕРјР°РЅРґ
     await set_bot_commands(bot)
 
     logger.info("Bot started in polling mode")
 
+    # Prevent polling/webhook conflicts after redeploys.
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook deleted before polling start")
+    except Exception as e:
+        logger.warning(f"Failed to delete webhook before polling: {e}")
 
     start_reminder_scheduler(bot)
     logger.info("Reminder scheduler started")
@@ -95,12 +101,12 @@ async def start_bot_webhook():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
-    # Регистрируем роутеры (email_router и support_router ПЕРВЫМИ для приоритета FSM)
+    # Р РµРіРёСЃС‚СЂРёСЂСѓРµРј СЂРѕСѓС‚РµСЂС‹ (email_router Рё support_router РџР•Р Р’Р«РњР РґР»СЏ РїСЂРёРѕСЂРёС‚РµС‚Р° FSM)
     dp.include_router(email_router)
     dp.include_router(support_router)
     dp.include_router(router)
 
-    # Устанавливаем меню команд
+    # РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј РјРµРЅСЋ РєРѕРјР°РЅРґ
     await set_bot_commands(bot)
 
     try:
@@ -125,7 +131,7 @@ async def start_bot_webhook():
 
 
 def start_webapp():
-    """Запуск веб-приложения"""
+    """Р—Р°РїСѓСЃРє РІРµР±-РїСЂРёР»РѕР¶РµРЅРёСЏ"""
     import os
     
     port = int(os.environ.get("PORT", PORT))
@@ -158,3 +164,4 @@ if __name__ == "__main__":
         logger.info("Bot stopped by user")
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+
