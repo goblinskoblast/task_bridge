@@ -194,7 +194,14 @@ async def read_root():
         raise HTTPException(status_code=404, detail=f"index.html not found at {index_html_path}")
 
     logger.info(f"Successfully serving index.html from {index_html_path}")
-    return FileResponse(str(index_html_path))
+    return FileResponse(
+        str(index_html_path),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/webapp/index.html", response_class=HTMLResponse)
@@ -204,7 +211,14 @@ async def read_webapp():
         logger.error(f"index.html NOT FOUND at {index_html_path}")
         raise HTTPException(status_code=404, detail=f"index.html not found at {index_html_path}")
     logger.info(f"Serving index.html from {index_html_path}")
-    return FileResponse(str(index_html_path))
+    return FileResponse(
+        str(index_html_path),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("//webapp/index.html", response_class=HTMLResponse)
@@ -215,7 +229,14 @@ async def read_webapp_double_slash():
         logger.error(f"index.html NOT FOUND at {index_html_path}")
         raise HTTPException(status_code=404, detail=f"index.html not found at {index_html_path}")
     logger.info(f"Serving index.html from {index_html_path}")
-    return FileResponse(str(index_html_path))
+    return FileResponse(
+        str(index_html_path),
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/health")

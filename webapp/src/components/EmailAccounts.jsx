@@ -260,6 +260,11 @@ export default function EmailAccounts({ currentUser }) {
         </button>
       </div>
 
+      <div className="info-message">
+        <AlertCircle size={18} />
+        Подключите Gmail в 1 клик через OAuth (без IMAP-пароля приложения).
+      </div>
+
       {accounts.length >= 5 && (
         <div className="info-message">
           <AlertCircle size={18} />
