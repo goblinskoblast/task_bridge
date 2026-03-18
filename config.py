@@ -40,6 +40,12 @@ OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
 
 OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "500"))
 
+# Google OAuth (Gmail one-click connect)
+GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+GOOGLE_OAUTH_REDIRECT_URI = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "").strip()
+OAUTH_STATE_SECRET = os.getenv("OAUTH_STATE_SECRET", BOT_TOKEN)
+
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///taskbridge.db")
 

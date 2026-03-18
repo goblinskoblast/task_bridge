@@ -75,6 +75,14 @@ export default function EmailAccounts({ currentUser }) {
     }
   }
 
+  const connectGoogle = () => {
+    if (!currentUser?.id) {
+      alert('Пользователь не найден')
+      return
+    }
+    window.location.href = getApiUrl(`/oauth/google/start?user_id=${currentUser.id}`)
+  }
+
   const testConnection = async () => {
     setTesting(true)
     try {
@@ -235,6 +243,13 @@ export default function EmailAccounts({ currentUser }) {
           <Mail size={28} />
           Email Аккаунты
         </h1>
+        <button
+          className="btn-primary"
+          onClick={connectGoogle}
+          disabled={accounts.length >= 5}
+        >
+          📩 Подключить Gmail
+        </button>
         <button
           className="btn-primary"
           onClick={() => setShowAddForm(true)}

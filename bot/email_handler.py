@@ -11,9 +11,13 @@ from imapclient import IMAPClient
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import re
+import json
+from urllib import parse as urlparse
+from urllib import request as urlrequest
 
 from db.database import get_db_session
 from db.models import EmailAccount, EmailMessage
+from config import GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +32,43 @@ IMAP_SERVERS = {
     "mail.ru": {"server": "imap.mail.ru", "port": 993},
     "yahoo.com": {"server": "imap.mail.yahoo.com", "port": 993},
 }
+
+GOOGLE_REFRESH_PREFIX = "oauth_refresh:"
+
+
+def _get_google_access_token(refresh_token: str) -> Optional[str]:
+    """Exchange Google refresh token to short-lived access token."""
+    if not GOOGLE_OAUTH_CLIENT_ID or not GOOGLE_OAUTH_CLIENT_SECRET:
+        logger.error("Google OAuth credentials are not configured")
+        return None
+
+    try:
+        payload = urlparse.urlencode({
+            "client_id": GOOGLE_OAUTH_CLIENT_ID,
+            "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }).encode("utf-8")
+
+        req = urlrequest.Request(
+            "https://oauth2.googleapis.com/token",
+            data=payload,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+
+        with urlrequest.urlopen(req, timeout=20) as response:
+            token_payload = json.loads(response.read().decode("utf-8"))
+
+        access_token = token_payload.get("access_token")
+        if not access_token:
+            logger.error(f"Google token response missing access_token: {token_payload}")
+            return None
+
+        return access_token
+    except Exception as e:
+        logger.error(f"Failed to refresh Google access token: {e}")
+        return None
 
 
 def get_imap_server(email_address: str) -> Dict[str, Any]:
@@ -101,7 +142,16 @@ def connect_imap(email_account: EmailAccount) -> Optional[IMAPClient]:
             ssl=email_account.use_ssl
         )
 
-        client.login(email_account.imap_username, email_account.imap_password)
+        raw_secret = email_account.imap_password or ""
+        if raw_secret.startswith(GOOGLE_REFRESH_PREFIX):
+            refresh_token = raw_secret[len(GOOGLE_REFRESH_PREFIX):]
+            access_token = _get_google_access_token(refresh_token)
+            if not access_token:
+                logger.error(f"Failed to get Google access token for {email_account.email_address}")
+                return None
+            client.oauth2_login(email_account.imap_username, access_token)
+        else:
+            client.login(email_account.imap_username, raw_secret)
         client.select_folder(email_account.folder)
 
         logger.info(f"✅ Connected to IMAP: {email_account.email_address}")

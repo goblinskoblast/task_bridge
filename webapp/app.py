@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, or_
@@ -11,11 +11,119 @@ from pydantic import BaseModel
 import os
 from pathlib import Path
 from datetime import datetime
+import base64
+import hashlib
+import hmac
+import json
+import secrets
+import time
+from urllib import parse as urlparse
+from urllib import request as urlrequest
 
 app = FastAPI(title="TaskBridge API")
 
 import logging
 logger = logging.getLogger(__name__)
+
+GOOGLE_OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
+GOOGLE_REFRESH_PREFIX = "oauth_refresh:"
+OAUTH_STATE_TTL_SECONDS = 900
+
+GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+GOOGLE_OAUTH_REDIRECT_URI = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "").strip()
+OAUTH_STATE_SECRET = os.getenv("OAUTH_STATE_SECRET", os.getenv("BOT_TOKEN", ""))
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+
+def _b64url_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode(value + padding)
+
+
+def _build_oauth_state(user_id: int) -> str:
+    payload = {"uid": user_id, "ts": int(time.time()), "nonce": secrets.token_urlsafe(8)}
+    payload_part = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    sign = hmac.new(OAUTH_STATE_SECRET.encode("utf-8"), payload_part.encode("utf-8"), hashlib.sha256).digest()
+    return f"{payload_part}.{_b64url_encode(sign)}"
+
+
+def _verify_oauth_state(state: str) -> int:
+    if not OAUTH_STATE_SECRET:
+        raise ValueError("OAUTH_STATE_SECRET is not configured")
+
+    payload_part, sign_part = state.split(".", 1)
+    expected_sign = hmac.new(OAUTH_STATE_SECRET.encode("utf-8"), payload_part.encode("utf-8"), hashlib.sha256).digest()
+    provided_sign = _b64url_decode(sign_part)
+    if not hmac.compare_digest(expected_sign, provided_sign):
+        raise ValueError("Invalid OAuth state signature")
+
+    payload = json.loads(_b64url_decode(payload_part).decode("utf-8"))
+    created_ts = int(payload.get("ts", 0))
+    if int(time.time()) - created_ts > OAUTH_STATE_TTL_SECONDS:
+        raise ValueError("OAuth state expired")
+
+    uid = int(payload.get("uid", 0))
+    if uid <= 0:
+        raise ValueError("Invalid OAuth state user")
+    return uid
+
+
+def _exchange_google_code(code: str) -> dict:
+    if not GOOGLE_OAUTH_CLIENT_ID or not GOOGLE_OAUTH_CLIENT_SECRET or not GOOGLE_OAUTH_REDIRECT_URI:
+        raise ValueError("Google OAuth is not configured")
+
+    payload = urlparse.urlencode({
+        "code": code,
+        "client_id": GOOGLE_OAUTH_CLIENT_ID,
+        "client_secret": GOOGLE_OAUTH_CLIENT_SECRET,
+        "redirect_uri": GOOGLE_OAUTH_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }).encode("utf-8")
+
+    req = urlrequest.Request(
+        GOOGLE_OAUTH_TOKEN_URL,
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urlrequest.urlopen(req, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _fetch_google_email(access_token: str) -> str:
+    req = urlrequest.Request(
+        GOOGLE_USERINFO_URL,
+        headers={"Authorization": f"Bearer {access_token}"},
+        method="GET",
+    )
+    with urlrequest.urlopen(req, timeout=20) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    email = (payload.get("email") or "").strip().lower()
+    if not email:
+        raise ValueError("Google userinfo does not contain email")
+    return email
+
+
+def _oauth_result_html(ok: bool, message: str) -> HTMLResponse:
+    status = "Success" if ok else "Error"
+    color = "#1a7f37" if ok else "#b42318"
+    body = f"""
+    <html><head><meta charset=\"utf-8\" /><title>{status}</title></head>
+    <body style=\"font-family:Arial,sans-serif;padding:24px;\">
+      <h2 style=\"color:{color};\">{status}</h2>
+      <p>{message}</p>
+      <p><a href=\"/webapp/index.html\">Back to dashboard</a></p>
+      <script>setTimeout(function() {{ window.location.href='/webapp/index.html'; }}, 1800);</script>
+    </body></html>
+    """
+    return HTMLResponse(content=body)
 
 
 def format_datetime_utc(dt):
@@ -607,6 +715,114 @@ async def remove_task_assignee(task_id: int, user_id: int, db: Session = Depends
     db.commit()
 
     return {"message": "Assignee removed successfully"}
+
+
+@app.get("/api/oauth/google/start")
+async def google_oauth_start(user_id: int, db: Session = Depends(get_db)):
+    if not GOOGLE_OAUTH_CLIENT_ID or not GOOGLE_OAUTH_CLIENT_SECRET or not GOOGLE_OAUTH_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Google OAuth is not configured")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    state = _build_oauth_state(user_id)
+    params = urlparse.urlencode({
+        "client_id": GOOGLE_OAUTH_CLIENT_ID,
+        "redirect_uri": GOOGLE_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email https://mail.google.com/",
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state,
+    })
+    return RedirectResponse(url=f"{GOOGLE_OAUTH_AUTH_URL}?{params}")
+
+
+@app.get("/api/oauth/google/callback", response_class=HTMLResponse)
+async def google_oauth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    if error:
+        return _oauth_result_html(False, f"Google OAuth error: {error}")
+    if not code or not state:
+        return _oauth_result_html(False, "Missing OAuth parameters")
+
+    try:
+        user_id = _verify_oauth_state(state)
+    except Exception as e:
+        logger.error(f"OAuth state validation failed: {e}")
+        return _oauth_result_html(False, "OAuth state is invalid or expired")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return _oauth_result_html(False, "User not found")
+
+    try:
+        token_payload = _exchange_google_code(code)
+    except Exception as e:
+        logger.error(f"Google token exchange failed: {e}")
+        return _oauth_result_html(False, "Failed to exchange OAuth code")
+
+    access_token = token_payload.get("access_token")
+    refresh_token = token_payload.get("refresh_token")
+    if not access_token:
+        return _oauth_result_html(False, "Google did not return access_token")
+
+    try:
+        email_address = _fetch_google_email(access_token)
+    except Exception as e:
+        logger.error(f"Failed to fetch Google profile email: {e}")
+        return _oauth_result_html(False, "Failed to read Google account email")
+
+    try:
+        existing = db.query(EmailAccount).filter(EmailAccount.email_address == email_address).first()
+        if existing and existing.user_id != user.id:
+            return _oauth_result_html(False, "This Google email is already linked to another user")
+
+        if existing:
+            if refresh_token:
+                existing.imap_password = f"{GOOGLE_REFRESH_PREFIX}{refresh_token}"
+            existing.imap_server = "imap.gmail.com"
+            existing.imap_port = 993
+            existing.imap_username = email_address
+            existing.use_ssl = True
+            existing.folder = "INBOX"
+            existing.is_active = True
+            existing.updated_at = datetime.utcnow()
+            db.commit()
+            return _oauth_result_html(True, f"Email {email_address} connected")
+
+        if not refresh_token:
+            return _oauth_result_html(False, "Google did not return refresh_token. Try connect again.")
+
+        accounts_count = db.query(EmailAccount).filter(EmailAccount.user_id == user.id).count()
+        if accounts_count >= 5:
+            return _oauth_result_html(False, "Maximum 5 email accounts per user")
+
+        account = EmailAccount(
+            user_id=user.id,
+            email_address=email_address,
+            imap_server="imap.gmail.com",
+            imap_port=993,
+            imap_username=email_address,
+            imap_password=f"{GOOGLE_REFRESH_PREFIX}{refresh_token}",
+            use_ssl=True,
+            folder="INBOX",
+            is_active=True,
+            auto_confirm=False,
+            last_uid=0,
+        )
+        db.add(account)
+        db.commit()
+        return _oauth_result_html(True, f"Email {email_address} connected")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to save Google OAuth account: {e}", exc_info=True)
+        return _oauth_result_html(False, "Failed to save account")
 
 
 # ============================================================
