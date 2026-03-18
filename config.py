@@ -33,11 +33,6 @@ PORT = int(os.getenv("PORT", "8000"))
 WEB_APP_DOMAIN = os.getenv("WEB_APP_DOMAIN", f"http://{HOST}:{PORT}").rstrip("/")
 
 MINI_APP_URL = os.getenv("MINI_APP_URL", f"{WEB_APP_DOMAIN}/webapp/index.html")
-WEBAPP_BUILD_TAG = (
-    os.getenv("RAILWAY_GIT_COMMIT_SHA")
-    or os.getenv("RAILWAY_DEPLOYMENT_ID")
-    or "dev"
-).strip()[:12]
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
