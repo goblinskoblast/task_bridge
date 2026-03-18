@@ -1,7 +1,7 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Email IMAP Integration Handler
-Р¤СѓРЅРєС†РёРё РґР»СЏ СЂР°Р±РѕС‚С‹ СЃ IMAP СЃРµСЂРІРµСЂР°РјРё Рё РїРѕР»СѓС‡РµРЅРёСЏ РїРёСЃРµРј
+Функции для работы с IMAP серверами и получения писем
 """
 
 import logging
@@ -11,7 +11,6 @@ from imapclient import IMAPClient
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import re
-import os
 import json
 from urllib import parse as urlparse
 from urllib import request as urlrequest
@@ -23,7 +22,7 @@ from config import GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET
 logger = logging.getLogger(__name__)
 
 
-# РџРѕРїСѓР»СЏСЂРЅС‹Рµ IMAP СЃРµСЂРІРµСЂС‹
+# Популярные IMAP серверы
 IMAP_SERVERS = {
     "gmail.com": {"server": "imap.gmail.com", "port": 993},
     "outlook.com": {"server": "outlook.office365.com", "port": 993},
@@ -38,7 +37,7 @@ GOOGLE_REFRESH_PREFIX = "oauth_refresh:"
 
 
 def _get_google_access_token(refresh_token: str) -> Optional[str]:
-    """Exchange Google refresh token for short-lived access token."""
+    """Exchange Google refresh token to a short-lived access token."""
     if not GOOGLE_OAUTH_CLIENT_ID or not GOOGLE_OAUTH_CLIENT_SECRET:
         logger.error("Google OAuth credentials are not configured")
         return None
@@ -74,20 +73,20 @@ def _get_google_access_token(refresh_token: str) -> Optional[str]:
 
 def get_imap_server(email_address: str) -> Dict[str, Any]:
     """
-    РђРІС‚РѕРѕРїСЂРµРґРµР»РµРЅРёРµ IMAP СЃРµСЂРІРµСЂР° РїРѕ email Р°РґСЂРµСЃСѓ
+    Автоопределение IMAP сервера по email адресу
 
     Args:
-        email_address: Email Р°РґСЂРµСЃ (example@gmail.com)
+        email_address: Email адрес (example@gmail.com)
 
     Returns:
-        Dict СЃ РєР»СЋС‡Р°РјРё server Рё port
+        Dict с ключами server и port
     """
     domain = email_address.split("@")[-1].lower()
 
     if domain in IMAP_SERVERS:
         return IMAP_SERVERS[domain]
 
-    # Р”Р»СЏ РЅРµРёР·РІРµСЃС‚РЅС‹С… РґРѕРјРµРЅРѕРІ - СЃС‚Р°РЅРґР°СЂС‚РЅС‹Р№ IMAP
+    # Для неизвестных доменов - стандартный IMAP
     return {"server": f"imap.{domain}", "port": 993}
 
 
@@ -99,14 +98,14 @@ def test_imap_connection(
     use_ssl: bool = True
 ) -> tuple[bool, Optional[str]]:
     """
-    РўРµСЃС‚РёСЂСѓРµС‚ IMAP РїРѕРґРєР»СЋС‡РµРЅРёРµ
+    Тестирует IMAP подключение
 
     Args:
-        server: IMAP СЃРµСЂРІРµСЂ (imap.gmail.com)
-        port: IMAP РїРѕСЂС‚ (993)
-        username: РРјСЏ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ (РѕР±С‹С‡РЅРѕ email)
-        password: РџР°СЂРѕР»СЊ РёР»Рё App Password
-        use_ssl: РСЃРїРѕР»СЊР·РѕРІР°С‚СЊ SSL
+        server: IMAP сервер (imap.gmail.com)
+        port: IMAP порт (993)
+        username: Имя пользователя (обычно email)
+        password: Пароль или App Password
+        use_ssl: Использовать SSL
 
     Returns:
         (success: bool, error_message: Optional[str])
@@ -117,24 +116,24 @@ def test_imap_connection(
         client.select_folder("INBOX")
         client.logout()
 
-        logger.info(f"вњ… IMAP connection test successful: {username}@{server}")
+        logger.info(f"✅ IMAP connection test successful: {username}@{server}")
         return True, None
 
     except Exception as e:
         error_msg = str(e)
-        logger.error(f"вќЊ IMAP connection test failed: {username}@{server} - {error_msg}")
+        logger.error(f"❌ IMAP connection test failed: {username}@{server} - {error_msg}")
         return False, error_msg
 
 
 def connect_imap(email_account: EmailAccount) -> Optional[IMAPClient]:
     """
-    РџРѕРґРєР»СЋС‡Р°РµС‚СЃСЏ Рє IMAP СЃРµСЂРІРµСЂСѓ
+    Подключается к IMAP серверу
 
     Args:
-        email_account: РњРѕРґРµР»СЊ EmailAccount РёР· Р‘Р”
+        email_account: Модель EmailAccount из БД
 
     Returns:
-        IMAPClient РёР»Рё None РІ СЃР»СѓС‡Р°Рµ РѕС€РёР±РєРё
+        IMAPClient или None в случае ошибки
     """
     try:
         client = IMAPClient(
@@ -150,30 +149,28 @@ def connect_imap(email_account: EmailAccount) -> Optional[IMAPClient]:
             if not access_token:
                 logger.error(f"Failed to get Google access token for {email_account.email_address}")
                 return None
-
             client.oauth2_login(email_account.imap_username, access_token)
         else:
             client.login(email_account.imap_username, raw_secret)
-
         client.select_folder(email_account.folder)
 
-        logger.info(f"вњ… Connected to IMAP: {email_account.email_address}")
+        logger.info(f"✅ Connected to IMAP: {email_account.email_address}")
         return client
 
     except Exception as e:
-        logger.error(f"вќЊ Failed to connect to IMAP: {email_account.email_address} - {e}")
+        logger.error(f"❌ Failed to connect to IMAP: {email_account.email_address} - {e}")
         return None
 
 
 def decode_mime_header(header_value: str) -> str:
     """
-    Р”РµРєРѕРґРёСЂСѓРµС‚ MIME Р·Р°РіРѕР»РѕРІРѕРє email
+    Декодирует MIME заголовок email
 
     Args:
-        header_value: Р—РЅР°С‡РµРЅРёРµ Р·Р°РіРѕР»РѕРІРєР°
+        header_value: Значение заголовка
 
     Returns:
-        Р”РµРєРѕРґРёСЂРѕРІР°РЅРЅР°СЏ СЃС‚СЂРѕРєР°
+        Декодированная строка
     """
     if not header_value:
         return ""
@@ -198,10 +195,10 @@ def decode_mime_header(header_value: str) -> str:
 
 def extract_email_body(msg: email.message.Message) -> tuple[Optional[str], Optional[str]]:
     """
-    РР·РІР»РµРєР°РµС‚ С‚РµРєСЃС‚ Рё HTML РёР· email СЃРѕРѕР±С‰РµРЅРёСЏ
+    Извлекает текст и HTML из email сообщения
 
     Args:
-        msg: Email message РѕР±СЉРµРєС‚
+        msg: Email message объект
 
     Returns:
         (text_body, html_body)
@@ -214,7 +211,7 @@ def extract_email_body(msg: email.message.Message) -> tuple[Optional[str], Optio
             content_type = part.get_content_type()
             content_disposition = str(part.get("Content-Disposition"))
 
-            # РџСЂРѕРїСѓСЃРєР°РµРј РІР»РѕР¶РµРЅРёСЏ
+            # Пропускаем вложения
             if "attachment" in content_disposition:
                 continue
 
@@ -230,7 +227,7 @@ def extract_email_body(msg: email.message.Message) -> tuple[Optional[str], Optio
                 except:
                     pass
     else:
-        # РџСЂРѕСЃС‚РѕРµ СЃРѕРѕР±С‰РµРЅРёРµ
+        # Простое сообщение
         content_type = msg.get_content_type()
 
         if content_type == "text/plain":
@@ -253,30 +250,30 @@ def check_message_filters(
     subject: str
 ) -> bool:
     """
-    РџСЂРѕРІРµСЂСЏРµС‚ СЃРѕРѕС‚РІРµС‚СЃС‚РІРёРµ РїРёСЃСЊРјР° С„РёР»СЊС‚СЂР°Рј
+    Проверяет соответствие письма фильтрам
 
     Args:
-        email_account: Email Р°РєРєР°СѓРЅС‚ СЃ РЅР°СЃС‚СЂРѕР№РєР°РјРё С„РёР»СЊС‚СЂРѕРІ
-        from_address: Email РѕС‚РїСЂР°РІРёС‚РµР»СЏ
-        subject: РўРµРјР° РїРёСЃСЊРјР°
+        email_account: Email аккаунт с настройками фильтров
+        from_address: Email отправителя
+        subject: Тема письма
 
     Returns:
-        True РµСЃР»Рё РїРёСЃСЊРјРѕ РїСЂРѕС…РѕРґРёС‚ С„РёР»СЊС‚СЂС‹
+        True если письмо проходит фильтры
     """
-    # Р¤РёР»СЊС‚СЂ РїРѕ РѕС‚РїСЂР°РІРёС‚РµР»СЋ
+    # Фильтр по отправителю
     if email_account.only_from_addresses:
         allowed = email_account.only_from_addresses
         if not any(addr.lower() in from_address.lower() for addr in allowed):
-            logger.info(f"вќЊ Message from {from_address} filtered out (not in allowed list)")
+            logger.info(f"❌ Message from {from_address} filtered out (not in allowed list)")
             return False
 
-    # Р¤РёР»СЊС‚СЂ РїРѕ РєР»СЋС‡РµРІС‹Рј СЃР»РѕРІР°Рј РІ С‚РµРјРµ
+    # Фильтр по ключевым словам в теме
     if email_account.subject_keywords:
         keywords = email_account.subject_keywords
         subject_lower = subject.lower()
 
         if not any(keyword.lower() in subject_lower for keyword in keywords):
-            logger.info(f"вќЊ Message with subject '{subject}' filtered out (no keywords match)")
+            logger.info(f"❌ Message with subject '{subject}' filtered out (no keywords match)")
             return False
 
     return True
@@ -284,29 +281,29 @@ def check_message_filters(
 
 def fetch_new_emails(email_account: EmailAccount) -> List[Dict[str, Any]]:
     """
-    РџРѕР»СѓС‡Р°РµС‚ РЅРѕРІС‹Рµ РїРёСЃСЊРјР° РёР· IMAP
+    Получает новые письма из IMAP
 
     Args:
-        email_account: Email Р°РєРєР°СѓРЅС‚ РґР»СЏ РїСЂРѕРІРµСЂРєРё
+        email_account: Email аккаунт для проверки
 
     Returns:
-        РЎРїРёСЃРѕРє СЃР»РѕРІР°СЂРµР№ СЃ РґР°РЅРЅС‹РјРё РїРёСЃРµРј
+        Список словарей с данными писем
     """
     client = connect_imap(email_account)
     if not client:
         return []
 
     try:
-        # РџРѕР»СѓС‡Р°РµРј РІСЃРµ UID РІ РїР°РїРєРµ
+        # Получаем все UID в папке
         messages = client.search(['ALL'])
 
-        # РџР•Р Р’РђРЇ РџР РћР’Р•Р РљРђ: РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ last_uid Р±РµР· РѕР±СЂР°Р±РѕС‚РєРё СЃС‚Р°СЂС‹С… РїРёСЃРµРј
+        # ПЕРВАЯ ПРОВЕРКА: Инициализация last_uid без обработки старых писем
         if email_account.last_uid == 0 and email_account.last_checked is None:
             if messages:
                 max_uid = max(messages)
-                logger.info(f"рџ†• First check for {email_account.email_address}: setting last_uid to {max_uid} (skipping {len(messages)} old emails)")
+                logger.info(f"🆕 First check for {email_account.email_address}: setting last_uid to {max_uid} (skipping {len(messages)} old emails)")
 
-                # РћР±РЅРѕРІР»СЏРµРј last_uid РІ Р‘Р” С‡С‚РѕР±С‹ РЅР°С‡Р°С‚СЊ РїСЂРѕРІРµСЂРєСѓ СЃ СЌС‚РѕРіРѕ РјРѕРјРµРЅС‚Р°
+                # Обновляем last_uid в БД чтобы начать проверку с этого момента
                 from db.database import get_db_session
                 db = get_db_session()
                 try:
@@ -321,19 +318,19 @@ def fetch_new_emails(email_account: EmailAccount) -> List[Dict[str, Any]]:
                     db.close()
 
             client.logout()
-            return []  # РќРµ РѕР±СЂР°Р±Р°С‚С‹РІР°РµРј СЃС‚Р°СЂС‹Рµ РїРёСЃСЊРјР°
+            return []  # Не обрабатываем старые письма
 
-        # Р¤РёР»СЊС‚СЂСѓРµРј С‚РѕР»СЊРєРѕ РЅРѕРІС‹Рµ (UID > last_uid)
+        # Фильтруем только новые (UID > last_uid)
         new_messages = [uid for uid in messages if uid > email_account.last_uid]
 
         if not new_messages:
-            logger.info(f"рџ“­ No new emails for {email_account.email_address}")
+            logger.info(f"📭 No new emails for {email_account.email_address}")
             client.logout()
             return []
 
-        logger.info(f"рџ“¬ Found {len(new_messages)} new emails for {email_account.email_address}")
+        logger.info(f"📬 Found {len(new_messages)} new emails for {email_account.email_address}")
 
-        # РџРѕР»СѓС‡Р°РµРј РґР°РЅРЅС‹Рµ РїРёСЃРµРј
+        # Получаем данные писем
         response = client.fetch(new_messages, ['RFC822', 'FLAGS'])
 
         emails_data = []
@@ -343,32 +340,32 @@ def fetch_new_emails(email_account: EmailAccount) -> List[Dict[str, Any]]:
                 raw_email = data[b'RFC822']
                 msg = email.message_from_bytes(raw_email)
 
-                # РР·РІР»РµРєР°РµРј Р·Р°РіРѕР»РѕРІРєРё
+                # Извлекаем заголовки
                 subject = decode_mime_header(msg.get('Subject', ''))
                 from_header = msg.get('From', '')
                 to_header = msg.get('To', '')
                 message_id = msg.get('Message-ID', '')
                 date_header = msg.get('Date', '')
 
-                # РџР°СЂСЃРёРј email Р°РґСЂРµСЃ РѕС‚РїСЂР°РІРёС‚РµР»СЏ
+                # Парсим email адрес отправителя
                 from_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', from_header)
                 from_address = from_match.group(0) if from_match else from_header
 
-                # РџСЂРѕРІРµСЂСЏРµРј С„РёР»СЊС‚СЂС‹
+                # Проверяем фильтры
                 if not check_message_filters(email_account, from_address, subject):
                     continue
 
-                # РР·РІР»РµРєР°РµРј С‚РµР»Рѕ РїРёСЃСЊРјР°
+                # Извлекаем тело письма
                 text_body, html_body = extract_email_body(msg)
 
-                # РџСЂРѕРІРµСЂСЏРµРј РІР»РѕР¶РµРЅРёСЏ
+                # Проверяем вложения
                 has_attachments = False
                 for part in msg.walk():
                     if part.get_content_disposition() == 'attachment':
                         has_attachments = True
                         break
 
-                # РџР°СЂСЃРёРј РґР°С‚Сѓ
+                # Парсим дату
                 email_date = None
                 if date_header:
                     try:
@@ -387,7 +384,7 @@ def fetch_new_emails(email_account: EmailAccount) -> List[Dict[str, Any]]:
                     'body_text': text_body,
                     'body_html': html_body,
                     'has_attachments': has_attachments,
-                    'raw_message': msg,  # РџРѕР»РЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ РґР»СЏ РѕР±СЂР°Р±РѕС‚РєРё РІР»РѕР¶РµРЅРёР№
+                    'raw_message': msg,  # Полное сообщение для обработки вложений
                 })
 
             except Exception as e:
@@ -396,7 +393,7 @@ def fetch_new_emails(email_account: EmailAccount) -> List[Dict[str, Any]]:
 
         client.logout()
 
-        logger.info(f"вњ… Processed {len(emails_data)} emails (passed filters)")
+        logger.info(f"✅ Processed {len(emails_data)} emails (passed filters)")
         return emails_data
 
     except Exception as e:
@@ -407,7 +404,3 @@ def fetch_new_emails(email_account: EmailAccount) -> List[Dict[str, Any]]:
             except:
                 pass
         return []
-
-
-
-
