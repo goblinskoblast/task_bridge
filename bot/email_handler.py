@@ -295,33 +295,39 @@ def fetch_new_emails(email_account: EmailAccount) -> List[Dict[str, Any]]:
 
     try:
         # Получаем все UID в папке
-        messages = client.search(['ALL'])
+        all_messages = client.search(['ALL'])
 
-        # ПЕРВАЯ ПРОВЕРКА: Инициализация last_uid без обработки старых писем
+        # First check behavior:
+        # - process UNSEEN emails immediately
+        # - if there are no UNSEEN emails, initialize last_uid and skip historical backlog
         if email_account.last_uid == 0 and email_account.last_checked is None:
-            if messages:
-                max_uid = max(messages)
-                logger.info(f"🆕 First check for {email_account.email_address}: setting last_uid to {max_uid} (skipping {len(messages)} old emails)")
+            unseen_messages = client.search(['UNSEEN'])
+            if unseen_messages:
+                new_messages = unseen_messages
+                logger.info(f"First check for {email_account.email_address}: processing {len(new_messages)} unseen emails")
+            else:
+                if all_messages:
+                    max_uid = max(all_messages)
+                    logger.info(f"First check for {email_account.email_address}: setting last_uid to {max_uid} (skipping {len(all_messages)} old emails)")
 
-                # Обновляем last_uid в БД чтобы начать проверку с этого момента
-                from db.database import get_db_session
-                db = get_db_session()
-                try:
-                    email_account.last_uid = max_uid
-                    email_account.last_checked = datetime.utcnow()
-                    db.merge(email_account)
-                    db.commit()
-                except Exception as e:
-                    logger.error(f"Failed to update last_uid: {e}")
-                    db.rollback()
-                finally:
-                    db.close()
+                    from db.database import get_db_session
+                    db = get_db_session()
+                    try:
+                        email_account.last_uid = max_uid
+                        email_account.last_checked = datetime.utcnow()
+                        db.merge(email_account)
+                        db.commit()
+                    except Exception as e:
+                        logger.error(f"Failed to update last_uid: {e}")
+                        db.rollback()
+                    finally:
+                        db.close()
 
-            client.logout()
-            return []  # Не обрабатываем старые письма
-
-        # Фильтруем только новые (UID > last_uid)
-        new_messages = [uid for uid in messages if uid > email_account.last_uid]
+                client.logout()
+                return []
+        else:
+            # filter only fresh messages after last_uid
+            new_messages = [uid for uid in all_messages if uid > email_account.last_uid]
 
         if not new_messages:
             logger.info(f"📭 No new emails for {email_account.email_address}")

@@ -336,12 +336,20 @@ def process_email(email_account: EmailAccount, email_data: Dict[str, Any]) -> bo
         # Создаем задачу
         task_id = create_task_from_email(email_account, email_data, task_data, email_message)
 
+        # Mark message processed both for direct task creation and pending confirmation flow.
+        email_message.processed = True
+        email_message.processed_at = datetime.utcnow()
         if task_id:
-            logger.info(f"✅ Task #{task_id} created from email")
-            return True
+            email_message.task_id = task_id
+        else:
+            email_message.error_message = "Pending confirmation or task creation failed"
+        db.commit()
+
+        if task_id:
+            logger.info(f"Task #{task_id} created from email")
         else:
             logger.info("Task requires confirmation or failed to create")
-            return True
+        return True
 
     except Exception as e:
         logger.error(f"Error processing email: {e}", exc_info=True)
