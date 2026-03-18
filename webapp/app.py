@@ -6,7 +6,7 @@ from sqlalchemy import func, desc, or_
 from typing import List, Optional
 
 from db.database import get_db
-from db.models import Task, User, Category, Message as MessageModel, TaskFile, Comment, EmailAccount, EmailMessage
+from db.models import Task, User, Category, Message as MessageModel, TaskFile, Comment, EmailAccount, EmailMessage, task_assignees
 from pydantic import BaseModel
 import os
 from pathlib import Path

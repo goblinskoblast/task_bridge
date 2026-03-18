@@ -34,8 +34,11 @@ export function TasksApp({ userId }) {
   }, [filters, activeTab])
 
   async function loadUserData() {
+    // Fallback: enough for email APIs, even if /users temporarily fails.
+    setCurrentUser({ id: userId })
+
     try {
-      const response = await fetch(getApiUrl('/users'))
+      const response = await fetch(getApiUrl(`/users?current_user_id=${userId}`))
       if (response.ok) {
         const users = await response.json()
         const user = users.find(u => u.id === userId)
