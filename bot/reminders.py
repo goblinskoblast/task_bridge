@@ -1,6 +1,6 @@
 import logging
-from datetime import datetime, timedelta
-from typing import List
+from datetime import datetime
+
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram import Bot
@@ -17,25 +17,52 @@ logger = logging.getLogger(__name__)
 
 
 scheduler = None
+DEFAULT_PRIORITY_REMINDER_HOURS = {
+    "low": 6,
+    "normal": 3,
+    "high": 2,
+    "urgent": 2,
+}
+
+
+def get_default_reminder_interval_hours(priority: str) -> int:
+    return DEFAULT_PRIORITY_REMINDER_HOURS.get((priority or "normal").lower(), 3)
+
+
+def get_effective_reminder_interval_hours(task: Task) -> int:
+    if task.reminder_interval_hours and task.reminder_interval_hours > 0:
+        return task.reminder_interval_hours
+    return get_default_reminder_interval_hours(task.priority)
+
+
+def _was_creator_reminder_sent_for_interval(task: Task, interval_days: int) -> bool:
+    if not task.last_creator_reminder_sent_at or not task.created_at:
+        return False
+
+    last_days_since_created = (
+        task.last_creator_reminder_sent_at - task.created_at
+    ).total_seconds() / (24 * 3600)
+    return abs(last_days_since_created - interval_days) < 0.5
 
 
 async def send_assignee_reminder(bot: Bot, task: Task, assignee: User, reminder_type: str = "upcoming"):
-    """Отправляет напоминание исполнителю о задаче"""
     try:
         if not assignee or assignee.telegram_id == -1:
             logger.warning(f"Assignee for task {task.id} hasn't started bot")
-            return
+            return False
 
-        if reminder_type == "upcoming":
-            days_left = (task.due_date - datetime.now()).days
-            emoji = "📅"
-            title = f"Напоминание: До дедлайна {days_left} дн."
-        elif reminder_type == "due_today":
+        if reminder_type == "due_today":
             emoji = "⏰"
-            title = "Внимание: Дедлайн сегодня!"
-        else:
+            title = "Дедлайн сегодня"
+        elif reminder_type == "overdue":
             emoji = "⚠️"
-            title = "ПРОСРОЧЕНО"
+            title = "Задача просрочена"
+        elif reminder_type == "scheduled":
+            emoji = "🔔"
+            title = "Плановое напоминание"
+        else:
+            emoji = "📌"
+            title = "Напоминание по задаче"
 
         notification = (
             f"{emoji} <b>{title}</b>\n\n"
@@ -50,6 +77,7 @@ async def send_assignee_reminder(bot: Bot, task: Task, assignee: User, reminder_
 
         notification += f"<b>Приоритет:</b> {task.priority}\n"
         notification += f"<b>Статус:</b> {task.status}\n"
+        notification += f"<b>Интервал напоминаний:</b> каждые {get_effective_reminder_interval_hours(task)} ч\n"
 
         await bot.send_message(
             chat_id=assignee.telegram_id,
@@ -58,19 +86,18 @@ async def send_assignee_reminder(bot: Bot, task: Task, assignee: User, reminder_
         )
 
         logger.info(f"Assignee reminder sent for task {task.id} to user {assignee.telegram_id}")
-
+        return True
     except Exception as e:
         logger.error(f"Failed to send assignee reminder for task {task.id}: {e}")
+        return False
 
 
 async def send_creator_reminder(bot: Bot, task: Task):
-    """Отправляет напоминание создателю задачи о статусе"""
     try:
         if not task.creator or task.creator.telegram_id == -1:
             logger.warning(f"Creator of task {task.id} hasn't started bot")
-            return
+            return False
 
-        # Определяем emoji и текст в зависимости от статуса
         status_emoji = {
             "pending": "⏳",
             "in_progress": "🔄",
@@ -87,9 +114,7 @@ async def send_creator_reminder(bot: Bot, task: Task):
 
         emoji = status_emoji.get(task.status, "📋")
         status = status_text.get(task.status, task.status)
-
-        # Вычисляем время с момента создания
-        days_since_created = (datetime.now() - task.created_at).days
+        days_since_created = (datetime.utcnow() - task.created_at).days
 
         notification = (
             f"{emoji} <b>Обновление статуса задачи</b>\n\n"
@@ -98,9 +123,10 @@ async def send_creator_reminder(bot: Bot, task: Task):
             f"<b>Приоритет:</b> {task.priority}\n"
         )
 
-        # Добавляем информацию об исполнителях
         if task.assignees:
-            assignees_names = ", ".join([a.first_name or a.username for a in task.assignees if a.first_name or a.username])
+            assignees_names = ", ".join(
+                [a.first_name or a.username for a in task.assignees if a.first_name or a.username]
+            )
             notification += f"<b>Исполнители:</b> {assignees_names}\n"
 
         if task.due_date:
@@ -109,7 +135,7 @@ async def send_creator_reminder(bot: Bot, task: Task):
         notification += f"\n📅 Создана {days_since_created} дн. назад"
 
         if task.status in ["pending", "in_progress"] and task.due_date:
-            days_until_due = (task.due_date - datetime.now()).days
+            days_until_due = (task.due_date - datetime.utcnow()).days
             if days_until_due < 0:
                 notification += f"\n⚠️ Просрочено на {abs(days_until_due)} дн."
             else:
@@ -122,22 +148,18 @@ async def send_creator_reminder(bot: Bot, task: Task):
         )
 
         logger.info(f"Creator reminder sent for task {task.id} to creator {task.creator.telegram_id}")
-
+        return True
     except Exception as e:
         logger.error(f"Failed to send creator reminder for task {task.id}: {e}")
+        return False
 
 
-# Legacy function for backward compatibility
 async def send_reminder(bot: Bot, task: Task, db: Session, reminder_type: str = "upcoming"):
-    """Legacy function - sends reminder to assignee (backward compatibility)"""
-    if task.assignee:
+    if getattr(task, "assignee", None):
         await send_assignee_reminder(bot, task, task.assignee, reminder_type)
 
 
 async def check_and_send_reminders(bot: Bot):
-    """
-    Проверяет все задачи и отправляет напоминания по мере необходимости
-    """
     db = get_db_session()
 
     try:
@@ -146,92 +168,61 @@ async def check_and_send_reminders(bot: Bot):
         tz = pytz.timezone(TIMEZONE)
         now = datetime.now(tz)
 
-        # ЧАСТЬ 1: Напоминания исполнителям о дедлайнах
-        tasks_with_deadlines = db.query(Task).filter(
-            Task.status.in_(["pending", "in_progress"]),
-            Task.due_date.isnot(None)
+        active_tasks = db.query(Task).filter(
+            Task.status.in_(["pending", "in_progress"])
         ).all()
 
-        logger.info(f"Found {len(tasks_with_deadlines)} active tasks with deadlines")
+        logger.info(f"Found {len(active_tasks)} active tasks")
 
-        for task in tasks_with_deadlines:
+        for task in active_tasks:
             try:
-                # Проверяем что есть исполнители
-                if not task.assignees:
-                    continue
+                if task.assignees:
+                    interval_hours = get_effective_reminder_interval_hours(task)
+                    if task.last_assignee_reminder_sent_at:
+                        hours_since_last = (
+                            datetime.utcnow() - task.last_assignee_reminder_sent_at
+                        ).total_seconds() / 3600
+                        if hours_since_last < interval_hours:
+                            continue
 
-                if task.due_date.tzinfo is None:
-                    task_due_date = tz.localize(task.due_date)
-                else:
-                    task_due_date = task.due_date
+                    reminder_type = "scheduled"
+                    if task.due_date:
+                        task_due_date = tz.localize(task.due_date) if task.due_date.tzinfo is None else task.due_date
+                        hours_until_due = (task_due_date - now).total_seconds() / 3600
+                        if hours_until_due < 0:
+                            reminder_type = "overdue"
+                        elif hours_until_due <= 24:
+                            reminder_type = "due_today"
+                        else:
+                            reminder_type = "upcoming"
 
-                time_diff = task_due_date - now
-                days_until_due = time_diff.days
-                hours_until_due = time_diff.total_seconds() / 3600
-
-                reminder_type = None
-
-                if hours_until_due < 0:
-                    days_overdue = abs(days_until_due)
-                    logger.info(f"Task {task.id} is overdue by {days_overdue} days")
-                    reminder_type = "overdue"
-                elif 0 <= hours_until_due <= 24:
-                    logger.info(f"Task {task.id} is due today ({hours_until_due:.1f} hours left)")
-                    reminder_type = "due_today"
-                else:
-                    # Проверяем интервалы напоминаний
-                    for interval in ASSIGNEE_REMINDER_INTERVALS:
-                        if interval > 0:
-                            days_diff = time_diff.total_seconds() / (24 * 3600)
-                            if abs(days_diff - interval) < 0.5:
-                                logger.info(f"Task {task.id} is due in ~{interval} days")
-                                reminder_type = "upcoming"
-                                break
-
-                # Отправляем напоминание ВСЕМ исполнителям
-                if reminder_type:
+                    sent = False
                     for assignee in task.assignees:
-                        await send_assignee_reminder(bot, task, assignee, reminder_type)
+                        if await send_assignee_reminder(bot, task, assignee, reminder_type):
+                            sent = True
 
-            except Exception as task_error:
-                logger.error(f"Error processing task {task.id} for assignee reminders: {task_error}", exc_info=True)
-                continue
+                    if sent:
+                        task.last_assignee_reminder_sent_at = datetime.utcnow()
 
-        # ЧАСТЬ 2: Напоминания постановщикам о статусе задач
-        all_active_tasks = db.query(Task).filter(
-            Task.status.in_(["pending", "in_progress"]),
-            Task.created_by.isnot(None)
-        ).all()
-
-        logger.info(f"Found {len(all_active_tasks)} active tasks for creator reminders")
-
-        for task in all_active_tasks:
-            try:
                 if not task.creator:
                     continue
 
-                # Вычисляем дни с момента создания
-                if task.created_at.tzinfo is None:
-                    task_created_at = tz.localize(task.created_at)
-                else:
-                    task_created_at = task.created_at
-
+                task_created_at = tz.localize(task.created_at) if task.created_at.tzinfo is None else task.created_at
                 time_since_created = now - task_created_at
                 days_since_created = time_since_created.total_seconds() / (24 * 3600)
 
-                # Проверяем интервалы напоминаний для создателя
                 for interval in CREATOR_REMINDER_INTERVALS:
-                    if abs(days_since_created - interval) < 0.5:
+                    if abs(days_since_created - interval) < 0.5 and not _was_creator_reminder_sent_for_interval(task, interval):
                         logger.info(f"Task {task.id} was created {interval} days ago, sending creator reminder")
-                        await send_creator_reminder(bot, task)
+                        if await send_creator_reminder(bot, task):
+                            task.last_creator_reminder_sent_at = datetime.utcnow()
                         break
 
             except Exception as task_error:
-                logger.error(f"Error processing task {task.id} for creator reminders: {task_error}", exc_info=True)
+                logger.error(f"Error processing task {task.id} for reminders: {task_error}", exc_info=True)
                 continue
 
         db.commit()
-
     except Exception as e:
         logger.error(f"Error in check_and_send_reminders: {e}", exc_info=True)
     finally:
@@ -239,7 +230,6 @@ async def check_and_send_reminders(bot: Bot):
 
 
 def start_reminder_scheduler(bot: Bot):
-
     global scheduler
 
     if scheduler is not None:
@@ -247,41 +237,35 @@ def start_reminder_scheduler(bot: Bot):
         return
 
     try:
-
         scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 
-        # Задача для проверки напоминаний
         scheduler.add_job(
             check_and_send_reminders,
-            'interval',
+            "interval",
             minutes=REMINDER_CHECK_INTERVAL,
             args=[bot],
-            id='check_reminders',
+            id="check_reminders",
             replace_existing=True
         )
 
-        # Задача для проверки email каждые 10 минут
         from bot.email_processor import check_and_process_emails
         scheduler.add_job(
             check_and_process_emails,
-            'interval',
-            minutes=10,  # Проверяем email каждые 10 минут
-            id='check_emails',
+            "interval",
+            minutes=10,
+            id="check_emails",
             replace_existing=True
         )
-
 
         scheduler.start()
 
         logger.info(f"Reminder scheduler started with interval {REMINDER_CHECK_INTERVAL} minutes")
         logger.info("Email checker started with interval 10 minutes")
-
     except Exception as e:
         logger.error(f"Failed to start reminder scheduler: {e}", exc_info=True)
 
 
 def stop_reminder_scheduler():
-    
     global scheduler
 
     if scheduler is not None:

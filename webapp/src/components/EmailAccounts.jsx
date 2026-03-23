@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { Mail, Plus, Trash2, Check, X, AlertCircle } from 'lucide-react'
 import { getApiUrl } from '../services/api'
 import '../styles/EmailAccounts.css'
@@ -81,6 +81,14 @@ export default function EmailAccounts({ currentUser }) {
       return
     }
     window.location.href = getApiUrl(`/oauth/google/start?user_id=${currentUser.id}`)
+  }
+
+  const connectYandex = () => {
+    if (!currentUser?.id) {
+      alert('Пользователь не найден')
+      return
+    }
+    window.location.href = getApiUrl(`/oauth/yandex/start?user_id=${currentUser.id}`)
   }
 
   const testConnection = async () => {
@@ -252,6 +260,13 @@ export default function EmailAccounts({ currentUser }) {
         </button>
         <button
           className="btn-primary"
+          onClick={connectYandex}
+          disabled={accounts.length >= 5}
+        >
+          ✉️ Подключить Яндекс
+        </button>
+        <button
+          className="btn-primary"
           onClick={() => setShowAddForm(true)}
           disabled={accounts.length >= 5}
         >
@@ -409,3 +424,4 @@ export default function EmailAccounts({ currentUser }) {
     </div>
   )
 }
+

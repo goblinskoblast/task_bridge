@@ -1,12 +1,11 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from config import DATABASE_URL
 from db.models import Base
 
 
 def get_async_database_url(url: str) -> str:
-    
     if url.startswith("postgresql://"):
         return url.replace("postgresql://", "postgresql+asyncpg://")
     elif url.startswith("sqlite://"):
@@ -21,14 +20,12 @@ if "postgresql" in DATABASE_URL:
         pool_pre_ping=True
     )
 elif "sqlite" in DATABASE_URL:
-    
     sync_engine = create_engine(
         DATABASE_URL,
         echo=False,
-        connect_args={"check_same_thread": False}  
+        connect_args={"check_same_thread": False}
     )
 else:
-    
     sync_engine = create_engine(
         "sqlite:///taskbridge.db",
         echo=False,
@@ -39,7 +36,6 @@ else:
 ASYNC_DATABASE_URL = get_async_database_url(DATABASE_URL)
 
 if "postgresql" in DATABASE_URL:
-   
     async_engine = create_async_engine(
         ASYNC_DATABASE_URL,
         echo=False,
@@ -48,7 +44,6 @@ if "postgresql" in DATABASE_URL:
         pool_pre_ping=True
     )
 else:
-    
     async_engine = create_async_engine(
         ASYNC_DATABASE_URL,
         echo=False,
@@ -67,12 +62,36 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
 
 
 def init_db():
-    """Инициализация базы данных - создание всех таблиц (синхронно)"""
     Base.metadata.create_all(bind=sync_engine)
+    _ensure_task_columns()
+
+
+def _ensure_task_columns():
+    inspector = inspect(sync_engine)
+    column_names = {column["name"] for column in inspector.get_columns("tasks")}
+    datetime_type = "TIMESTAMP" if sync_engine.dialect.name == "postgresql" else "DATETIME"
+    alter_statements = []
+
+    if "reminder_interval_hours" not in column_names:
+        alter_statements.append("ALTER TABLE tasks ADD COLUMN reminder_interval_hours INTEGER")
+    if "last_assignee_reminder_sent_at" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE tasks ADD COLUMN last_assignee_reminder_sent_at {datetime_type}"
+        )
+    if "last_creator_reminder_sent_at" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE tasks ADD COLUMN last_creator_reminder_sent_at {datetime_type}"
+        )
+
+    if not alter_statements:
+        return
+
+    with sync_engine.begin() as connection:
+        for statement in alter_statements:
+            connection.execute(text(statement))
 
 
 async def get_async_db():
-    """Получение асинхронной сессии базы данных"""
     async with AsyncSessionLocal() as session:
         try:
             yield session
@@ -81,7 +100,6 @@ async def get_async_db():
 
 
 def get_db():
-    """Получение синхронной сессии (для FastAPI endpoints)"""
     db = SessionLocal()
     try:
         yield db
@@ -90,10 +108,8 @@ def get_db():
 
 
 def get_db_session() -> Session:
-    """Получение синхронного объекта сессии (для совместимости)"""
     return SessionLocal()
 
 
 def get_async_session() -> AsyncSession:
-    """Получение асинхронной сессии (для прямого использования)"""
     return AsyncSessionLocal()

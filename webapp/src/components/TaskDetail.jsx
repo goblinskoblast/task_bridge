@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   getTask,
   updateTaskStatus,
+  updateTaskSettings,
   getTaskComments,
   createTaskComment,
   getTaskFiles,
@@ -13,6 +14,15 @@ import {
 import { formatDate, getStatusText, getPriorityText, getPriorityColor, getStatusColor } from '../utils/format'
 import { showTelegramAlert, showTelegramConfirm } from '../utils/telegram'
 
+const REMINDER_OPTIONS = [
+  { value: '', label: 'По умолчанию' },
+  { value: '2', label: 'Каждые 2 часа' },
+  { value: '3', label: 'Каждые 3 часа' },
+  { value: '6', label: 'Каждые 6 часов' },
+  { value: '12', label: 'Каждые 12 часов' },
+  { value: '24', label: 'Каждые 24 часа' }
+]
+
 export function TaskDetail({ task: initialTask, onBack, isManager }) {
   const [task, setTask] = useState(initialTask)
   const [comments, setComments] = useState([])
@@ -22,6 +32,7 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
   const [loading, setLoading] = useState(false)
   const [showAssigneeModal, setShowAssigneeModal] = useState(false)
   const [assigneeSearch, setAssigneeSearch] = useState('')
+  const [savingSettings, setSavingSettings] = useState(false)
 
   useEffect(() => {
     loadTaskData()
@@ -30,15 +41,13 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
   async function loadTaskData() {
     try {
       setLoading(true)
-
-      // SECURITY: Получаем текущий userId для фильтрации пользователей
       const userId = new URLSearchParams(window.location.search).get('user_id')
 
       const [taskData, commentsData, filesData, usersData] = await Promise.all([
         getTask(task.id),
         getTaskComments(task.id),
         getTaskFiles(task.id),
-        isManager ? getUsers(parseInt(userId)) : Promise.resolve([])
+        isManager ? getUsers(parseInt(userId, 10)) : Promise.resolve([])
       ])
 
       setTask(taskData)
@@ -56,7 +65,7 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
   async function handleStatusChange(newStatus) {
     try {
       const userId = new URLSearchParams(window.location.search).get('user_id')
-      await updateTaskStatus(task.id, newStatus, parseInt(userId))
+      await updateTaskStatus(task.id, newStatus, parseInt(userId, 10))
       setTask({ ...task, status: newStatus })
       showTelegramAlert('Статус обновлен')
     } catch (err) {
@@ -65,12 +74,30 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
     }
   }
 
+  async function handleReminderIntervalChange(event) {
+    const value = event.target.value
+
+    try {
+      setSavingSettings(true)
+      const updatedTask = await updateTaskSettings(task.id, {
+        reminder_interval_hours: value ? parseInt(value, 10) : null
+      })
+      setTask(updatedTask)
+      showTelegramAlert('Настройки напоминаний обновлены')
+    } catch (err) {
+      console.error('Error updating reminder settings:', err)
+      showTelegramAlert('Ошибка обновления настроек задачи')
+    } finally {
+      setSavingSettings(false)
+    }
+  }
+
   async function handleAddComment() {
     if (!newComment.trim()) return
 
     try {
       const userId = new URLSearchParams(window.location.search).get('user_id')
-      const comment = await createTaskComment(task.id, newComment, parseInt(userId))
+      const comment = await createTaskComment(task.id, newComment, parseInt(userId, 10))
       setComments([...comments, comment])
       setNewComment('')
     } catch (err) {
@@ -82,9 +109,9 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
   async function handleAddAssignee(userId) {
     try {
       await addTaskAssignee(task.id, userId)
-      await loadTaskData() // Перезагружаем данные задачи
+      await loadTaskData()
       setShowAssigneeModal(false)
-      setAssigneeSearch('') // Сбрасываем поиск
+      setAssigneeSearch('')
       showTelegramAlert('Исполнитель добавлен')
     } catch (err) {
       console.error('Error adding assignee:', err)
@@ -93,12 +120,12 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
   }
 
   async function handleRemoveAssignee(userId) {
-    showTelegramConfirm('Удалить исполнителя?', async (confirmed) => {
+    showTelegramConfirm('Удалить исполнителя?', async confirmed => {
       if (!confirmed) return
 
       try {
         await removeTaskAssignee(task.id, userId)
-        await loadTaskData() // Перезагружаем данные задачи
+        await loadTaskData()
         showTelegramAlert('Исполнитель удален')
       } catch (err) {
         console.error('Error removing assignee:', err)
@@ -108,13 +135,13 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
   }
 
   async function handleDeleteTask() {
-    showTelegramConfirm('Вы точно хотите удалить эту задачу?', async (confirmed) => {
+    showTelegramConfirm('Вы точно хотите удалить эту задачу?', async confirmed => {
       if (!confirmed) return
 
       try {
         await deleteTask(task.id)
         showTelegramAlert('Задача удалена')
-        onBack() // Возвращаемся к списку задач
+        onBack()
       } catch (err) {
         console.error('Error deleting task:', err)
         showTelegramAlert('Ошибка удаления задачи')
@@ -122,11 +149,9 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
     })
   }
 
-  // Определяем доступные действия в зависимости от роли
   const statusActions = {}
 
   if (isManager) {
-    // Создатель задачи может делать всё
     statusActions.pending = [
       { status: 'in_progress', label: 'Начать работу', color: '#0dcaf0' },
       { status: 'cancelled', label: 'Отменить', color: '#6c757d' }
@@ -142,7 +167,6 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
       { status: 'pending', label: 'Восстановить', color: '#ffc107' }
     ]
   } else {
-    // Исполнитель может только начать работу и завершить
     statusActions.pending = [
       { status: 'in_progress', label: 'Начать работу', color: '#0dcaf0' }
     ]
@@ -151,12 +175,10 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
     ]
   }
 
-  // Фильтруем пользователей, которые еще не назначены
   const availableUsers = users.filter(
     user => !task.assignees.some(assignee => assignee.id === user.id)
   )
 
-  // Фильтруем по поисковому запросу
   const filteredUsers = availableUsers.filter(user => {
     if (!assigneeSearch.trim()) return true
 
@@ -166,6 +188,9 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
 
     return firstName.includes(searchLower) || username.includes(searchLower)
   })
+
+  const effectiveReminderHours =
+    task.effective_reminder_interval_hours || task.default_reminder_interval_hours || 3
 
   return (
     <div className="task-detail">
@@ -227,6 +252,28 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
               <span className="info-value">{formatDate(task.created_at)}</span>
             </div>
           )}
+
+          <div className="info-row info-row-settings">
+            <span className="info-label">Напоминания:</span>
+            {isManager ? (
+              <select
+                className="form-select task-settings-select"
+                value={task.reminder_interval_hours ?? ''}
+                onChange={handleReminderIntervalChange}
+                disabled={savingSettings}
+              >
+                {REMINDER_OPTIONS.map(option => (
+                  <option key={option.value || 'default'} value={option.value}>
+                    {option.value === ''
+                      ? `${option.label} (${effectiveReminderHours} ч)`
+                      : option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="info-value">Каждые {effectiveReminderHours} ч</span>
+            )}
+          </div>
         </div>
 
         <div className="task-description-section">
@@ -270,22 +317,23 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
           </div>
         </div>
 
-        {/* Модальное окно для добавления исполнителя */}
         {showAssigneeModal && (
-          <div className="modal-overlay" onClick={() => {
-            setShowAssigneeModal(false)
-            setAssigneeSearch('')
-          }}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-overlay"
+            onClick={() => {
+              setShowAssigneeModal(false)
+              setAssigneeSearch('')
+            }}
+          >
+            <div className="modal-content" onClick={e => e.stopPropagation()}>
               <h3>Добавить исполнителя</h3>
 
-              {/* Поисковая строка */}
               <input
                 type="text"
                 className="assignee-search-input"
                 placeholder="Поиск по имени или username..."
                 value={assigneeSearch}
-                onChange={(e) => setAssigneeSearch(e.target.value)}
+                onChange={e => setAssigneeSearch(e.target.value)}
                 autoFocus
               />
 
@@ -319,7 +367,6 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
           </div>
         )}
 
-        {/* Действия со статусом */}
         {statusActions[task.status] && statusActions[task.status].length > 0 && (
           <div className="task-actions-section">
             <h3>Действия</h3>
@@ -338,7 +385,6 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
           </div>
         )}
 
-        {/* Кнопка удаления задачи - только для создателя */}
         {isManager && (
           <div className="task-danger-section">
             <button
@@ -350,7 +396,6 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
           </div>
         )}
 
-        {/* Файлы */}
         {files.length > 0 && (
           <div className="task-files-section">
             <h3>Файлы ({files.length})</h3>
@@ -367,7 +412,6 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
           </div>
         )}
 
-        {/* Комментарии */}
         <div className="task-comments-section">
           <h3>Комментарии ({comments.length})</h3>
 
@@ -390,7 +434,7 @@ export function TaskDetail({ task: initialTask, onBack, isManager }) {
           <div className="add-comment">
             <textarea
               value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
+              onChange={e => setNewComment(e.target.value)}
               placeholder="Добавить комментарий..."
               rows={3}
             />

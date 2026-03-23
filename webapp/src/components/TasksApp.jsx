@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { getTasks, getStats, getCategories, getApiUrl } from '../services/api'
 import { TaskList } from './TaskList'
 import { TaskDetail } from './TaskDetail'
@@ -156,13 +156,13 @@ export function TasksApp({ userId }) {
           className={`tab ${activeTab === 'created_by_me' ? 'active' : ''}`}
           onClick={() => setActiveTab('created_by_me')}
         >
-          Назначенные мной
+          Поставленные
         </button>
         <button
           className={`tab ${activeTab === 'emails' ? 'active' : ''}`}
           onClick={() => setActiveTab('emails')}
         >
-          📧 Email
+          Почта
         </button>
       </div>
 
@@ -200,3 +200,4 @@ export function TasksApp({ userId }) {
     </div>
   )
 }
+

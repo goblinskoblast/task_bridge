@@ -114,6 +114,9 @@ class Task(Base):
     status = Column(String(50), default="pending")  # pending, in_progress, completed, cancelled
     priority = Column(String(50), default="normal")  # low, normal, high, urgent
     due_date = Column(DateTime, nullable=True)
+    reminder_interval_hours = Column(Integer, nullable=True)  # NULL = default by priority
+    last_assignee_reminder_sent_at = Column(DateTime, nullable=True)
+    last_creator_reminder_sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

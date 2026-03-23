@@ -36,6 +36,11 @@ export const updateTaskStatus = async (taskId, status, userId = null) => {
   return response.data
 }
 
+export const updateTaskSettings = async (taskId, payload) => {
+  const response = await api.patch(`/tasks/${taskId}/settings`, payload)
+  return response.data
+}
+
 // Файлы задач
 export const getTaskFiles = async (taskId) => {
   const response = await api.get(`/tasks/${taskId}/files`)

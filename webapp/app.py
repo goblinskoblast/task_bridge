@@ -29,12 +29,25 @@ GOOGLE_OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 GOOGLE_REFRESH_PREFIX = "oauth_refresh:"
+YANDEX_OAUTH_AUTH_URL = "https://oauth.yandex.ru/authorize"
+YANDEX_OAUTH_TOKEN_URL = "https://oauth.yandex.ru/token"
+YANDEX_USERINFO_URL = "https://login.yandex.ru/info"
+YANDEX_REFRESH_PREFIX = "yandex_oauth_refresh:"
 OAUTH_STATE_TTL_SECONDS = 900
 
 GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
 GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
 GOOGLE_OAUTH_REDIRECT_URI = os.getenv("GOOGLE_OAUTH_REDIRECT_URI", "").strip()
+YANDEX_OAUTH_CLIENT_ID = os.getenv("YANDEX_OAUTH_CLIENT_ID", "").strip()
+YANDEX_OAUTH_CLIENT_SECRET = os.getenv("YANDEX_OAUTH_CLIENT_SECRET", "").strip()
+YANDEX_OAUTH_REDIRECT_URI = os.getenv("YANDEX_OAUTH_REDIRECT_URI", "").strip()
 OAUTH_STATE_SECRET = os.getenv("OAUTH_STATE_SECRET", os.getenv("BOT_TOKEN", ""))
+DEFAULT_PRIORITY_REMINDER_HOURS = {
+    "low": 6,
+    "normal": 3,
+    "high": 2,
+    "urgent": 2,
+}
 
 
 def _b64url_encode(raw: bytes) -> str:
@@ -111,6 +124,42 @@ def _fetch_google_email(access_token: str) -> str:
     return email
 
 
+def _exchange_yandex_code(code: str) -> dict:
+    if not YANDEX_OAUTH_CLIENT_ID or not YANDEX_OAUTH_CLIENT_SECRET or not YANDEX_OAUTH_REDIRECT_URI:
+        raise ValueError("Yandex OAuth is not configured")
+
+    payload = urlparse.urlencode({
+        "grant_type": "authorization_code",
+        "code": code,
+        "client_id": YANDEX_OAUTH_CLIENT_ID,
+        "client_secret": YANDEX_OAUTH_CLIENT_SECRET,
+    }).encode("utf-8")
+
+    req = urlrequest.Request(
+        YANDEX_OAUTH_TOKEN_URL,
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urlrequest.urlopen(req, timeout=20) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _fetch_yandex_email(access_token: str) -> str:
+    req = urlrequest.Request(
+        f"{YANDEX_USERINFO_URL}?format=json",
+        headers={"Authorization": f"OAuth {access_token}"},
+        method="GET",
+    )
+    with urlrequest.urlopen(req, timeout=20) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    email = (payload.get("default_email") or payload.get("email") or "").strip().lower()
+    if not email:
+        raise ValueError("Yandex userinfo does not contain email")
+    return email
+
+
 def _oauth_result_html(ok: bool, message: str) -> HTMLResponse:
     status = "Success" if ok else "Error"
     color = "#1a7f37" if ok else "#b42318"
@@ -134,6 +183,59 @@ def format_datetime_utc(dt):
     if dt is None:
         return None
     return dt.isoformat() + 'Z'
+
+
+def get_default_reminder_interval_hours(priority: Optional[str]) -> int:
+    return DEFAULT_PRIORITY_REMINDER_HOURS.get((priority or "normal").lower(), 3)
+
+
+def serialize_task(task: Task) -> dict:
+    assignees = []
+    for assignee in task.assignees:
+        assignees.append({
+            "id": assignee.id,
+            "telegram_id": assignee.telegram_id,
+            "username": assignee.username,
+            "first_name": assignee.first_name
+        })
+
+    creator = None
+    if task.creator:
+        creator = {
+            "id": task.creator.id,
+            "telegram_id": task.creator.telegram_id,
+            "username": task.creator.username,
+            "first_name": task.creator.first_name
+        }
+
+    category = None
+    if task.category:
+        category = {
+            "id": task.category.id,
+            "name": task.category.name,
+            "description": task.category.description,
+            "keywords": task.category.keywords
+        }
+
+    default_reminder_hours = get_default_reminder_interval_hours(task.priority)
+
+    return {
+        "id": task.id,
+        "title": task.title,
+        "description": task.description,
+        "status": task.status,
+        "priority": task.priority,
+        "due_date": format_datetime_utc(task.due_date),
+        "created_at": format_datetime_utc(task.created_at),
+        "updated_at": format_datetime_utc(task.updated_at),
+        "assignees": assignees,
+        "creator": creator,
+        "category": category,
+        "reminder_interval_hours": task.reminder_interval_hours,
+        "default_reminder_interval_hours": default_reminder_hours,
+        "effective_reminder_interval_hours": task.reminder_interval_hours or default_reminder_hours,
+        "last_assignee_reminder_sent_at": format_datetime_utc(task.last_assignee_reminder_sent_at),
+    }
 
 # Определяем пути к файлам
 webapp_dir = Path(__file__).parent.resolve()
@@ -223,18 +325,6 @@ async def get_tasks(
     created_by: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """
-    Получить список задач
-
-    Параметры фильтрации:
-    - status: Статус задачи (pending, in_progress, completed, cancelled)
-    - category_id: ID категории
-    - assigned_to: ID исполнителя (фильтр по одному из исполнителей)
-    - created_by: ID создателя задачи
-
-    ВАЖНО: Должен быть указан хотя бы один из фильтров assigned_to или created_by
-    """
-    # Защита от получения всех задач - требуем обязательно assigned_to или created_by
     if not assigned_to and not created_by:
         logger.error(f"API /tasks called without assigned_to or created_by filters!")
         raise HTTPException(
@@ -246,26 +336,20 @@ async def get_tasks(
 
     query = db.query(Task)
 
-    # Базовые фильтры
     if status:
         query = query.filter(Task.status == status)
     if category_id:
         query = query.filter(Task.category_id == category_id)
 
-    # Критичная логика фильтрации по пользователю
-    # Если указаны ОБА параметра - показываем задачи где пользователь ЛИБО создатель ЛИБО исполнитель
     if assigned_to and created_by:
-        # OR условие - задачи где пользователь либо создал, либо назначен исполнителем
         query = query.outerjoin(Task.assignees).filter(
             or_(
                 Task.created_by == created_by,
                 User.id == assigned_to
             )
         ).distinct()
-    # Если только created_by - только созданные пользователем
     elif created_by:
         query = query.filter(Task.created_by == created_by)
-    # Если только assigned_to - только назначенные на пользователя
     elif assigned_to:
         query = query.join(Task.assignees).filter(User.id == assigned_to)
 
@@ -273,52 +357,8 @@ async def get_tasks(
 
     logger.info(f"Found {len(tasks)} tasks for user (assigned_to={assigned_to}, created_by={created_by})")
 
-    result = []
-    for task in tasks:
-        # Собираем всех исполнителей
-        assignees = []
-        for assignee in task.assignees:
-            assignees.append({
-                "id": assignee.id,
-                "telegram_id": assignee.telegram_id,
-                "username": assignee.username,
-                "first_name": assignee.first_name
-            })
+    result = [serialize_task(task) for task in tasks]
 
-        # Создатель задачи
-        creator = None
-        if task.creator:
-            creator = {
-                "id": task.creator.id,
-                "telegram_id": task.creator.telegram_id,
-                "username": task.creator.username,
-                "first_name": task.creator.first_name
-            }
-
-        category = None
-        if task.category:
-            category = {
-                "id": task.category.id,
-                "name": task.category.name,
-                "description": task.category.description,
-                "keywords": task.category.keywords
-            }
-
-        result.append({
-            "id": task.id,
-            "title": task.title,
-            "description": task.description,
-            "status": task.status,
-            "priority": task.priority,
-            "due_date": format_datetime_utc(task.due_date),
-            "created_at": format_datetime_utc(task.created_at),
-            "updated_at": format_datetime_utc(task.updated_at),
-            "assignees": assignees,  # Множественные исполнители
-            "creator": creator,  # Создатель задачи
-            "category": category
-        })
-
-    # Логируем каждую возвращаемую задачу для отладки
     for task_data in result:
         logger.info(f"  Task #{task_data['id']}: '{task_data['title']}' - created_by={task_data['creator']['id'] if task_data['creator'] else None}, assignees={[a['id'] for a in task_data['assignees']]}")
 
@@ -327,54 +367,38 @@ async def get_tasks(
 
 @app.get("/api/tasks/{task_id}", response_model=dict)
 async def get_task(task_id: int, db: Session = Depends(get_db)):
-    """Получить задачу по ID"""
     task = db.query(Task).filter(Task.id == task_id).first()
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Собираем всех исполнителей
-    assignees = []
-    for assignee in task.assignees:
-        assignees.append({
-            "id": assignee.id,
-            "telegram_id": assignee.telegram_id,
-            "username": assignee.username,
-            "first_name": assignee.first_name
-        })
+    return serialize_task(task)
 
-    # Создатель задачи
-    creator = None
-    if task.creator:
-        creator = {
-            "id": task.creator.id,
-            "telegram_id": task.creator.telegram_id,
-            "username": task.creator.username,
-            "first_name": task.creator.first_name
-        }
 
-    category = None
-    if task.category:
-        category = {
-            "id": task.category.id,
-            "name": task.category.name,
-            "description": task.category.description,
-            "keywords": task.category.keywords
-        }
+class TaskSettingsUpdate(BaseModel):
+    reminder_interval_hours: Optional[int] = None
 
-    return {
-        "id": task.id,
-        "title": task.title,
-        "description": task.description,
-        "status": task.status,
-        "priority": task.priority,
-        "due_date": format_datetime_utc(task.due_date),
-        "created_at": format_datetime_utc(task.created_at),
-        "updated_at": format_datetime_utc(task.updated_at),
-        "assignees": assignees,  # Множественные исполнители
-        "creator": creator,  # Создатель задачи
-        "category": category
-    }
+
+@app.patch("/api/tasks/{task_id}/settings")
+async def update_task_settings(
+    task_id: int,
+    settings: TaskSettingsUpdate,
+    db: Session = Depends(get_db)
+):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if settings.reminder_interval_hours is None:
+        task.reminder_interval_hours = None
+    else:
+        if settings.reminder_interval_hours <= 0:
+            raise HTTPException(status_code=400, detail="Reminder interval must be positive")
+        task.reminder_interval_hours = settings.reminder_interval_hours
+
+    db.commit()
+    db.refresh(task)
+    return serialize_task(task)
 
 
 @app.patch("/api/tasks/{task_id}/status")
@@ -861,6 +885,115 @@ class EmailAccountTest(BaseModel):
     imap_username: str
     imap_password: str
     use_ssl: bool = True
+
+
+
+
+
+@app.get("/api/oauth/yandex/start")
+async def yandex_oauth_start(user_id: int, db: Session = Depends(get_db)):
+    if not YANDEX_OAUTH_CLIENT_ID or not YANDEX_OAUTH_CLIENT_SECRET or not YANDEX_OAUTH_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Yandex OAuth is not configured")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    state = _build_oauth_state(user_id)
+    params = urlparse.urlencode({
+        "response_type": "code",
+        "client_id": YANDEX_OAUTH_CLIENT_ID,
+        "redirect_uri": YANDEX_OAUTH_REDIRECT_URI,
+        "force_confirm": "yes",
+        "state": state,
+    })
+    return RedirectResponse(url=f"{YANDEX_OAUTH_AUTH_URL}?{params}")
+
+
+@app.get("/api/oauth/yandex/callback", response_class=HTMLResponse)
+async def yandex_oauth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    if error:
+        return _oauth_result_html(False, f"Yandex OAuth error: {error}")
+    if not code or not state:
+        return _oauth_result_html(False, "Missing OAuth parameters")
+
+    try:
+        user_id = _verify_oauth_state(state)
+    except Exception as e:
+        logger.error(f"OAuth state validation failed: {e}")
+        return _oauth_result_html(False, "OAuth state is invalid or expired")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return _oauth_result_html(False, "User not found")
+
+    try:
+        token_payload = _exchange_yandex_code(code)
+    except Exception as e:
+        logger.error(f"Yandex token exchange failed: {e}")
+        return _oauth_result_html(False, "Failed to exchange OAuth code")
+
+    access_token = token_payload.get("access_token")
+    refresh_token = token_payload.get("refresh_token")
+    if not access_token:
+        return _oauth_result_html(False, "Yandex did not return access_token")
+
+    try:
+        email_address = _fetch_yandex_email(access_token)
+    except Exception as e:
+        logger.error(f"Failed to fetch Yandex profile email: {e}")
+        return _oauth_result_html(False, "Failed to read Yandex account email")
+
+    try:
+        existing = db.query(EmailAccount).filter(EmailAccount.email_address == email_address).first()
+        if existing and existing.user_id != user.id:
+            return _oauth_result_html(False, "This Yandex email is already linked to another user")
+
+        if existing:
+            if refresh_token:
+                existing.imap_password = f"{YANDEX_REFRESH_PREFIX}{refresh_token}"
+            existing.imap_server = "imap.yandex.ru"
+            existing.imap_port = 993
+            existing.imap_username = email_address
+            existing.use_ssl = True
+            existing.folder = "INBOX"
+            existing.is_active = True
+            existing.updated_at = datetime.utcnow()
+            db.commit()
+            return _oauth_result_html(True, f"Email {email_address} connected")
+
+        if not refresh_token:
+            return _oauth_result_html(False, "Yandex did not return refresh_token. Try connect again.")
+
+        accounts_count = db.query(EmailAccount).filter(EmailAccount.user_id == user.id).count()
+        if accounts_count >= 5:
+            return _oauth_result_html(False, "Maximum 5 email accounts per user")
+
+        account = EmailAccount(
+            user_id=user.id,
+            email_address=email_address,
+            imap_server="imap.yandex.ru",
+            imap_port=993,
+            imap_username=email_address,
+            imap_password=f"{YANDEX_REFRESH_PREFIX}{refresh_token}",
+            use_ssl=True,
+            folder="INBOX",
+            is_active=True,
+            auto_confirm=False,
+            last_uid=0,
+        )
+        db.add(account)
+        db.commit()
+        return _oauth_result_html(True, f"Email {email_address} connected")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to save Yandex OAuth account: {e}", exc_info=True)
+        return _oauth_result_html(False, "Failed to save account")
 
 
 @app.get("/api/email-accounts", response_model=List[dict])

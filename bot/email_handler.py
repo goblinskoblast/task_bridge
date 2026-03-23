@@ -17,7 +17,7 @@ from urllib import request as urlrequest
 
 from db.database import get_db_session
 from db.models import EmailAccount, EmailMessage
-from config import GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET
+from config import GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, YANDEX_OAUTH_CLIENT_ID, YANDEX_OAUTH_CLIENT_SECRET
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ IMAP_SERVERS = {
 }
 
 GOOGLE_REFRESH_PREFIX = "oauth_refresh:"
+YANDEX_REFRESH_PREFIX = "yandex_oauth_refresh:"
 
 
 def _get_google_access_token(refresh_token: str) -> Optional[str]:
@@ -68,6 +69,40 @@ def _get_google_access_token(refresh_token: str) -> Optional[str]:
         return access_token
     except Exception as e:
         logger.error(f"Failed to refresh Google access token: {e}")
+        return None
+
+
+def _get_yandex_access_token(refresh_token: str) -> Optional[str]:
+    if not YANDEX_OAUTH_CLIENT_ID or not YANDEX_OAUTH_CLIENT_SECRET:
+        logger.error("Yandex OAuth credentials are not configured")
+        return None
+
+    try:
+        payload = urlparse.urlencode({
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": YANDEX_OAUTH_CLIENT_ID,
+            "client_secret": YANDEX_OAUTH_CLIENT_SECRET,
+        }).encode("utf-8")
+
+        req = urlrequest.Request(
+            "https://oauth.yandex.ru/token",
+            data=payload,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+
+        with urlrequest.urlopen(req, timeout=20) as response:
+            token_payload = json.loads(response.read().decode("utf-8"))
+
+        access_token = token_payload.get("access_token")
+        if not access_token:
+            logger.error(f"Yandex token response missing access_token: {token_payload}")
+            return None
+
+        return access_token
+    except Exception as e:
+        logger.error(f"Failed to refresh Yandex access token: {e}")
         return None
 
 
@@ -148,6 +183,13 @@ def connect_imap(email_account: EmailAccount) -> Optional[IMAPClient]:
             access_token = _get_google_access_token(refresh_token)
             if not access_token:
                 logger.error(f"Failed to get Google access token for {email_account.email_address}")
+                return None
+            client.oauth2_login(email_account.imap_username, access_token)
+        elif raw_secret.startswith(YANDEX_REFRESH_PREFIX):
+            refresh_token = raw_secret[len(YANDEX_REFRESH_PREFIX):]
+            access_token = _get_yandex_access_token(refresh_token)
+            if not access_token:
+                logger.error(f"Failed to get Yandex access token for {email_account.email_address}")
                 return None
             client.oauth2_login(email_account.imap_username, access_token)
         else:
