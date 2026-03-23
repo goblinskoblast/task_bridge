@@ -3,12 +3,21 @@
  */
 
 export function getTelegramParams() {
+  const tg = window.Telegram?.WebApp
   const urlParams = new URLSearchParams(window.location.search)
+  const userIdFromUrl = urlParams.get('user_id')
+  const storedUserId = window.localStorage.getItem('taskbridge_user_id')
+
+  if (userIdFromUrl) {
+    window.localStorage.setItem('taskbridge_user_id', userIdFromUrl)
+  }
 
   return {
     mode: urlParams.get('mode'),
-    user_id: urlParams.get('user_id'),
-    task_id: urlParams.get('task_id')
+    user_id: userIdFromUrl || storedUserId,
+    task_id: urlParams.get('task_id'),
+    tab: urlParams.get('tab'),
+    telegram_user_id: tg?.initDataUnsafe?.user?.id?.toString() || null
   }
 }
 

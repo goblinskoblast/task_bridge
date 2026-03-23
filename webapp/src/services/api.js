@@ -41,6 +41,13 @@ export const updateTaskSettings = async (taskId, payload) => {
   return response.data
 }
 
+export const updateTaskDueDate = async (taskId, dueDate) => {
+  const response = await api.patch(`/tasks/${taskId}/due-date`, {
+    due_date: dueDate
+  })
+  return response.data
+}
+
 // Файлы задач
 export const getTaskFiles = async (taskId) => {
   const response = await api.get(`/tasks/${taskId}/files`)

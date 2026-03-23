@@ -7,13 +7,14 @@ import { FilterBar } from './FilterBar'
 import EmailAccounts from './EmailAccounts'
 
 export function TasksApp({ userId }) {
+  const initialTab = new URLSearchParams(window.location.search).get('tab') || 'my_tasks'
   const [tasks, setTasks] = useState([])
   const [stats, setStats] = useState(null)
   const [categories, setCategories] = useState([])
   const [selectedTask, setSelectedTask] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [activeTab, setActiveTab] = useState('my_tasks') // my_tasks | created_by_me | emails
+  const [activeTab, setActiveTab] = useState(initialTab) // my_tasks | created_by_me | emails
   const [currentUser, setCurrentUser] = useState(null)
 
   // Фильтры
@@ -133,6 +134,7 @@ export function TasksApp({ userId }) {
         task={selectedTask}
         onBack={handleBackToList}
         isManager={isCreator}
+        currentUserId={userId}
       />
     )
   }

@@ -9,6 +9,7 @@ from db.database import get_db
 from db.models import Task, User, Category, Message as MessageModel, TaskFile, Comment, EmailAccount, EmailMessage, task_assignees
 from pydantic import BaseModel
 import os
+import html
 from pathlib import Path
 from datetime import datetime
 import base64
@@ -160,16 +161,20 @@ def _fetch_yandex_email(access_token: str) -> str:
     return email
 
 
-def _oauth_result_html(ok: bool, message: str) -> HTMLResponse:
+def _oauth_result_html(ok: bool, message: str, user_id: Optional[int] = None) -> HTMLResponse:
     status = "Success" if ok else "Error"
     color = "#1a7f37" if ok else "#b42318"
+    safe_message = html.escape(message)
+    redirect_url = "/webapp/index.html"
+    if user_id:
+        redirect_url = f"/webapp/index.html?user_id={user_id}&tab=emails&oauth_status={'success' if ok else 'error'}"
     body = f"""
     <html><head><meta charset=\"utf-8\" /><title>{status}</title></head>
     <body style=\"font-family:Arial,sans-serif;padding:24px;\">
       <h2 style=\"color:{color};\">{status}</h2>
-      <p>{message}</p>
-      <p><a href=\"/webapp/index.html\">Back to dashboard</a></p>
-      <script>setTimeout(function() {{ window.location.href='/webapp/index.html'; }}, 1800);</script>
+      <p>{safe_message}</p>
+      <p><a href=\"{redirect_url}\">Back to dashboard</a></p>
+      <script>setTimeout(function() {{ window.location.href='{redirect_url}'; }}, 1800);</script>
     </body></html>
     """
     return HTMLResponse(content=body)
@@ -379,6 +384,10 @@ class TaskSettingsUpdate(BaseModel):
     reminder_interval_hours: Optional[int] = None
 
 
+class TaskDueDateUpdate(BaseModel):
+    due_date: Optional[str] = None
+
+
 @app.patch("/api/tasks/{task_id}/settings")
 async def update_task_settings(
     task_id: int,
@@ -395,6 +404,29 @@ async def update_task_settings(
         if settings.reminder_interval_hours <= 0:
             raise HTTPException(status_code=400, detail="Reminder interval must be positive")
         task.reminder_interval_hours = settings.reminder_interval_hours
+
+    db.commit()
+    db.refresh(task)
+    return serialize_task(task)
+
+
+@app.patch("/api/tasks/{task_id}/due-date")
+async def update_task_due_date(
+    task_id: int,
+    payload: TaskDueDateUpdate,
+    db: Session = Depends(get_db)
+):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if payload.due_date:
+        try:
+            task.due_date = datetime.fromisoformat(payload.due_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid due_date format")
+    else:
+        task.due_date = None
 
     db.commit()
     db.refresh(task)
@@ -783,29 +815,29 @@ async def google_oauth_callback(
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        return _oauth_result_html(False, "User not found")
+        return _oauth_result_html(False, "User not found", user_id=user_id)
 
     try:
         token_payload = _exchange_google_code(code)
     except Exception as e:
         logger.error(f"Google token exchange failed: {e}")
-        return _oauth_result_html(False, "Failed to exchange OAuth code")
+        return _oauth_result_html(False, "Failed to exchange OAuth code", user_id=user.id)
 
     access_token = token_payload.get("access_token")
     refresh_token = token_payload.get("refresh_token")
     if not access_token:
-        return _oauth_result_html(False, "Google did not return access_token")
+        return _oauth_result_html(False, "Google did not return access_token", user_id=user.id)
 
     try:
         email_address = _fetch_google_email(access_token)
     except Exception as e:
         logger.error(f"Failed to fetch Google profile email: {e}")
-        return _oauth_result_html(False, "Failed to read Google account email")
+        return _oauth_result_html(False, "Failed to read Google account email", user_id=user.id)
 
     try:
         existing = db.query(EmailAccount).filter(EmailAccount.email_address == email_address).first()
         if existing and existing.user_id != user.id:
-            return _oauth_result_html(False, "This Google email is already linked to another user")
+            return _oauth_result_html(False, "This Google email is already linked to another user", user_id=user.id)
 
         if existing:
             if refresh_token:
@@ -818,14 +850,14 @@ async def google_oauth_callback(
             existing.is_active = True
             existing.updated_at = datetime.utcnow()
             db.commit()
-            return _oauth_result_html(True, f"Email {email_address} connected")
+            return _oauth_result_html(True, f"Email {email_address} connected", user_id=user.id)
 
         if not refresh_token:
-            return _oauth_result_html(False, "Google did not return refresh_token. Try connect again.")
+            return _oauth_result_html(False, "Google did not return refresh_token. Try connect again.", user_id=user.id)
 
         accounts_count = db.query(EmailAccount).filter(EmailAccount.user_id == user.id).count()
         if accounts_count >= 5:
-            return _oauth_result_html(False, "Maximum 5 email accounts per user")
+            return _oauth_result_html(False, "Maximum 5 email accounts per user", user_id=user.id)
 
         account = EmailAccount(
             user_id=user.id,
@@ -842,11 +874,11 @@ async def google_oauth_callback(
         )
         db.add(account)
         db.commit()
-        return _oauth_result_html(True, f"Email {email_address} connected")
+        return _oauth_result_html(True, f"Email {email_address} connected", user_id=user.id)
     except Exception as e:
         db.rollback()
         logger.error(f"Failed to save Google OAuth account: {e}", exc_info=True)
-        return _oauth_result_html(False, "Failed to save account")
+        return _oauth_result_html(False, "Failed to save account", user_id=user.id)
 
 
 # ============================================================
@@ -930,29 +962,29 @@ async def yandex_oauth_callback(
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        return _oauth_result_html(False, "User not found")
+        return _oauth_result_html(False, "User not found", user_id=user_id)
 
     try:
         token_payload = _exchange_yandex_code(code)
     except Exception as e:
         logger.error(f"Yandex token exchange failed: {e}")
-        return _oauth_result_html(False, "Failed to exchange OAuth code")
+        return _oauth_result_html(False, "Failed to exchange OAuth code", user_id=user.id)
 
     access_token = token_payload.get("access_token")
     refresh_token = token_payload.get("refresh_token")
     if not access_token:
-        return _oauth_result_html(False, "Yandex did not return access_token")
+        return _oauth_result_html(False, "Yandex did not return access_token", user_id=user.id)
 
     try:
         email_address = _fetch_yandex_email(access_token)
     except Exception as e:
         logger.error(f"Failed to fetch Yandex profile email: {e}")
-        return _oauth_result_html(False, "Failed to read Yandex account email")
+        return _oauth_result_html(False, "Failed to read Yandex account email", user_id=user.id)
 
     try:
         existing = db.query(EmailAccount).filter(EmailAccount.email_address == email_address).first()
         if existing and existing.user_id != user.id:
-            return _oauth_result_html(False, "This Yandex email is already linked to another user")
+            return _oauth_result_html(False, "This Yandex email is already linked to another user", user_id=user.id)
 
         if existing:
             if refresh_token:
@@ -965,14 +997,14 @@ async def yandex_oauth_callback(
             existing.is_active = True
             existing.updated_at = datetime.utcnow()
             db.commit()
-            return _oauth_result_html(True, f"Email {email_address} connected")
+            return _oauth_result_html(True, f"Email {email_address} connected", user_id=user.id)
 
         if not refresh_token:
-            return _oauth_result_html(False, "Yandex did not return refresh_token. Try connect again.")
+            return _oauth_result_html(False, "Yandex did not return refresh_token. Try connect again.", user_id=user.id)
 
         accounts_count = db.query(EmailAccount).filter(EmailAccount.user_id == user.id).count()
         if accounts_count >= 5:
-            return _oauth_result_html(False, "Maximum 5 email accounts per user")
+            return _oauth_result_html(False, "Maximum 5 email accounts per user", user_id=user.id)
 
         account = EmailAccount(
             user_id=user.id,
@@ -989,11 +1021,11 @@ async def yandex_oauth_callback(
         )
         db.add(account)
         db.commit()
-        return _oauth_result_html(True, f"Email {email_address} connected")
+        return _oauth_result_html(True, f"Email {email_address} connected", user_id=user.id)
     except Exception as e:
         db.rollback()
         logger.error(f"Failed to save Yandex OAuth account: {e}", exc_info=True)
-        return _oauth_result_html(False, "Failed to save account")
+        return _oauth_result_html(False, "Failed to save account", user_id=user.id)
 
 
 @app.get("/api/email-accounts", response_model=List[dict])

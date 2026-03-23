@@ -40,6 +40,17 @@ OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
 
 OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "500"))
 
+AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").strip().lower()
+OPENCLAW_BASE_URL = os.getenv("OPENCLAW_BASE_URL", "http://localhost:3000").strip()
+OPENCLAW_MODEL = os.getenv("OPENCLAW_MODEL", "openai/gpt-4o").strip()
+OPENCLAW_TIMEOUT = int(os.getenv("OPENCLAW_TIMEOUT", "60"))
+OPENCLAW_ENFORCE_SDD_SPEC = os.getenv("OPENCLAW_ENFORCE_SDD_SPEC", "true").lower() == "true"
+OPENCLAW_SDD_SPEC_PATH = os.getenv(
+    "OPENCLAW_SDD_SPEC_PATH",
+    "docs/sdd/specs/SPEC-OC-001-openclaw-agent.md"
+).strip()
+OPENCLAW_SDD_MAX_CHARS = int(os.getenv("OPENCLAW_SDD_MAX_CHARS", "24000"))
+
 # Google OAuth (Gmail one-click connect)
 GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
 GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()

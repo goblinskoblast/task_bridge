@@ -22,6 +22,44 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+def get_recent_chat_context(
+    db: Session,
+    chat_id: int,
+    current_message_db_id: int,
+    limit: int = 8
+) -> List[dict]:
+    """Return recent chat messages for context-aware task extraction."""
+    recent_messages = (
+        db.query(MessageModel)
+        .filter(
+            MessageModel.chat_id == chat_id,
+            MessageModel.id != current_message_db_id,
+            MessageModel.text.isnot(None)
+        )
+        .order_by(MessageModel.date.desc(), MessageModel.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+    context_messages: List[dict] = []
+    for item in reversed(recent_messages):
+        sender_name = "unknown"
+        if item.user:
+            sender_name = (
+                item.user.first_name
+                or (f"@{item.user.username}" if item.user.username else None)
+                or f"user_{item.user_id}"
+            )
+
+        context_messages.append({
+            "sender": sender_name,
+            "date": item.date.strftime("%Y-%m-%d %H:%M:%S") if item.date else "",
+            "text": item.text or "",
+        })
+
+    return context_messages
+
+
 def init_default_categories(db: Session):
     """Инициализация стандартных категорий задач"""
     default_categories = [
@@ -907,9 +945,21 @@ async def handle_group_message(message: Message):
         db.commit()
         db.refresh(message_obj)
 
-        
-        logger.info(f"Analyzing message: {message.text[:50]}...")
-        ai_result = await analyze_message(message.text, use_ai=True)
+        context_messages = get_recent_chat_context(
+            db=db,
+            chat_id=message.chat.id,
+            current_message_db_id=message_obj.id,
+        )
+
+        logger.info(
+            f"Analyzing message with {len(context_messages)} context items: "
+            f"{message.text[:50]}..."
+        )
+        ai_result = await analyze_message(
+            message.text,
+            use_ai=True,
+            context_messages=context_messages
+        )
 
         if not ai_result or not ai_result.get("has_task"):
             logger.info("No task found in message")

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { TasksApp } from './components/TasksApp'
 import { getTelegramParams } from './utils/telegram'
 
@@ -8,20 +8,17 @@ function App() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Получаем параметры из URL (Telegram WebApp)
     const params = getTelegramParams()
 
-    setUserId(params.user_id ? parseInt(params.user_id) : null)
-    setTaskId(params.task_id ? parseInt(params.task_id) : null)
+    setUserId(params.user_id ? parseInt(params.user_id, 10) : null)
+    setTaskId(params.task_id ? parseInt(params.task_id, 10) : null)
     setLoading(false)
 
-    // Инициализируем Telegram WebApp
     if (window.Telegram?.WebApp) {
       const tg = window.Telegram.WebApp
       tg.ready()
       tg.expand()
 
-      // Применяем тему Telegram
       document.documentElement.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#ffffff')
       document.documentElement.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#000000')
       document.documentElement.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#999999')
@@ -30,9 +27,7 @@ function App() {
       document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff')
       document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#f4f4f5')
 
-      // Определяем темную тему и применяем класс
-      const isDark = tg.colorScheme === 'dark'
-      if (isDark) {
+      if (tg.colorScheme === 'dark') {
         document.body.classList.add('dark-theme')
       } else {
         document.body.classList.remove('dark-theme')
