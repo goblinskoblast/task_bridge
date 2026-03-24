@@ -61,6 +61,9 @@ Current date/time: {current_datetime}
 
 Rules:
 - Detect direct and indirect requests, reminders, commitments, follow-ups, and expected deliverables.
+- Use quoted email thread fragments as context when they clarify who must do what and by when.
+- Treat polite business wording as a task when there is an expected result: "please prepare", "could you send", "I need by Friday", "waiting for", "вам нужно", "прошу направить", "ожидаю".
+- If the body contains a question that already encodes a deadline or expectation, treat it as a task, not as a casual question.
 - Ignore ads, promo, receipts, newsletters, and service notifications unless they contain a concrete task.
 - Return one primary task only.
 - Build a short clean title and a fuller description.

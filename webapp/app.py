@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Response
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -6,7 +6,7 @@ from sqlalchemy import func, desc, or_
 from typing import List, Optional
 
 from db.database import get_db
-from db.models import Task, User, Category, Message as MessageModel, TaskFile, Comment, EmailAccount, EmailMessage, task_assignees
+from db.models import Task, User, Category, Message as MessageModel, TaskFile, Comment, EmailAccount, EmailMessage, EmailAttachment, task_assignees
 from pydantic import BaseModel
 import os
 import html
@@ -1259,6 +1259,16 @@ async def get_email_messages(
 
     result = []
     for msg in messages:
+        attachments = []
+        for attachment in msg.attachments:
+            attachments.append({
+                "id": attachment.id,
+                "filename": attachment.filename,
+                "content_type": attachment.content_type,
+                "file_size": attachment.file_size,
+                "has_extracted_text": bool(attachment.extracted_text)
+            })
+
         result.append({
             "id": msg.id,
             "message_id": msg.message_id,
@@ -1266,7 +1276,9 @@ async def get_email_messages(
             "from_address": msg.from_address,
             "to_address": msg.to_address,
             "date": format_datetime_utc(msg.date),
+            "body_text": msg.body_text,
             "has_attachments": msg.has_attachments,
+            "attachments": attachments,
             "processed": msg.processed,
             "processed_at": format_datetime_utc(msg.processed_at),
             "task_id": msg.task_id,
@@ -1275,3 +1287,20 @@ async def get_email_messages(
         })
 
     return result
+
+
+@app.get("/api/email-attachments/{attachment_id}/download")
+async def download_email_attachment(attachment_id: int, db: Session = Depends(get_db)):
+    attachment = db.query(EmailAttachment).filter(EmailAttachment.id == attachment_id).first()
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{attachment.filename}"'
+    }
+
+    return Response(
+        content=attachment.file_data,
+        media_type=attachment.content_type or "application/octet-stream",
+        headers=headers
+    )

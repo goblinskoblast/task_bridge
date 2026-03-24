@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Boolean, ForeignKey, JSON, Table
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Boolean, ForeignKey, JSON, Table, LargeBinary
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -271,9 +271,29 @@ class EmailMessage(Base):
     # Связи
     email_account = relationship("EmailAccount", back_populates="email_messages")
     task = relationship("Task", backref="email_source")
+    attachments = relationship("EmailAttachment", back_populates="email_message", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<EmailMessage(id={self.id}, from={self.from_address}, subject={self.subject})>"
+
+
+class EmailAttachment(Base):
+    """РњРѕРґРµР»СЊ РІР»РѕР¶РµРЅРёСЏ email СЃРѕРѕР±С‰РµРЅРёСЏ"""
+    __tablename__ = "email_attachments"
+
+    id = Column(Integer, primary_key=True)
+    email_message_id = Column(Integer, ForeignKey("email_messages.id", ondelete='CASCADE'), nullable=False, index=True)
+    filename = Column(String(500), nullable=False)
+    content_type = Column(String(255), nullable=True)
+    file_size = Column(Integer, nullable=True)
+    extracted_text = Column(Text, nullable=True)
+    file_data = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    email_message = relationship("EmailMessage", back_populates="attachments")
+
+    def __repr__(self):
+        return f"<EmailAttachment(id={self.id}, filename={self.filename})>"
 
 
 class SupportSession(Base):

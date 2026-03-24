@@ -5,6 +5,8 @@ import '../styles/EmailAccounts.css'
 
 export default function EmailAccounts({ currentUser }) {
   const [accounts, setAccounts] = useState([])
+  const [messagesByAccount, setMessagesByAccount] = useState({})
+  const [expandedAccounts, setExpandedAccounts] = useState({})
   const [loading, setLoading] = useState(true)
   const [showAddForm, setShowAddForm] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -72,6 +74,26 @@ export default function EmailAccounts({ currentUser }) {
       console.error('Error loading email accounts:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadMessages = async (accountId) => {
+    try {
+      const response = await fetch(getApiUrl(`/email-accounts/${accountId}/messages?limit=10`))
+      if (!response.ok) return
+      const data = await response.json()
+      setMessagesByAccount(prev => ({ ...prev, [accountId]: data }))
+    } catch (error) {
+      console.error('Error loading email messages:', error)
+    }
+  }
+
+  const toggleMessages = async (accountId) => {
+    const isExpanded = expandedAccounts[accountId]
+    setExpandedAccounts(prev => ({ ...prev, [accountId]: !isExpanded }))
+
+    if (!isExpanded && !messagesByAccount[accountId]) {
+      await loadMessages(accountId)
     }
   }
 
@@ -364,6 +386,14 @@ export default function EmailAccounts({ currentUser }) {
 
               <div className="account-actions">
                 <button
+                  className="btn-icon"
+                  onClick={() => toggleMessages(account.id)}
+                  title="Последние письма"
+                >
+                  {expandedAccounts[account.id] ? 'Скрыть письма' : 'Письма'}
+                </button>
+
+                <button
                   className={`btn-toggle ${account.is_active ? 'active' : 'inactive'}`}
                   onClick={() => toggleActive(account.id, account.is_active)}
                   title={account.is_active ? 'Приостановить' : 'Активировать'}
@@ -405,6 +435,51 @@ export default function EmailAccounts({ currentUser }) {
                 </button>
               </div>
             </div>
+
+            {expandedAccounts[account.id] && (
+              <div className="email-messages-panel">
+                <h4>Последние письма</h4>
+                {(messagesByAccount[account.id] || []).length > 0 ? (
+                  <div className="email-messages-list">
+                    {messagesByAccount[account.id].map(message => (
+                      <div key={message.id} className="email-message-item">
+                        <div className="email-message-head">
+                          <strong>{message.subject || 'Без темы'}</strong>
+                          <span>{formatTimeAgo(message.date || message.created_at)}</span>
+                        </div>
+                        <div className="email-message-meta">
+                          <span>От: {message.from_address}</span>
+                          {message.task_id && <span>Задача: #{message.task_id}</span>}
+                        </div>
+                        {message.body_text && (
+                          <p className="email-message-preview">
+                            {message.body_text.slice(0, 220)}
+                            {message.body_text.length > 220 ? '...' : ''}
+                          </p>
+                        )}
+                        {message.attachments && message.attachments.length > 0 && (
+                          <div className="email-attachments-list">
+                            {message.attachments.map(attachment => (
+                              <a
+                                key={attachment.id}
+                                className="email-attachment-link"
+                                href={getApiUrl(`/email-attachments/${attachment.id}/download`)}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Скачать: {attachment.filename}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="email-message-empty">Письма пока не загружены</p>
+                )}
+              </div>
+            )}
 
           </div>
         ))}

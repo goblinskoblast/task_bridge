@@ -208,62 +208,46 @@ def process_attachment(filename: str, file_content: bytes) -> Optional[str]:
 
 def extract_attachments_from_email(msg: EmailMessage) -> List[Dict[str, Any]]:
     """
-    Извлекает вложения из email сообщения
-
-    Args:
-        msg: Email message объект
-
-    Returns:
-        Список словарей с данными вложений
+    Извлекает вложения из email сообщения.
+    Для поддерживаемых офисных форматов дополнительно извлекает текст,
+    но для скачивания сохраняет байты любого attachment.
     """
     attachments = []
 
     try:
         for part in msg.walk():
-            # Проверяем что это вложение
-            content_disposition = part.get_content_disposition()
+            if part.get_content_disposition() != 'attachment':
+                continue
 
-            if content_disposition == 'attachment':
-                filename = part.get_filename()
+            filename = part.get_filename()
+            if not filename:
+                continue
 
-                if not filename:
-                    continue
+            from bot.email_handler import decode_mime_header
+            filename = decode_mime_header(filename)
 
-                # Декодируем имя файла (может быть в MIME формате)
-                from bot.email_handler import decode_mime_header
-                filename = decode_mime_header(filename)
+            file_content = part.get_payload(decode=True)
+            if not file_content:
+                continue
 
-                # Получаем содержимое файла
-                file_content = part.get_payload(decode=True)
+            filename_lower = filename.lower()
+            supported = filename_lower.endswith(('.txt', '.docx', '.xlsx', '.xls'))
+            extracted_text = process_attachment(filename, file_content) if supported else None
 
-                if not file_content:
-                    continue
+            attachments.append({
+                'filename': filename,
+                'content_type': part.get_content_type(),
+                'size': len(file_content),
+                'text': extracted_text,
+                'file_data': file_content
+            })
 
-                # Обрабатываем только поддерживаемые форматы
-                filename_lower = filename.lower()
-                supported = filename_lower.endswith(('.txt', '.docx', '.xlsx', '.xls'))
-
-                if not supported:
-                    logger.info(f"Skipping unsupported attachment: {filename}")
-                    continue
-
-                # Извлекаем текст из вложения
-                extracted_text = process_attachment(filename, file_content)
-
-                attachments.append({
-                    'filename': filename,
-                    'content_type': part.get_content_type(),
-                    'size': len(file_content),
-                    'text': extracted_text
-                })
-
-                logger.info(f"Processed attachment: {filename} ({len(file_content)} bytes)")
+            logger.info(f"Processed attachment: {filename} ({len(file_content)} bytes)")
 
     except Exception as e:
         logger.error(f"Error extracting attachments: {e}", exc_info=True)
 
     return attachments
-
 
 def format_attachments_text(attachments: List[Dict[str, Any]]) -> str:
     """

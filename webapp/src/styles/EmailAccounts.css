@@ -710,3 +710,77 @@
   outline: 2px solid var(--email-primary);
   outline-offset: 2px;
 }
+
+.email-messages-panel {
+  margin-top: 18px;
+  padding: 16px;
+  background: var(--email-bg-secondary);
+  border: 1px solid var(--email-border);
+  border-radius: var(--email-radius-md);
+}
+
+.email-messages-panel h4 {
+  margin: 0 0 12px;
+  color: var(--email-text-primary);
+}
+
+.email-messages-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.email-message-item {
+  padding: 14px;
+  background: var(--email-bg-primary);
+  border: 1px solid var(--email-border);
+  border-radius: var(--email-radius-sm);
+}
+
+.email-message-head,
+.email-message-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.email-message-head {
+  margin-bottom: 6px;
+  color: var(--email-text-primary);
+}
+
+.email-message-meta {
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--email-text-secondary);
+}
+
+.email-message-preview {
+  margin: 0 0 10px;
+  color: var(--email-text-primary);
+  white-space: pre-wrap;
+}
+
+.email-attachments-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.email-attachment-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: var(--email-radius-sm);
+  background: var(--email-primary-light);
+  color: var(--email-primary-hover);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.email-message-empty {
+  margin: 0;
+  color: var(--email-text-secondary);
+}
