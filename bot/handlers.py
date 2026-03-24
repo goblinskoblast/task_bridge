@@ -757,6 +757,9 @@ async def handle_confirm_task(callback: CallbackQuery):
                 task.assignees.append(assignee)
             db.commit()
 
+        from bot.calendar_sync import sync_task_to_connected_calendars
+        sync_task_to_connected_calendars(task, db)
+
         # Отмечаем pending task как подтвержденный
         pending_task.status = "confirmed"
         db.commit()
@@ -1292,3 +1295,5 @@ async def handle_other_message(message: Message):
             "Я работаю в групповых чатах. Добавьте меня в группу, чтобы я начал анализировать задачи.\n\n"
             "Используйте /help для получения справки."
         )
+
+

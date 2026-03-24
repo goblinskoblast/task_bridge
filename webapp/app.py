@@ -787,7 +787,7 @@ async def google_oauth_start(user_id: int, db: Session = Depends(get_db)):
         "client_id": GOOGLE_OAUTH_CLIENT_ID,
         "redirect_uri": GOOGLE_OAUTH_REDIRECT_URI,
         "response_type": "code",
-        "scope": "openid email https://mail.google.com/",
+        "scope": "openid email https://mail.google.com/ https://www.googleapis.com/auth/calendar.events",
         "access_type": "offline",
         "prompt": "consent",
         "state": state,
