@@ -10,7 +10,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 
 from db.database import get_db_session
-from db.models import EmailAccount, EmailMessage, EmailAttachment, Task, PendingTask, User
+from db.models import EmailAccount, EmailMessage, EmailAttachment, Task, User
 from bot.ai_extractor import analyze_email_with_ai
 from bot.email_handler import fetch_new_emails
 from bot.attachment_processor import extract_attachments_from_email, format_attachments_text
@@ -187,11 +187,7 @@ def create_task_from_email(
             logger.error(f"Email account owner not found: user_id={email_account.user_id}")
             return None
 
-        # Проверяем - является ли отправитель зарегистрированным пользователем
         sender_email = email_data.get('from_address', '')
-        sender_user = find_user_by_email(sender_email)
-
-        # Определяем нужно ли автоподтверждение
         needs_confirmation = not email_account.auto_confirm
 
         # Извлекаем исполнителей
@@ -208,66 +204,41 @@ def create_task_from_email(
 
         logger.info(f"Email from: {sender_email}, auto_confirm={email_account.auto_confirm}, needs_confirmation={needs_confirmation}")
 
+        task = Task(
+            title=task_data.get("title", email_data.get('subject', 'Задача из email')),
+            description=task_data.get("description", email_data.get('body_text', '')),
+            status="pending",
+            priority=task_data.get("priority", "normal"),
+            due_date=task_data.get("due_date_parsed"),
+            created_by=owner.id
+        )
+
+        db.add(task)
+        db.flush()
+
+        for username in assignee_usernames:
+            assignee = find_user_by_username(username)
+            if assignee:
+                task.assignees.append(assignee)
+                logger.info(f"Assigned task to @{username}")
+
+        db.commit()
+        db.refresh(task)
+        sync_task_to_connected_calendars(task, db)
+
+        email_message.task_id = task.id
+        email_message.processed = True
+        email_message.processed_at = datetime.utcnow()
         if needs_confirmation:
-            # Создаем PendingTask (требует подтверждения)
-            pending_task = PendingTask(
-                message_id=None,  # У email нет Telegram message_id
-                chat_id=owner.telegram_id,  # Отправляем владельцу email аккаунта
-                created_by_id=owner.id,
-                title=task_data.get("title", email_data.get('subject', 'Задача из email')),
-                description=task_data.get("description", email_data.get('body_text', '')),
-                assignee_usernames=assignee_usernames if assignee_usernames else None,
-                due_date=task_data.get("due_date_parsed"),
-                priority=task_data.get("priority", "normal"),
-                status="pending"
-            )
+            email_message.error_message = "Created from email without Telegram confirmation flow"
+        db.commit()
 
-            db.add(pending_task)
-            db.commit()
-            db.refresh(pending_task)
+        logger.info(
+            f"✅ Created Task #{task.id} from email: {email_data.get('subject', '')}, "
+            f"needs_confirmation={needs_confirmation}"
+        )
 
-            logger.info(f"✅ Created PendingTask #{pending_task.id} from email: {email_data.get('subject', '')}")
-
-            # TODO: Отправить уведомление владельцу о новой задаче требующей подтверждения
-
-            return None  # PendingTask, не Task
-
-        else:
-            # Создаем Task автоматически
-            task = Task(
-                title=task_data.get("title", email_data.get('subject', 'Задача из email')),
-                description=task_data.get("description", email_data.get('body_text', '')),
-                status="pending",
-                priority=task_data.get("priority", "normal"),
-                due_date=task_data.get("due_date_parsed"),
-                created_by=owner.id
-            )
-
-            db.add(task)
-            db.flush()  # Получаем ID задачи
-
-            # Назначаем исполнителей
-            for username in assignee_usernames:
-                assignee = find_user_by_username(username)
-                if assignee:
-                    task.assignees.append(assignee)
-                    logger.info(f"Assigned task to @{username}")
-
-            db.commit()
-            db.refresh(task)
-            sync_task_to_connected_calendars(task, db)
-
-            # Связываем email с задачей
-            email_message.task_id = task.id
-            email_message.processed = True
-            email_message.processed_at = datetime.utcnow()
-            db.commit()
-
-            logger.info(f"✅ Created Task #{task.id} from email: {email_data.get('subject', '')}")
-
-            # TODO: Отправить уведомления исполнителям
-
-            return task.id
+        return task.id
 
     except Exception as e:
         logger.error(f"Error creating task from email: {e}", exc_info=True)
