@@ -1050,10 +1050,20 @@ async def get_email_accounts(user_id: Optional[int] = None, db: Session = Depend
             EmailMessage.processed == True
         ).count()
 
-        tasks_created = db.query(EmailMessage).filter(
+        direct_tasks_created = db.query(EmailMessage).filter(
             EmailMessage.email_account_id == account.id,
             EmailMessage.task_id.isnot(None)
         ).count()
+
+        confirmed_email_tasks = db.query(func.count(Task.id)).join(
+            MessageModel, Task.message_id == MessageModel.id
+        ).join(
+            EmailMessage, EmailMessage.uid == MessageModel.message_id
+        ).filter(
+            EmailMessage.email_account_id == account.id
+        ).scalar() or 0
+
+        tasks_created = max(direct_tasks_created, confirmed_email_tasks)
 
         result.append({
             "id": account.id,
