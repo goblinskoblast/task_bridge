@@ -187,6 +187,14 @@ NOISE_MARKERS = [
     "чек",
 ]
 
+ERROR_SUBJECT_MARKERS = [
+    "обнаружены ошибки",
+    "ошибка",
+    "error",
+    "invalid",
+    "некорректный формат",
+]
+
 
 def get_current_datetime() -> str:
     tz = pytz.timezone(TIMEZONE)
@@ -366,6 +374,24 @@ def _build_title_from_imperative(text: str) -> str:
     return _clean_title_candidate(cleaned)
 
 
+def _select_best_email_trigger_text(subject: str, body_text: str) -> str:
+    subject = (subject or "").strip()
+    body_text = (body_text or "").strip()
+
+    body_lines = [line.strip(" -\t") for line in re.split(r"[\r\n]+", body_text) if line.strip()]
+    body_sentences = [item.strip() for item in re.split(r"(?<=[.!?])\s+", body_text) if item.strip()]
+
+    candidates = body_lines + body_sentences
+    for candidate in candidates:
+        if _contains_imperative_signal(candidate):
+            return candidate
+
+    if not any(marker in subject.lower() for marker in ERROR_SUBJECT_MARKERS) and subject:
+        return subject
+
+    return body_text or subject
+
+
 def _build_fallback_task(
     source: str,
     current_text: str,
@@ -379,7 +405,7 @@ def _build_fallback_task(
     body_text = (body_text or current_text).strip()
     attachments_text = (attachments_text or "").strip()
 
-    trigger_text = current_text if source == "telegram" else f"{subject}\n{body_text}".strip()
+    trigger_text = current_text if source == "telegram" else _select_best_email_trigger_text(subject, body_text)
     context_text = "\n".join((item.get("text") or "").strip() for item in (context_messages or []) if (item.get("text") or "").strip())
     combined_text = "\n".join(part for part in [subject, body_text, context_text, attachments_text] if part).strip()
 
@@ -392,7 +418,14 @@ def _build_fallback_task(
         if source == "telegram":
             return None
 
-    title = subject if source == "email" and subject and len(subject) <= 120 else _build_title_from_imperative(trigger_text)
+    title = (
+        subject
+        if source == "email"
+        and subject
+        and len(subject) <= 120
+        and not any(marker in subject.lower() for marker in ERROR_SUBJECT_MARKERS)
+        else _build_title_from_imperative(trigger_text)
+    )
     if not title:
         title = _build_title_from_imperative(body_text)
     if not title:

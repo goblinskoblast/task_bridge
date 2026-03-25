@@ -297,7 +297,11 @@ def process_email(email_account: EmailAccount, email_data: Dict[str, Any]) -> bo
 
         extracted_attachments = []
         if email_data.get('has_attachments') and email_data.get('raw_message'):
-            extracted_attachments = extract_attachments_from_email(email_data['raw_message'])
+            try:
+                extracted_attachments = extract_attachments_from_email(email_data['raw_message'])
+            except Exception as attachment_error:
+                logger.error(f"Attachment extraction failed, continuing with email body only: {attachment_error}", exc_info=True)
+                extracted_attachments = []
 
         email_message = EmailMessage(
             email_account_id=email_account.id,
