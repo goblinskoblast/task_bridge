@@ -25,6 +25,7 @@ app = FastAPI(title="TaskBridge API")
 
 import logging
 logger = logging.getLogger(__name__)
+from bot.email_handler import initialize_email_account_sync_state
 
 GOOGLE_OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -849,6 +850,7 @@ async def google_oauth_callback(
             existing.folder = "INBOX"
             existing.is_active = True
             existing.updated_at = datetime.utcnow()
+            initialize_email_account_sync_state(existing)
             db.commit()
             return _oauth_result_html(True, f"Email {email_address} connected", user_id=user.id)
 
@@ -872,6 +874,7 @@ async def google_oauth_callback(
             auto_confirm=False,
             last_uid=0,
         )
+        initialize_email_account_sync_state(account)
         db.add(account)
         db.commit()
         return _oauth_result_html(True, f"Email {email_address} connected", user_id=user.id)
@@ -996,6 +999,7 @@ async def yandex_oauth_callback(
             existing.folder = "INBOX"
             existing.is_active = True
             existing.updated_at = datetime.utcnow()
+            initialize_email_account_sync_state(existing)
             db.commit()
             return _oauth_result_html(True, f"Email {email_address} connected", user_id=user.id)
 
@@ -1019,6 +1023,7 @@ async def yandex_oauth_callback(
             auto_confirm=False,
             last_uid=0,
         )
+        initialize_email_account_sync_state(account)
         db.add(account)
         db.commit()
         return _oauth_result_html(True, f"Email {email_address} connected", user_id=user.id)
@@ -1144,6 +1149,7 @@ async def create_email_account(account_data: EmailAccountCreate, user_id: int, d
         subject_keywords=account_data.subject_keywords,
         last_uid=0
     )
+    initialize_email_account_sync_state(new_account)
 
     db.add(new_account)
     db.commit()

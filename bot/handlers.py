@@ -783,7 +783,11 @@ async def handle_confirm_task(callback: CallbackQuery):
 
         
         creator = db.query(User).filter(User.id == pending_task.created_by_id).first()
-        webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=manager&user_id={creator.id}" if creator else f"{WEB_APP_DOMAIN}/webapp/index.html"
+        webapp_url = (
+            f"{WEB_APP_DOMAIN}/webapp/index.html?mode=manager&user_id={creator.id}&task_id={task.id}"
+            if creator else
+            f"{WEB_APP_DOMAIN}/webapp/index.html?task_id={task.id}"
+        )
 
         
         manager_keyboard = InlineKeyboardMarkup(inline_keyboard=[
