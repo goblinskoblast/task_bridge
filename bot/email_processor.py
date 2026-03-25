@@ -10,13 +10,79 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 
 from db.database import get_db_session
-from db.models import EmailAccount, EmailMessage, EmailAttachment, Task, User
+from db.models import EmailAccount, EmailMessage, EmailAttachment, Task, PendingTask, User, Message as MessageModel
 from bot.ai_extractor import analyze_email_with_ai
 from bot.email_handler import fetch_new_emails
 from bot.attachment_processor import extract_attachments_from_email, format_attachments_text
 from bot.calendar_sync import sync_task_to_connected_calendars
+from bot.notifications import get_notification_bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from config import WEB_APP_DOMAIN
 
 logger = logging.getLogger(__name__)
+
+
+async def _send_email_pending_confirmation(owner: User, pending_task: PendingTask) -> None:
+    if not owner.telegram_id or owner.telegram_id == -1:
+        logger.warning("Owner %s has no Telegram chat, cannot send email confirmation", owner.id)
+        return
+
+    bot = get_notification_bot()
+    confirmation_text = (
+        f"📨 <b>Новая задача из почты требует подтверждения</b>\n\n"
+        f"<b>Задача:</b> {pending_task.title}\n"
+    )
+
+    if pending_task.description and pending_task.description != pending_task.title:
+        confirmation_text += f"<b>Описание:</b> {pending_task.description}\n"
+
+    if pending_task.due_date:
+        confirmation_text += f"<b>Срок:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+
+    confirmation_text += f"<b>Приоритет:</b> {pending_task.priority}\n\n"
+    confirmation_text += "Подтвердите создание задачи:"
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm_task:{pending_task.id}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_task:{pending_task.id}")
+    ]])
+
+    sent_message = await bot.send_message(
+        chat_id=owner.telegram_id,
+        text=confirmation_text,
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    pending_task.telegram_message_id = sent_message.message_id
+
+
+async def _send_email_task_created_notification(owner: User, task: Task) -> None:
+    if not owner.telegram_id or owner.telegram_id == -1:
+        logger.warning("Owner %s has no Telegram chat, cannot send created-task notification", owner.id)
+        return
+
+    bot = get_notification_bot()
+    webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=manager&user_id={owner.id}&task_id={task.id}"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📱 Открыть задачу", web_app=WebAppInfo(url=webapp_url))
+    ]])
+
+    text = (
+        f"✅ <b>Задача создана из письма</b>\n\n"
+        f"<b>Задача:</b> {task.title}\n"
+    )
+    if task.description and task.description != task.title:
+        text += f"<b>Описание:</b> {task.description}\n"
+    if task.due_date:
+        text += f"<b>Срок:</b> {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+    text += f"<b>Приоритет:</b> {task.priority}"
+
+    await bot.send_message(
+        chat_id=owner.telegram_id,
+        text=text,
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
 
 
 def clean_html_to_text(html_content: str) -> str:
@@ -83,13 +149,13 @@ def extract_task_from_email(
     elif attachments:
         attachments_text = format_attachments_text(attachments)
 
-    full_text = (
-        f"EMAIL SUBJECT:\n{subject}\n\n"
-        f"EMAIL BODY:\n{body_text}\n\n"
-        "Use quoted thread fragments and attachment text as context for hidden or indirect tasks.\n"
-        "If the sender implies an expected deliverable or asks for a result by a time, treat it as a task.\n"
-        f"{attachments_text}"
-    ).strip()
+    full_text_parts = [
+        f"EMAIL SUBJECT:\n{subject}",
+        f"EMAIL BODY:\n{body_text}",
+    ]
+    if attachments_text:
+        full_text_parts.append(f"ATTACHMENT TEXT:\n{attachments_text}")
+    full_text = "\n\n".join(part for part in full_text_parts if part.strip()).strip()
 
     if not full_text.strip():
         logger.warning("Empty email content, skipping")
@@ -207,6 +273,46 @@ def create_task_from_email(
 
         logger.info(f"Email from: {sender_email}, auto_confirm={email_account.auto_confirm}, needs_confirmation={needs_confirmation}")
 
+        if needs_confirmation:
+            synthetic_message = MessageModel(
+                message_id=email_message.uid,
+                chat_id=owner.telegram_id or owner.id,
+                user_id=owner.id,
+                text=task_data.get("description", email_data.get('body_text', '')) or task_data.get("title", "Задача из email"),
+                date=email_data.get('date') or datetime.utcnow(),
+                has_task=True
+            )
+            db.add(synthetic_message)
+            db.flush()
+
+            pending_task = PendingTask(
+                message_id=synthetic_message.id,
+                chat_id=owner.telegram_id or owner.id,
+                created_by_id=owner.id,
+                title=task_data.get("title", email_data.get('subject', 'Задача из email')),
+                description=task_data.get("description", email_data.get('body_text', '')),
+                assignee_usernames=assignee_usernames if assignee_usernames else None,
+                assignee_username=assignee_usernames[0] if assignee_usernames else None,
+                due_date=task_data.get("due_date_parsed"),
+                priority=task_data.get("priority", "normal"),
+                status="pending"
+            )
+            db.add(pending_task)
+            db.commit()
+            db.refresh(pending_task)
+
+            import asyncio
+            asyncio.run(_send_email_pending_confirmation(owner, pending_task))
+            db.commit()
+
+            email_message.processed = True
+            email_message.processed_at = datetime.utcnow()
+            email_message.error_message = "Awaiting owner confirmation"
+            db.commit()
+
+            logger.info(f"✅ Created PendingTask #{pending_task.id} from email: {email_data.get('subject', '')}")
+            return None
+
         task = Task(
             title=task_data.get("title", email_data.get('subject', 'Задача из email')),
             description=task_data.get("description", email_data.get('body_text', '')),
@@ -232,15 +338,13 @@ def create_task_from_email(
         email_message.task_id = task.id
         email_message.processed = True
         email_message.processed_at = datetime.utcnow()
-        if needs_confirmation:
-            email_message.error_message = "Created from email without Telegram confirmation flow"
+        email_message.error_message = None
         db.commit()
 
-        logger.info(
-            f"✅ Created Task #{task.id} from email: {email_data.get('subject', '')}, "
-            f"needs_confirmation={needs_confirmation}"
-        )
+        import asyncio
+        asyncio.run(_send_email_task_created_notification(owner, task))
 
+        logger.info(f"✅ Created Task #{task.id} from email: {email_data.get('subject', '')}")
         return task.id
 
     except Exception as e:
