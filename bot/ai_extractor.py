@@ -33,11 +33,13 @@ If yes, return exactly one primary task.
 Core rules:
 - Use context to resolve references like "it", "this", "as discussed", "then do it by Saturday".
 - Treat imperative requests and operational instructions as tasks: examples include "пришлите", "отправьте", "подготовьте", "проверьте", "согласуйте", "fill", "send", "prepare", "review".
+- Treat meeting and call invitations as tasks too. If the communication asks someone to attend a meeting, join a call, be on a demo, or connect at a specific time, extract it as a task.
 - A task may be indirect. If the sender expects a concrete result, artifact, answer, file, update, approval, or action, it is a task candidate.
 - For Telegram, the current message must trigger the task. Older context may complete the details but should not create a task on its own.
 - For Email, use subject, body, quoted thread, and attachment text together.
 - Ignore pure discussion, jokes, newsletters, ads, receipts, and service notifications without an expected action.
 - Build a short clean title. Remove greetings, direct addresses, filler, and repeated deadline wording when possible.
+- Preserve meeting metadata in description when present: address, meeting place, floor/room, call link, dial-in details.
 - description should keep the useful actionable details in natural language.
 - assignee_usernames must be an array without @.
 - If a person is mentioned by name but no Telegram username is known, return the plain name in assignee_usernames.
@@ -195,6 +197,25 @@ ERROR_SUBJECT_MARKERS = [
     "некорректный формат",
 ]
 
+MEETING_MARKERS = [
+    "встреча",
+    "встретимся",
+    "встретиться",
+    "созвон",
+    "созвониться",
+    "колл",
+    "звонок",
+    "видеозвонок",
+    "call",
+    "meeting",
+    "zoom",
+    "google meet",
+    "meet.google",
+    "teams.microsoft",
+    "webex",
+    "demo",
+]
+
 
 def get_current_datetime() -> str:
     tz = pytz.timezone(TIMEZONE)
@@ -294,11 +315,42 @@ def _extract_due_date(text: str) -> Optional[datetime]:
     now = datetime.now(tz)
     text_lower = text.lower()
 
+    explicit_datetime_patterns = [
+        r"\b\d{1,2}\.\d{1,2}\.\d{2,4}\s+в\s+\d{1,2}:\d{2}\b",
+        r"\b\d{1,2}\.\d{1,2}\.\d{2,4}\s+\d{1,2}:\d{2}\b",
+        r"\b\d{1,2}\.\d{1,2}\s+в\s+\d{1,2}:\d{2}\b",
+        r"\b\d{1,2}\.\d{1,2}\s+\d{1,2}:\d{2}\b",
+        r"\b\d{1,2}:\d{2}\b",
+    ]
+    for pattern in explicit_datetime_patterns:
+        match = re.search(pattern, text_lower)
+        if not match:
+            continue
+        fragment = match.group(0).replace(" в ", " ")
+        try:
+            parsed = date_parser.parse(
+                fragment,
+                dayfirst=True,
+                fuzzy=True,
+                default=now.replace(hour=18, minute=0, second=0, microsecond=0),
+            )
+            if parsed.tzinfo is None:
+                parsed = tz.localize(parsed)
+            return parsed
+        except Exception:
+            continue
+
     if "сегодня" in text_lower:
+        time_match = re.search(r"\b(\d{1,2}):(\d{2})\b", text_lower)
+        if time_match:
+            return now.replace(hour=int(time_match.group(1)), minute=int(time_match.group(2)), second=0, microsecond=0)
         return now.replace(hour=18, minute=0, second=0, microsecond=0)
 
     if "завтра" in text_lower:
         target = now + timedelta(days=1)
+        time_match = re.search(r"\b(\d{1,2}):(\d{2})\b", text_lower)
+        if time_match:
+            return target.replace(hour=int(time_match.group(1)), minute=int(time_match.group(2)), second=0, microsecond=0)
         return target.replace(hour=18, minute=0, second=0, microsecond=0)
 
     days_match = re.search(r"через\s+(\d+)\s+(дн|дня|дней)", text_lower)
@@ -358,6 +410,11 @@ def _contains_imperative_signal(text: str) -> bool:
     return False
 
 
+def _contains_meeting_signal(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in MEETING_MARKERS)
+
+
 def _is_noise(text: str) -> bool:
     lowered = (text or "").lower()
     return any(marker in lowered for marker in NOISE_MARKERS)
@@ -372,6 +429,39 @@ def _build_title_from_imperative(text: str) -> str:
             title = f"{normalized} {tail}".strip()
             return _clean_title_candidate(title)
     return _clean_title_candidate(cleaned)
+
+
+def _extract_meeting_metadata(text: str) -> Dict[str, Optional[str]]:
+    raw_text = (text or "").strip()
+    lowered = raw_text.lower()
+
+    url_match = re.search(r"https?://\S+", raw_text)
+    location_match = re.search(
+        r"(?:адрес|локация|место|офис|по адресу|в офисе|в переговорке|room|address)\s*[:\-]?\s*([^\n]+)",
+        raw_text,
+        flags=re.IGNORECASE,
+    )
+    time_match = re.search(r"\b\d{1,2}:\d{2}\b", raw_text)
+
+    title = None
+    if _contains_meeting_signal(lowered):
+        if any(marker in lowered for marker in ["созвон", "звонок", "call", "meet.google", "zoom", "teams.microsoft", "webex"]):
+            title = "Подключиться к созвону"
+        else:
+            title = "Принять участие во встрече"
+
+    details: List[str] = []
+    if url_match:
+        details.append(f"Ссылка: {url_match.group(0)}")
+    if location_match:
+        details.append(f"Адрес: {location_match.group(1).strip()}")
+    if time_match:
+        details.append(f"Время: {time_match.group(0)}")
+
+    return {
+        "title": title,
+        "details": "\n".join(details) if details else None,
+    }
 
 
 def _select_best_email_trigger_text(subject: str, body_text: str) -> str:
@@ -413,10 +503,12 @@ def _build_fallback_task(
         return None
 
     if not _contains_imperative_signal(trigger_text):
-        if source == "email" and not _contains_imperative_signal(combined_text):
+        if source == "email" and not (_contains_imperative_signal(combined_text) or _contains_meeting_signal(combined_text)):
             return None
-        if source == "telegram":
+        if source == "telegram" and not _contains_meeting_signal(combined_text):
             return None
+
+    meeting_meta = _extract_meeting_metadata(combined_text)
 
     title = (
         subject
@@ -426,6 +518,8 @@ def _build_fallback_task(
         and not any(marker in subject.lower() for marker in ERROR_SUBJECT_MARKERS)
         else _build_title_from_imperative(trigger_text)
     )
+    if not title and meeting_meta["title"]:
+        title = meeting_meta["title"]
     if not title:
         title = _build_title_from_imperative(body_text)
     if not title:
@@ -443,6 +537,9 @@ def _build_fallback_task(
         description_parts.append(current_text)
         if context_text:
             description_parts.append(f"Контекст: {context_text}")
+
+    if meeting_meta["details"]:
+        description_parts.append(meeting_meta["details"])
 
     description = "\n\n".join(part.strip() for part in description_parts if part.strip()) or title
     due_date = _extract_due_date(combined_text)
