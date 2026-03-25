@@ -27,7 +27,7 @@ IMAP_SERVERS = {
     "gmail.com": {"server": "imap.gmail.com", "port": 993},
     "outlook.com": {"server": "outlook.office365.com", "port": 993},
     "hotmail.com": {"server": "outlook.office365.com", "port": 993},
-    "yandex.ru": {"server": "imap.yandex.ru", "port": 993},
+    "yandex.ru": {"server": "imap.yandex.com", "port": 993},
     "yandex.com": {"server": "imap.yandex.com", "port": 993},
     "mail.ru": {"server": "imap.mail.ru", "port": 993},
     "yahoo.com": {"server": "imap.mail.yahoo.com", "port": 993},

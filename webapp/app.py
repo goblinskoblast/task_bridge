@@ -992,7 +992,7 @@ async def yandex_oauth_callback(
         if existing:
             if refresh_token:
                 existing.imap_password = f"{YANDEX_REFRESH_PREFIX}{refresh_token}"
-            existing.imap_server = "imap.yandex.ru"
+            existing.imap_server = "imap.yandex.com"
             existing.imap_port = 993
             existing.imap_username = email_address
             existing.use_ssl = True
@@ -1013,7 +1013,7 @@ async def yandex_oauth_callback(
         account = EmailAccount(
             user_id=user.id,
             email_address=email_address,
-            imap_server="imap.yandex.ru",
+            imap_server="imap.yandex.com",
             imap_port=993,
             imap_username=email_address,
             imap_password=f"{YANDEX_REFRESH_PREFIX}{refresh_token}",
