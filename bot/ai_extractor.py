@@ -1,5 +1,6 @@
-import logging
-from datetime import datetime
+﻿import logging
+import re
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import pytz
@@ -62,7 +63,7 @@ Current date/time: {current_datetime}
 Rules:
 - Detect direct and indirect requests, reminders, commitments, follow-ups, and expected deliverables.
 - Use quoted email thread fragments as context when they clarify who must do what and by when.
-- Treat polite business wording as a task when there is an expected result: "please prepare", "could you send", "I need by Friday", "waiting for", "вам нужно", "прошу направить", "ожидаю".
+- Treat polite business wording as a task when there is an expected result: "please prepare", "could you send", "I need by Friday", "waiting for", "вам нужно", "тебе нужно", "прошу направить", "ожидаю", "нужно подготовить", "пришли мне", "сделай".
 - If the body contains a question that already encodes a deadline or expectation, treat it as a task, not as a casual question.
 - Ignore ads, promo, receipts, newsletters, and service notifications unless they contain a concrete task.
 - Return one primary task only.
@@ -73,6 +74,43 @@ Rules:
 
 Return ONLY JSON in the same schema as chat extraction.
 """.strip()
+
+
+RUS_WEEKDAYS = {
+    "понедельник": 0,
+    "вторник": 1,
+    "среда": 2,
+    "среду": 2,
+    "четверг": 3,
+    "пятница": 4,
+    "пятницу": 4,
+    "суббота": 5,
+    "субботу": 5,
+    "воскресенье": 6,
+}
+
+EMAIL_TASK_MARKERS = [
+    "тебе нужно",
+    "вам нужно",
+    "нужно",
+    "надо",
+    "необходимо",
+    "прошу",
+    "сделай",
+    "подготовь",
+    "напиши",
+    "продумай",
+    "пришли",
+    "отправь",
+    "подготовьте",
+    "please",
+    "need",
+    "must",
+    "should",
+    "prepare",
+    "send",
+    "write",
+]
 
 
 def get_current_datetime() -> str:
@@ -96,6 +134,106 @@ def _build_context_prompt(text: str, context_messages: Optional[List[Dict[str, A
             lines.append(f"{prefix}: {body}")
 
     return "\n".join(lines)
+
+
+def _clean_email_title(subject: str, body_text: str) -> str:
+    subject = (subject or "").strip().strip(" .;:-")
+    body_text = (body_text or "").strip()
+
+    if subject and len(subject) <= 120:
+        return subject
+
+    first_sentence = re.split(r"[.!?\n]+", body_text, maxsplit=1)[0].strip()
+    first_sentence = re.sub(
+        r"^(привет|добрый день|здравствуй|здравствуйте|hello|hi)\s+[^\s,]+,?\s*",
+        "",
+        first_sentence,
+        flags=re.IGNORECASE,
+    )
+    first_sentence = re.sub(r"^(тебе|вам)\s+нужно\s+", "", first_sentence, flags=re.IGNORECASE)
+    first_sentence = re.sub(r"^(нужно|надо|необходимо|прошу)\s+", "", first_sentence, flags=re.IGNORECASE)
+    first_sentence = re.sub(r"\s+до\s+.*$", "", first_sentence, flags=re.IGNORECASE)
+    first_sentence = re.sub(r"\s+", " ", first_sentence).strip(" ,.;:-")
+    return first_sentence[:120] if first_sentence else "Задача из email"
+
+
+def _extract_relative_due_date(text: str) -> Optional[datetime]:
+    if not text:
+        return None
+
+    tz = pytz.timezone(TIMEZONE)
+    now = datetime.now(tz)
+    text_lower = text.lower()
+
+    if "сегодня" in text_lower:
+        return now.replace(hour=18, minute=0, second=0, microsecond=0)
+
+    if "завтра" in text_lower:
+        target = now + timedelta(days=1)
+        return target.replace(hour=18, minute=0, second=0, microsecond=0)
+
+    days_match = re.search(r"через\s+(\d+)\s+(дн|дня|дней)", text_lower)
+    if days_match:
+        target = now + timedelta(days=int(days_match.group(1)))
+        return target.replace(hour=18, minute=0, second=0, microsecond=0)
+
+    for word, weekday in RUS_WEEKDAYS.items():
+        if re.search(rf"(до|к)\s+(этой\s+|этому\s+)?{word}\b", text_lower):
+            days_ahead = (weekday - now.weekday()) % 7
+            if days_ahead == 0:
+                days_ahead = 7
+            target = now + timedelta(days=days_ahead)
+            return target.replace(hour=18, minute=0, second=0, microsecond=0)
+
+    return None
+
+
+def _infer_email_priority(text: str) -> str:
+    text_lower = (text or "").lower()
+    if any(marker in text_lower for marker in ["срочно", "asap", "urgent", "critical"]):
+        return "high"
+    if "не срочно" in text_lower or "when you have time" in text_lower:
+        return "low"
+    return "normal"
+
+
+def _extract_task_from_email_fallback(text: str) -> Optional[Dict[str, Any]]:
+    if not text or not text.strip():
+        return None
+
+    subject_match = re.search(r"EMAIL SUBJECT:\s*(.+?)(?:\n|$)", text, flags=re.IGNORECASE | re.DOTALL)
+    body_match = re.search(
+        r"EMAIL BODY:\s*(.+?)(?:\n(?:Use quoted thread|ATTACHMENTS:)|$)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    subject = subject_match.group(1).strip() if subject_match else ""
+    body_text = body_match.group(1).strip() if body_match else text.strip()
+    body_lower = body_text.lower()
+
+    if not any(marker in body_lower for marker in EMAIL_TASK_MARKERS):
+        return None
+
+    if any(noise in body_lower for noise in ["скидка", "newsletter", "unsubscribe", "чек", "receipt", "promo"]):
+        return None
+
+    due_date = _extract_relative_due_date(body_text)
+    description = re.sub(r"\s+", " ", body_text).strip()
+    title = _clean_email_title(subject, body_text)
+
+    if not title or len(title) < 4:
+        title = "Задача из email"
+
+    return {
+        "has_task": True,
+        "task": {
+            "title": title,
+            "description": description or title,
+            "assignee_usernames": [],
+            "due_date": due_date.strftime("%Y-%m-%d %H:%M:%S") if due_date else None,
+            "priority": _infer_email_priority(f"{subject}\n{body_text}"),
+        },
+    }
 
 
 def _normalize_task_result(result: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -127,9 +265,11 @@ def _normalize_task_result(result: Optional[Dict[str, Any]]) -> Optional[Dict[st
             task["due_date_parsed"] = date_parser.parse(task["due_date"])
         except Exception as date_error:
             logger.warning(f"Failed to parse due_date: {task.get('due_date')}, error: {date_error}")
-            task["due_date_parsed"] = None
+            task["due_date_parsed"] = _extract_relative_due_date(f"{task.get('title', '')} {task.get('description', '')}")
     else:
-        task["due_date_parsed"] = None
+        task["due_date_parsed"] = _extract_relative_due_date(f"{task.get('title', '')} {task.get('description', '')}")
+        if task["due_date_parsed"]:
+            task["due_date"] = task["due_date_parsed"].strftime("%Y-%m-%d %H:%M:%S")
 
     result["task"] = task
     return result
@@ -185,9 +325,23 @@ async def analyze_email_with_ai(text: str) -> Optional[Dict[str, Any]]:
             response_format={"type": "json_object"}
         )
         logger.info(f"AI provider response for email: {result}")
-        return _normalize_task_result(result)
+
+        normalized = _normalize_task_result(result)
+        if normalized and normalized.get("has_task"):
+            return normalized
+
+        fallback = _extract_task_from_email_fallback(text)
+        if fallback:
+            logger.info(f"Email fallback extractor found task: {fallback}")
+            return _normalize_task_result(fallback)
+
+        return normalized
     except Exception as e:
         logger.error(f"Error in AI email analysis: {e}", exc_info=True)
+        fallback = _extract_task_from_email_fallback(text)
+        if fallback:
+            logger.info(f"Email fallback extractor found task after AI failure: {fallback}")
+            return _normalize_task_result(fallback)
         return None
 
 
