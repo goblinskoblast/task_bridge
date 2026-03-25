@@ -142,7 +142,7 @@ def find_user_by_email(email_address: str) -> Optional[User]:
         db.close()
 
 
-def find_user_by_username(username: str) -> Optional[User]:
+def find_user_by_username(username: str, db=None) -> Optional[User]:
     """
     Ищет пользователя по username из задачи
 
@@ -152,12 +152,15 @@ def find_user_by_username(username: str) -> Optional[User]:
     Returns:
         User или None
     """
-    db = get_db_session()
+    own_session = db is None
+    if own_session:
+        db = get_db_session()
 
     try:
         return db.query(User).filter(User.username == username).first()
     finally:
-        db.close()
+        if own_session:
+            db.close()
 
 
 def create_task_from_email(
@@ -217,7 +220,7 @@ def create_task_from_email(
         db.flush()
 
         for username in assignee_usernames:
-            assignee = find_user_by_username(username)
+            assignee = find_user_by_username(username, db=db)
             if assignee:
                 task.assignees.append(assignee)
                 logger.info(f"Assigned task to @{username}")

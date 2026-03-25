@@ -45,22 +45,22 @@ Core rules:
 - Priority mapping: urgent/high for срочно, asap, urgent, critical; low for when you have time, не срочно; otherwise normal.
 
 Return ONLY JSON:
-{
+{{
   "has_task": true,
-  "task": {
+  "task": {{
     "title": "short task title",
     "description": "clear task description",
     "assignee_usernames": ["user1"],
     "due_date": "YYYY-MM-DD HH:MM:SS or null",
     "priority": "low/normal/high/urgent"
-  }
-}
+  }}
+}}
 
 If there is no task:
-{
+{{
   "has_task": false,
   "task": null
-}
+}}
 """.strip()
 
 
