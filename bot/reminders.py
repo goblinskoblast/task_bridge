@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -253,6 +253,7 @@ def start_reminder_scheduler(bot: Bot):
             check_and_process_emails,
             "interval",
             minutes=10,
+            next_run_time=datetime.now(pytz.timezone(TIMEZONE)) + timedelta(minutes=1),
             id="check_emails",
             replace_existing=True
         )
@@ -260,7 +261,7 @@ def start_reminder_scheduler(bot: Bot):
         scheduler.start()
 
         logger.info(f"Reminder scheduler started with interval {REMINDER_CHECK_INTERVAL} minutes")
-        logger.info("Email checker started with interval 10 minutes")
+        logger.info("Email checker started: first run in 1 minute, then every 10 minutes")
     except Exception as e:
         logger.error(f"Failed to start reminder scheduler: {e}", exc_info=True)
 
