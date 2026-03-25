@@ -100,6 +100,33 @@ RUS_NUMBER_WORDS = {
     "семи": 7,
 }
 
+RUS_MONTHS = {
+    "январь": 1,
+    "января": 1,
+    "февраль": 2,
+    "февраля": 2,
+    "март": 3,
+    "марта": 3,
+    "апрель": 4,
+    "апреля": 4,
+    "май": 5,
+    "мая": 5,
+    "июнь": 6,
+    "июня": 6,
+    "июль": 7,
+    "июля": 7,
+    "август": 8,
+    "августа": 8,
+    "сентябрь": 9,
+    "сентября": 9,
+    "октябрь": 10,
+    "октября": 10,
+    "ноябрь": 11,
+    "ноября": 11,
+    "декабрь": 12,
+    "декабря": 12,
+}
+
 IMPERATIVE_MARKERS = [
     "тебе нужно",
     "вам нужно",
@@ -307,6 +334,90 @@ def _clean_title_candidate(text: str) -> str:
     return cleaned[:120]
 
 
+def _contains_deadline_signal(text: str) -> bool:
+    lowered = (text or "").lower()
+    if not lowered:
+        return False
+
+    deadline_markers = [
+        "срок",
+        "дедлайн",
+        "deadline",
+        "до ",
+        "к ",
+        "завтра",
+        "сегодня",
+        "через ",
+        "на этой неделе",
+        "до конца",
+        "by ",
+        "until ",
+        "before ",
+    ]
+    if any(marker in lowered for marker in deadline_markers):
+        return True
+
+    if re.search(r"(?:с|from)\s*\d{1,2}(?:[./-]\d{1,2}|\s+[а-яё]+).{0,20}(?:по|до|to|-)\s*\d{1,2}(?:[./-]\d{1,2}|\s+[а-яё]+)", lowered):
+        return True
+
+    if re.search(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", lowered):
+        return True
+    if re.search(r"\b\d{1,2}\s+(январ[ья]|феврал[ья]|март[а]?|апрел[ья]|ма[йя]|июн[ья]|июл[ья]|август[а]?|сентябр[ья]|октябр[ья]|ноябр[ья]|декабр[ья])\b", lowered):
+        return True
+    if any(word in lowered for word in RUS_WEEKDAYS):
+        return True
+
+    return False
+
+
+def _coerce_future_if_missing_year(target: datetime, now: datetime, has_explicit_year: bool) -> datetime:
+    if has_explicit_year:
+        return target
+
+    if target < now - timedelta(days=1):
+        try:
+            return target.replace(year=target.year + 1)
+        except ValueError:
+            return target + timedelta(days=365)
+
+    return target
+
+
+def _extract_date_range_due_date(text: str, now: datetime, tz) -> Optional[datetime]:
+    lowered = (text or "").lower()
+    if not lowered:
+        return None
+
+    numeric_range = re.search(
+        r"(?:с|from)\s*(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?\s*(?:по|до|to|-)\s*(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?",
+        lowered,
+    )
+    if numeric_range:
+        end_day = int(numeric_range.group(4))
+        end_month = int(numeric_range.group(5))
+        end_year_raw = numeric_range.group(6) or numeric_range.group(3)
+        end_year = int(end_year_raw) if end_year_raw else now.year
+        if end_year < 100:
+            end_year += 2000
+        target = tz.localize(datetime(end_year, end_month, end_day, 18, 0, 0))
+        return _coerce_future_if_missing_year(target, now, bool(end_year_raw))
+
+    text_range = re.search(
+        r"(?:с|from)\s*(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?\s*(?:по|до|to|-)\s*(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?",
+        lowered,
+    )
+    if text_range:
+        end_day = int(text_range.group(4))
+        end_month = RUS_MONTHS.get(text_range.group(5))
+        if end_month:
+            end_year_raw = text_range.group(6) or text_range.group(3)
+            end_year = int(end_year_raw) if end_year_raw else now.year
+            target = tz.localize(datetime(end_year, end_month, end_day, 18, 0, 0))
+            return _coerce_future_if_missing_year(target, now, bool(end_year_raw))
+
+    return None
+
+
 def _extract_due_date(text: str) -> Optional[datetime]:
     if not text:
         return None
@@ -315,12 +426,15 @@ def _extract_due_date(text: str) -> Optional[datetime]:
     now = datetime.now(tz)
     text_lower = text.lower()
 
+    range_due_date = _extract_date_range_due_date(text, now, tz)
+    if range_due_date:
+        return range_due_date
+
     explicit_datetime_patterns = [
         r"\b\d{1,2}\.\d{1,2}\.\d{2,4}\s+в\s+\d{1,2}:\d{2}\b",
         r"\b\d{1,2}\.\d{1,2}\.\d{2,4}\s+\d{1,2}:\d{2}\b",
         r"\b\d{1,2}\.\d{1,2}\s+в\s+\d{1,2}:\d{2}\b",
         r"\b\d{1,2}\.\d{1,2}\s+\d{1,2}:\d{2}\b",
-        r"\b\d{1,2}:\d{2}\b",
     ]
     for pattern in explicit_datetime_patterns:
         match = re.search(pattern, text_lower)
@@ -336,9 +450,20 @@ def _extract_due_date(text: str) -> Optional[datetime]:
             )
             if parsed.tzinfo is None:
                 parsed = tz.localize(parsed)
-            return parsed
+            has_explicit_year = bool(re.search(r"\b\d{1,2}\.\d{1,2}\.\d{2,4}\b", fragment))
+            return _coerce_future_if_missing_year(parsed, now, has_explicit_year)
         except Exception:
             continue
+
+    if _contains_deadline_signal(text_lower) or _contains_meeting_signal(text_lower):
+        time_only_match = re.search(r"\b(\d{1,2}):(\d{2})\b", text_lower)
+        if time_only_match:
+            return now.replace(
+                hour=int(time_only_match.group(1)),
+                minute=int(time_only_match.group(2)),
+                second=0,
+                microsecond=0,
+            )
 
     if "сегодня" in text_lower:
         time_match = re.search(r"\b(\d{1,2}):(\d{2})\b", text_lower)
@@ -581,16 +706,21 @@ def _normalize_task_result(result: Optional[Dict[str, Any]], fallback_text: str 
         single_assignee = task.get("assignee_username")
         task["assignee_usernames"] = [single_assignee] if single_assignee else []
 
-    if task.get("due_date"):
+    combined_text = f"{task.get('title', '')}\n{task.get('description', '')}\n{fallback_text}".strip()
+    deterministic_due_date = _extract_due_date(combined_text)
+
+    if deterministic_due_date:
+        task["due_date_parsed"] = deterministic_due_date
+        task["due_date"] = deterministic_due_date.strftime("%Y-%m-%d %H:%M:%S")
+    elif task.get("due_date") and _contains_deadline_signal(combined_text):
         try:
             task["due_date_parsed"] = date_parser.parse(task["due_date"])
         except Exception as exc:
             logger.warning("Failed to parse due_date %s: %s", task.get("due_date"), exc)
-            task["due_date_parsed"] = _extract_due_date(f"{task.get('title', '')} {task.get('description', '')} {fallback_text}")
+            task["due_date_parsed"] = None
     else:
-        task["due_date_parsed"] = _extract_due_date(f"{task.get('title', '')} {task.get('description', '')} {fallback_text}")
-        if task["due_date_parsed"]:
-            task["due_date"] = task["due_date_parsed"].strftime("%Y-%m-%d %H:%M:%S")
+        task["due_date_parsed"] = None
+        task["due_date"] = None
 
     if not task.get("priority"):
         task["priority"] = _infer_priority(f"{task.get('title', '')}\n{task.get('description', '')}\n{fallback_text}")

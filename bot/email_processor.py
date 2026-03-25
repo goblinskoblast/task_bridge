@@ -6,7 +6,7 @@ Email Processor
 
 import logging
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
 from db.database import get_db_session
@@ -258,6 +258,9 @@ def create_task_from_email(
 
         sender_email = email_data.get('from_address', '')
         needs_confirmation = not email_account.auto_confirm
+        task_due_date = task_data.get("due_date_parsed")
+        if not task_due_date:
+            task_due_date = datetime.now() + timedelta(hours=24)
 
         # Извлекаем исполнителей
         assignee_usernames = task_data.get("assignee_usernames", [])
@@ -293,7 +296,7 @@ def create_task_from_email(
                 description=task_data.get("description", email_data.get('body_text', '')),
                 assignee_usernames=assignee_usernames if assignee_usernames else None,
                 assignee_username=assignee_usernames[0] if assignee_usernames else None,
-                due_date=task_data.get("due_date_parsed"),
+                due_date=task_due_date,
                 priority=task_data.get("priority", "normal"),
                 status="pending"
             )
@@ -318,7 +321,7 @@ def create_task_from_email(
             description=task_data.get("description", email_data.get('body_text', '')),
             status="pending",
             priority=task_data.get("priority", "normal"),
-            due_date=task_data.get("due_date_parsed"),
+            due_date=task_due_date,
             created_by=owner.id
         )
 
