@@ -37,7 +37,7 @@ Core rules:
 - A task may be indirect. If the sender expects a concrete result, artifact, answer, file, update, approval, or action, it is a task candidate.
 - For Telegram, the current message must trigger the task. Older context may complete the details but should not create a task on its own.
 - For Email, use subject, body, quoted thread, and attachment text together.
-- Ignore pure discussion, jokes, newsletters, ads, receipts, and service notifications without an expected action.
+- Separate simple notifications from real tasks. Ignore pure discussion, jokes, newsletters, ads, receipts, login/security alerts, delivery updates, and service notifications unless they contain a clear expected action from the recipient.
 - Build a short clean title. Remove greetings, direct addresses, filler, and repeated deadline wording when possible.
 - Preserve meeting metadata in description when present: address, meeting place, floor/room, call link, dial-in details.
 - description should keep the useful actionable details in natural language.
@@ -214,6 +214,38 @@ NOISE_MARKERS = [
     "акция",
     "промокод",
     "чек",
+]
+
+NOTIFICATION_MARKERS = [
+    "уведомление",
+    "notification",
+    "напоминание",
+    "reminder",
+    "подтверждение",
+    "confirmation",
+    "статус заказа",
+    "заказ оформлен",
+    "order status",
+    "tracking",
+    "otp",
+    "код подтверждения",
+    "verification code",
+    "security alert",
+    "login alert",
+    "счет",
+    "invoice",
+    "receipt",
+]
+
+EMAIL_SERVICE_SENDERS = [
+    "no-reply",
+    "noreply",
+    "do-not-reply",
+    "mailer-daemon",
+    "postmaster",
+    "notification",
+    "notifications",
+    "news@",
 ]
 
 ERROR_SUBJECT_MARKERS = [
@@ -535,6 +567,47 @@ def _contains_imperative_signal(text: str) -> bool:
     return False
 
 
+def _contains_strong_task_signal(text: str) -> bool:
+    lowered = (text or "").lower()
+    if not lowered:
+        return False
+
+    strong_markers = [
+        "тебе нужно",
+        "вам нужно",
+        "необходимо",
+        "прошу",
+        "сделай",
+        "сделайте",
+        "подготовь",
+        "подготовьте",
+        "напиши",
+        "напишите",
+        "пришли",
+        "пришлите",
+        "отправь",
+        "отправьте",
+        "согласуй",
+        "согласуйте",
+        "заполни",
+        "заполните",
+        "создай",
+        "создайте",
+        "собери",
+        "соберите",
+        "обнови",
+        "обновите",
+        "жду",
+        "ожидаю",
+        "need you to",
+        "please send",
+        "please prepare",
+        "please review",
+        "must",
+    ]
+    return any(marker in lowered for marker in strong_markers)
+
+
 def _contains_meeting_signal(text: str) -> bool:
     lowered = (text or "").lower()
     return any(marker in lowered for marker in MEETING_MARKERS)
@@ -543,6 +616,24 @@ def _contains_meeting_signal(text: str) -> bool:
 def _is_noise(text: str) -> bool:
     lowered = (text or "").lower()
     return any(marker in lowered for marker in NOISE_MARKERS)
+
+
+def _looks_like_notification_email(subject: str, body_text: str, from_address: str = "") -> bool:
+    combined = f"{subject}\n{body_text}".lower()
+    sender = (from_address or "").lower()
+
+    if _is_noise(combined):
+        return True
+
+    if any(marker in combined for marker in NOTIFICATION_MARKERS):
+        if not (_contains_strong_task_signal(combined) or _contains_meeting_signal(combined)):
+            return True
+
+    if any(marker in sender for marker in EMAIL_SERVICE_SENDERS):
+        if not (_contains_strong_task_signal(combined) or _contains_meeting_signal(combined)):
+            return True
+
+    return False
 
 
 def _build_title_from_imperative(text: str) -> str:
@@ -627,11 +718,16 @@ def _build_fallback_task(
     if not combined_text or _is_noise(combined_text):
         return None
 
+    if source == "email" and _looks_like_notification_email(subject, body_text):
+        return None
+
     if not _contains_imperative_signal(trigger_text):
-        if source == "email" and not (_contains_imperative_signal(combined_text) or _contains_meeting_signal(combined_text)):
+        if source == "email" and not (_contains_strong_task_signal(combined_text) or _contains_meeting_signal(combined_text)):
             return None
         if source == "telegram" and not _contains_meeting_signal(combined_text):
             return None
+    elif source == "email" and not (_contains_strong_task_signal(trigger_text) or _contains_meeting_signal(combined_text)):
+        return None
 
     meeting_meta = _extract_meeting_metadata(combined_text)
 
@@ -789,6 +885,9 @@ async def analyze_email_with_ai(text: str) -> Optional[Dict[str, Any]]:
         return None
 
     email_payload = _parse_email_payload(text)
+
+    if _looks_like_notification_email(email_payload["subject"], email_payload["body"]):
+        return {"has_task": False, "task": None}
 
     try:
         normalized = await _analyze_with_unified_prompt(

@@ -35,6 +35,39 @@ IMAP_SERVERS = {
 
 GOOGLE_REFRESH_PREFIX = "oauth_refresh:"
 YANDEX_REFRESH_PREFIX = "yandex_oauth_refresh:"
+PRIMARY_INBOX_FOLDERS = {"INBOX", "Inbox", "inbox"}
+NON_PRIMARY_FOLDERS = {
+    "spam",
+    "junk",
+    "trash",
+    "bin",
+    "deleted",
+    "archive",
+    "all mail",
+    "[gmail]/spam",
+    "[gmail]/junk",
+    "[gmail]/all mail",
+}
+
+
+def _resolve_primary_folder(folder_name: Optional[str]) -> str:
+    raw = (folder_name or "").strip()
+    if not raw:
+        return "INBOX"
+
+    lowered = raw.lower()
+    if raw in PRIMARY_INBOX_FOLDERS:
+        return "INBOX"
+
+    if lowered in NON_PRIMARY_FOLDERS:
+        logger.warning("Non-primary email folder '%s' requested; forcing INBOX", raw)
+        return "INBOX"
+
+    if "spam" in lowered or "junk" in lowered:
+        logger.warning("Spam/junk-like folder '%s' requested; forcing INBOX", raw)
+        return "INBOX"
+
+    return "INBOX"
 
 
 def _get_google_access_token(refresh_token: str) -> Optional[str]:
@@ -194,7 +227,7 @@ def connect_imap(email_account: EmailAccount) -> Optional[IMAPClient]:
             client.oauth2_login(email_account.imap_username, access_token)
         else:
             client.login(email_account.imap_username, raw_secret)
-        client.select_folder(email_account.folder)
+        client.select_folder(_resolve_primary_folder(email_account.folder))
 
         logger.info(f"вњ… Connected to IMAP: {email_account.email_address}")
         return client
