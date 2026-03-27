@@ -121,10 +121,12 @@ class DataAgentOrchestrator:
 
         browser_result = tool_results.get("browser_tool")
         if browser_result:
-            if browser_result.get("connected_systems", 0) > 0:
+            if browser_result.get("status") == "completed" and browser_result.get("data"):
+                parts.append(f"Внешняя система:\n{browser_result.get('data')}")
+            elif browser_result.get("connected_systems", 0) > 0:
                 parts.append(
                     f"Внешние системы: подключено {browser_result.get('connected_systems', 0)}. "
-                    "Browser Tool будет активирован на следующем этапе."
+                    "Browser Tool не смог завершить сценарий автоматически, нужен повторный запуск или уточнение запроса."
                 )
             else:
                 parts.append("Внешние системы пока не подключены. Используйте /connect.")

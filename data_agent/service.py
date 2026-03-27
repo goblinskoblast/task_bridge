@@ -9,6 +9,7 @@ from db.database import get_db_session
 from db.models import DataAgentRequestLog, DataAgentSystem, User
 from email_integration.encryption import encrypt_password
 
+from .browser_agent import browser_agent
 from .internal_api_client import internal_api_client
 from .models import ConnectedSystem, DataAgentChatRequest, DataAgentChatResponse, SystemConnectRequest, SystemConnectResponse
 from .orchestrator import orchestrator
@@ -21,7 +22,7 @@ class DataAgentService:
         return {
             "status": "ok",
             "service": "data_agent",
-            "mode": "phase_3_orchestrated",
+            "mode": "phase_4_browser_mvp",
         }
 
     async def connect_system(self, payload: SystemConnectRequest) -> SystemConnectResponse:
@@ -119,7 +120,7 @@ class DataAgentService:
             systems = self.list_systems(payload.user_id)
             plan = await orchestrator.plan(payload.message, systems_count=len(systems))
             selected_tools = plan.selected_tools
-            tool_results = await self._collect_tool_results(payload.user_id, selected_tools, systems)
+            tool_results = await self._collect_tool_results(payload.user_id, payload.message, selected_tools, systems)
             answer = await orchestrator.synthesize(payload.message, tool_results)
             return DataAgentChatResponse(
                 answer=answer,
@@ -199,6 +200,7 @@ class DataAgentService:
     async def _collect_tool_results(
         self,
         user_id: int,
+        user_message: str,
         selected_tools: List[str],
         systems: List[ConnectedSystem],
     ) -> dict:
@@ -211,18 +213,7 @@ class DataAgentService:
             tool_results["calendar_tool"] = await internal_api_client.get_calendar_events(user_id, days=7)
 
         if "browser_tool" in selected_tools:
-            tool_results["browser_tool"] = {
-                "connected_systems": len(systems),
-                "systems": [
-                    {
-                        "system_name": item.system_name,
-                        "url": item.url,
-                        "login": item.login,
-                    }
-                    for item in systems[:10]
-                ],
-                "status": "planned_for_phase_4",
-            }
+            tool_results["browser_tool"] = await self._run_browser_tool(user_message, systems, user_id)
 
         if "orchestrator" in selected_tools and not tool_results:
             tool_results["orchestrator"] = {
@@ -231,6 +222,54 @@ class DataAgentService:
             }
 
         return tool_results
+
+    async def _run_browser_tool(self, user_message: str, systems: List[ConnectedSystem], user_id: int) -> dict:
+        if not systems:
+            return {
+                "connected_systems": 0,
+                "systems": [],
+                "status": "no_systems_connected",
+            }
+
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return {"connected_systems": 0, "systems": [], "status": "user_not_found"}
+
+            system = (
+                db.query(DataAgentSystem)
+                .filter(DataAgentSystem.user_id == user.id, DataAgentSystem.is_active == True)
+                .order_by(DataAgentSystem.last_connected_at.desc().nullslast(), DataAgentSystem.created_at.desc())
+                .first()
+            )
+            if not system:
+                return {"connected_systems": 0, "systems": [], "status": "system_not_found"}
+
+            try:
+                result = await browser_agent.extract_data(
+                    url=system.url,
+                    username=system.login,
+                    encrypted_password=system.encrypted_password,
+                    user_task=user_message,
+                    progress_callback=None,
+                )
+                return {
+                    "connected_systems": len(systems),
+                    "systems": [{"system_name": system.system_name, "url": system.url, "login": system.login}],
+                    "status": "completed",
+                    "data": result,
+                }
+            except Exception as exc:
+                logger.warning("Browser tool execution fallback used: %s", exc)
+                return {
+                    "connected_systems": len(systems),
+                    "systems": [{"system_name": system.system_name, "url": system.url, "login": system.login}],
+                    "status": "failed",
+                    "error": str(exc),
+                }
+        finally:
+            db.close()
 
 
 service = DataAgentService()
