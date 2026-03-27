@@ -11,6 +11,7 @@ from email_integration.encryption import encrypt_password
 
 from .internal_api_client import internal_api_client
 from .models import ConnectedSystem, DataAgentChatRequest, DataAgentChatResponse, SystemConnectRequest, SystemConnectResponse
+from .orchestrator import orchestrator
 
 
 class DataAgentService:
@@ -20,7 +21,7 @@ class DataAgentService:
         return {
             "status": "ok",
             "service": "data_agent",
-            "mode": "phase_2_persistent",
+            "mode": "phase_3_orchestrated",
         }
 
     async def connect_system(self, payload: SystemConnectRequest) -> SystemConnectResponse:
@@ -110,38 +111,16 @@ class DataAgentService:
     async def chat(self, payload: DataAgentChatRequest) -> DataAgentChatResponse:
         trace_id = str(uuid4())
         started_at = time.perf_counter()
-        selected_tools = self._select_tools(payload.message)
+        selected_tools: List[str] = []
         success = True
         error_message = None
 
         try:
             systems = self.list_systems(payload.user_id)
-            answer_parts = []
-
-            if "email_tool" in selected_tools:
-                email_summary = await internal_api_client.get_email_summary(payload.user_id, days=7)
-                answer_parts.append(self._format_email_summary(email_summary))
-
-            if "calendar_tool" in selected_tools:
-                calendar_summary = await internal_api_client.get_calendar_events(payload.user_id, days=7)
-                answer_parts.append(self._format_calendar_summary(calendar_summary))
-
-            if "browser_tool" in selected_tools:
-                if systems:
-                    answer_parts.append(
-                        f"Подключённых внешних систем: {len(systems)}. Browser Tool будет подключён на следующем этапе."
-                    )
-                else:
-                    answer_parts.append(
-                        "Внешние системы для Browser Tool пока не подключены. Используйте /connect."
-                    )
-
-            if not answer_parts:
-                answer_parts.append(
-                    "DataAgent готов к следующим этапам. Сейчас доступны постоянные подключения систем и внутренние сводки по почте и календарю."
-                )
-
-            answer = "\n\n".join(answer_parts)
+            plan = await orchestrator.plan(payload.message, systems_count=len(systems))
+            selected_tools = plan.selected_tools
+            tool_results = await self._collect_tool_results(payload.user_id, selected_tools, systems)
+            answer = await orchestrator.synthesize(payload.message, tool_results)
             return DataAgentChatResponse(
                 answer=answer,
                 selected_tools=selected_tools,
@@ -206,19 +185,6 @@ class DataAgentService:
         finally:
             db.close()
 
-    def _select_tools(self, message: str) -> List[str]:
-        lowered = message.lower()
-        tools: List[str] = []
-        if any(token in lowered for token in ["почт", "письм", "email", "gmail", "яндекс"]):
-            tools.append("email_tool")
-        if any(token in lowered for token in ["календар", "встреч", "созвон", "meeting", "call"]):
-            tools.append("calendar_tool")
-        if any(token in lowered for token in ["выручк", "erp", "crm", "отчет", "отчёт", "iiko", "1c", "1с", "система"]):
-            tools.append("browser_tool")
-        if not tools:
-            tools.append("orchestrator")
-        return tools
-
     def _to_connected_system(self, system: DataAgentSystem) -> ConnectedSystem:
         return ConnectedSystem(
             system_id=str(system.id),
@@ -230,24 +196,41 @@ class DataAgentService:
             created_at=system.created_at,
         )
 
-    def _format_email_summary(self, summary: dict) -> str:
-        lines = [
-            "Почта:",
-            f"- Подключённых аккаунтов: {summary.get('accounts_count', 0)}",
-            f"- Писем за период: {summary.get('messages_count', 0)}",
-        ]
-        for item in summary.get("recent_messages", [])[:5]:
-            lines.append(f"- {item.get('from_address')} -> {item.get('subject')}")
-        return "\n".join(lines)
+    async def _collect_tool_results(
+        self,
+        user_id: int,
+        selected_tools: List[str],
+        systems: List[ConnectedSystem],
+    ) -> dict:
+        tool_results: dict = {}
 
-    def _format_calendar_summary(self, summary: dict) -> str:
-        lines = [
-            "Календарь:",
-            f"- Событий за период: {summary.get('events_count', 0)}",
-        ]
-        for item in summary.get("events", [])[:5]:
-            lines.append(f"- {item.get('start_at')}: {item.get('title')}")
-        return "\n".join(lines)
+        if "email_tool" in selected_tools:
+            tool_results["email_tool"] = await internal_api_client.get_email_summary(user_id, days=7)
+
+        if "calendar_tool" in selected_tools:
+            tool_results["calendar_tool"] = await internal_api_client.get_calendar_events(user_id, days=7)
+
+        if "browser_tool" in selected_tools:
+            tool_results["browser_tool"] = {
+                "connected_systems": len(systems),
+                "systems": [
+                    {
+                        "system_name": item.system_name,
+                        "url": item.url,
+                        "login": item.login,
+                    }
+                    for item in systems[:10]
+                ],
+                "status": "planned_for_phase_4",
+            }
+
+        if "orchestrator" in selected_tools and not tool_results:
+            tool_results["orchestrator"] = {
+                "status": "no_tool_selected",
+                "message": "Для ответа не потребовались внутренние инструменты.",
+            }
+
+        return tool_results
 
 
 service = DataAgentService()

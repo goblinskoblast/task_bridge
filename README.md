@@ -7,7 +7,7 @@ TaskBridge is a Telegram-first task management service with:
 - Telegram Mini App for task management
 - OpenClaw-based AI routing
 - calendar sync for tasks with due dates
-- phase 1 skeleton of a separate `data_agent` service
+- phase 3 orchestrated `data_agent` service
 
 ## Current modules
 
@@ -15,7 +15,7 @@ TaskBridge is a Telegram-first task management service with:
 - `webapp/` - FastAPI API and Mini App frontend
 - `db/` - database models and DB helpers
 - `email_integration/` - email encryption and IMAP helpers
-- `data_agent/` - separate DataAgent service node, phase 1 skeleton
+- `data_agent/` - separate DataAgent service node with phase 3 orchestration
 - `docs/` - deployment, SDD, and integration documentation
 
 ## Main bot commands
@@ -62,19 +62,19 @@ Important groups:
 
 ## DataAgent status
 
-Phase 1 is already added:
+Phase 3 is already added:
 
 - separate FastAPI node
 - `/health`, `/chat`, `/systems/connect`, `/systems/{user_id}`
 - Telegram integration via `/dataagent`, `/connect`, `/systems`
+- persistent storage for connected systems
+- internal email/calendar tools
+- AI orchestrator for tool planning and final answer synthesis
 
 Not implemented yet:
 
-- real OpenClaw orchestrator for DataAgent
 - Browser Tool
-- persistent storage for connected systems
-- credentials storage
-- internal email/calendar tools for DataAgent
+- secure vault-level credentials storage
 
 ## Notes
 
