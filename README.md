@@ -1,4 +1,4 @@
-# TaskBridge
+﻿# TaskBridge
 
 TaskBridge is a Telegram-first task management service with:
 
@@ -8,6 +8,7 @@ TaskBridge is a Telegram-first task management service with:
 - OpenClaw-based AI routing
 - calendar sync for tasks with due dates
 - phase 4 Browser Agent MVP for `data_agent`
+- first restaurant demo scenario for reviews analytics via `review_tool`
 
 ## Current modules
 
@@ -15,7 +16,7 @@ TaskBridge is a Telegram-first task management service with:
 - `webapp/` - FastAPI API and Mini App frontend
 - `db/` - database models and DB helpers
 - `email_integration/` - email encryption and IMAP helpers
-- `data_agent/` - separate DataAgent service node with phase 4 Browser Agent MVP
+- `data_agent/` - separate DataAgent service node with Browser Agent MVP and modular tools
 - `docs/` - deployment, SDD, and integration documentation
 
 ## Main bot commands
@@ -27,6 +28,8 @@ TaskBridge is a Telegram-first task management service with:
 - `/dataagent` - DataAgent dialog entrypoint
 - `/connect` - connect an external system for DataAgent
 - `/systems` - list connected DataAgent systems
+- `/reviews` - build a reviews report for the current week
+- `/reviews month` - build a reviews report for the current month
 
 ## Local run
 
@@ -49,7 +52,7 @@ This starts:
 
 ## Environment variables
 
-Core variables are documented in [.env.example](C:/Users/Владислав/Desktop/task_bridge-main/.env.example).
+Core variables are documented in `.env.example`.
 
 Important groups:
 
@@ -58,26 +61,31 @@ Important groups:
 - web app: `WEB_APP_DOMAIN`, `MINI_APP_URL`
 - database: `DATABASE_URL`
 - mail OAuth: `GOOGLE_OAUTH_*`, `YANDEX_OAUTH_*`
-- DataAgent: `DATA_AGENT_URL`, `DATA_AGENT_TIMEOUT`
+- DataAgent: `DATA_AGENT_URL`, `DATA_AGENT_TIMEOUT`, `INTERNAL_API_*`
+- reviews demo: `REVIEWS_SHEET_URL`
 
 ## DataAgent status
 
-Phase 4 is already added:
+Current status:
 
 - separate FastAPI node
 - `/health`, `/chat`, `/systems/connect`, `/systems/{user_id}`
-- Telegram integration via `/dataagent`, `/connect`, `/systems`
+- Telegram integration via `/dataagent`, `/connect`, `/systems`, `/reviews`
 - persistent storage for connected systems
 - internal email/calendar tools
 - AI orchestrator for tool planning and final answer synthesis
 - Browser Agent MVP via Playwright for connected systems
+- `review_tool` for restaurant review reports from Google Sheets CSV
 
 Not implemented yet:
 
 - secure vault-level credentials storage
 - production-grade browser orchestration and Telegram progress streaming
+- stoplist and blanks monitoring tools
+- scheduler and memory layer for the Big Brother orchestrator
 
 ## Notes
 
 - The project currently uses a monorepo structure by design.
-- Browser Agent requirements and fixes are tracked separately in `BROWSER_AGENT_FIXES.md` on the Desktop and should be applied in the next DataAgent phase.
+- Browser Agent requirements and fixes are tracked separately in `BROWSER_AGENT_FIXES.md` on the Desktop.
+- The first business demo scenario is documented in `docs/DEMO_REVIEWS_SCENARIO.md`.

@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime
 from typing import List
@@ -13,10 +14,13 @@ from .browser_agent import browser_agent
 from .internal_api_client import internal_api_client
 from .models import ConnectedSystem, DataAgentChatRequest, DataAgentChatResponse, SystemConnectRequest, SystemConnectResponse
 from .orchestrator import orchestrator
+from .review_report import review_report_service
+
+logger = logging.getLogger(__name__)
 
 
 class DataAgentService:
-    """Phase-2 DataAgent service with DB-backed systems and internal tool contracts."""
+    """DataAgent service with persistent systems, internal tools, and Browser Agent MVP."""
 
     def health(self) -> dict:
         return {
@@ -214,6 +218,9 @@ class DataAgentService:
 
         if "browser_tool" in selected_tools:
             tool_results["browser_tool"] = await self._run_browser_tool(user_message, systems, user_id)
+
+        if "review_tool" in selected_tools:
+            tool_results["review_tool"] = await review_report_service.build_report(user_message)
 
         if "orchestrator" in selected_tools and not tool_results:
             tool_results["orchestrator"] = {

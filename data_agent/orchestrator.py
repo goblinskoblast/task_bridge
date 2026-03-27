@@ -1,6 +1,5 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List
@@ -16,7 +15,7 @@ from .prompts import (
 
 logger = logging.getLogger(__name__)
 
-KNOWN_TOOLS = {"email_tool", "calendar_tool", "browser_tool", "orchestrator"}
+KNOWN_TOOLS = {"email_tool", "calendar_tool", "browser_tool", "review_tool", "orchestrator"}
 
 
 @dataclass
@@ -89,17 +88,22 @@ class DataAgentOrchestrator:
         lowered = message.lower()
         tools: List[str] = []
 
-        if any(token in lowered for token in ["почт", "письм", "mail", "email", "gmail", "яндекс"]):
+        review_keywords = ["review", "feedback", "rating", "complaint", "praise", "restaurant review"]
+        if any(token in lowered for token in review_keywords):
+            tools.append("review_tool")
+
+        if any(token in lowered for token in ["mail", "email", "gmail", "inbox", "letter", "yandex mail"]):
             tools.append("email_tool")
-        if any(token in lowered for token in ["календар", "calendar", "встреч", "созвон", "meeting", "call", "deadline", "schedule"]):
+        if any(token in lowered for token in ["calendar", "meeting", "call", "deadline", "schedule", "event"]):
             tools.append("calendar_tool")
-        if any(token in lowered for token in ["выручк", "erp", "crm", "отчет", "отчёт", "report", "dashboard", "iiko", "1c", "1с", "система"]):
+        if any(token in lowered for token in ["revenue", "erp", "crm", "dashboard", "iiko", "1c", "website", "web system"]):
             tools.append("browser_tool")
 
         if not tools:
             tools.append("orchestrator")
 
-        return OrchestratorPlan(selected_tools=tools, reasoning="Fallback routing by keywords.")
+        deduped_tools = list(dict.fromkeys(tools))
+        return OrchestratorPlan(selected_tools=deduped_tools, reasoning="Fallback routing by keywords.")
 
     def _fallback_answer(self, tool_results: Dict[str, Any]) -> str:
         parts: List[str] = []
@@ -130,6 +134,16 @@ class DataAgentOrchestrator:
                 )
             else:
                 parts.append("Внешние системы пока не подключены. Используйте /connect.")
+
+        review_result = tool_results.get("review_tool")
+        if review_result:
+            if review_result.get("status") == "ok":
+                parts.append(review_result.get("report_text", "Отчёт по отзывам собран."))
+            else:
+                parts.append(
+                    "Отчёт по отзывам сейчас недоступен. "
+                    f"Причина: {review_result.get('message', 'источник не настроен')}"
+                )
 
         if not parts:
             parts.append("DataAgent пока не собрал полезных данных по этому запросу.")

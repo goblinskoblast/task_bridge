@@ -1,4 +1,4 @@
-import os
+﻿import os
 from dotenv import load_dotenv
 
 
@@ -29,7 +29,7 @@ HOST = os.getenv("HOST", "0.0.0.0")
 
 PORT = int(os.getenv("PORT", "8000"))
 
-# Нормализация WEB_APP_DOMAIN - убираем слеш в конце, если есть
+# РќРѕСЂРјР°Р»РёР·Р°С†РёСЏ WEB_APP_DOMAIN - СѓР±РёСЂР°РµРј СЃР»РµС€ РІ РєРѕРЅС†Рµ, РµСЃР»Рё РµСЃС‚СЊ
 WEB_APP_DOMAIN = os.getenv("WEB_APP_DOMAIN", f"http://{HOST}:{PORT}").rstrip("/")
 
 MINI_APP_URL = os.getenv("MINI_APP_URL", f"{WEB_APP_DOMAIN}/webapp/index.html")
@@ -55,6 +55,7 @@ DATA_AGENT_URL = os.getenv("DATA_AGENT_URL", "http://localhost:8010").strip()
 DATA_AGENT_TIMEOUT = int(os.getenv("DATA_AGENT_TIMEOUT", "45"))
 INTERNAL_API_URL = os.getenv("INTERNAL_API_URL", "http://localhost:8000/api/internal/data-agent").strip().rstrip("/")
 INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "").strip()
+REVIEWS_SHEET_URL = os.getenv("REVIEWS_SHEET_URL", "").strip()
 
 # Google OAuth (Gmail one-click connect)
 GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
@@ -70,35 +71,35 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///taskbridge.db")
 
 
 TASK_KEYWORDS = [
-    # Действия
-    "сделать", "нужно", "необходимо", "надо", "требуется",
-    "выполни", "подготовь", "создай", "напиши", "исправь",
-    "проверь", "убедись", "организуй", "настрой",
+    # Р”РµР№СЃС‚РІРёСЏ
+    "СЃРґРµР»Р°С‚СЊ", "РЅСѓР¶РЅРѕ", "РЅРµРѕР±С…РѕРґРёРјРѕ", "РЅР°РґРѕ", "С‚СЂРµР±СѓРµС‚СЃСЏ",
+    "РІС‹РїРѕР»РЅРё", "РїРѕРґРіРѕС‚РѕРІСЊ", "СЃРѕР·РґР°Р№", "РЅР°РїРёС€Рё", "РёСЃРїСЂР°РІСЊ",
+    "РїСЂРѕРІРµСЂСЊ", "СѓР±РµРґРёСЃСЊ", "РѕСЂРіР°РЅРёР·СѓР№", "РЅР°СЃС‚СЂРѕР№",
 
-    # Сроки
-    "до", "к", "срочно", "важно", "deadline",
+    # РЎСЂРѕРєРё
+    "РґРѕ", "Рє", "СЃСЂРѕС‡РЅРѕ", "РІР°Р¶РЅРѕ", "deadline",
 
-    # Английские
+    # РђРЅРіР»РёР№СЃРєРёРµ
     "need", "should", "must", "todo", "task",
     "please", "fix", "create", "update", "check"
 ]
 
 
-# Напоминания для исполнителей (дни до дедлайна)
-# По умолчанию: за 3 дня, за 1 день, в день дедлайна
+# РќР°РїРѕРјРёРЅР°РЅРёСЏ РґР»СЏ РёСЃРїРѕР»РЅРёС‚РµР»РµР№ (РґРЅРё РґРѕ РґРµРґР»Р°Р№РЅР°)
+# РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: Р·Р° 3 РґРЅСЏ, Р·Р° 1 РґРµРЅСЊ, РІ РґРµРЅСЊ РґРµРґР»Р°Р№РЅР°
 ASSIGNEE_REMINDER_INTERVALS = [3, 1, 0]
 
-# Напоминания для постановщиков (дни после создания задачи)
-# По умолчанию: через 1 день, через 3 дня, через 7 дней
+# РќР°РїРѕРјРёРЅР°РЅРёСЏ РґР»СЏ РїРѕСЃС‚Р°РЅРѕРІС‰РёРєРѕРІ (РґРЅРё РїРѕСЃР»Рµ СЃРѕР·РґР°РЅРёСЏ Р·Р°РґР°С‡Рё)
+# РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: С‡РµСЂРµР· 1 РґРµРЅСЊ, С‡РµСЂРµР· 3 РґРЅСЏ, С‡РµСЂРµР· 7 РґРЅРµР№
 CREATOR_REMINDER_INTERVALS = [1, 3, 7]
 
-# Legacy поддержка старого названия
+# Legacy РїРѕРґРґРµСЂР¶РєР° СЃС‚Р°СЂРѕРіРѕ РЅР°Р·РІР°РЅРёСЏ
 REMINDER_INTERVALS = ASSIGNEE_REMINDER_INTERVALS
 
 
 REMINDER_TIME_HOUR = 9
 
-# Интервал проверки напоминаний (в минутах)
+# РРЅС‚РµСЂРІР°Р» РїСЂРѕРІРµСЂРєРё РЅР°РїРѕРјРёРЅР°РЅРёР№ (РІ РјРёРЅСѓС‚Р°С…)
 REMINDER_CHECK_INTERVAL = 60  
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -115,3 +116,5 @@ MAX_TASK_DESCRIPTION_LENGTH = 2000
 TASK_STATUSES = ["pending", "in_progress", "completed", "cancelled"]
 
 TASK_PRIORITIES = ["low", "normal", "high", "urgent"]
+
+

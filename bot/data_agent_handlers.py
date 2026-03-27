@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
@@ -28,9 +28,10 @@ async def cmd_dataagent(message: Message) -> None:
             "Что уже доступно на этом этапе:\n"
             "• /connect — подключить внешнюю систему\n"
             "• /systems — список подключённых систем\n"
+            "• /reviews — отчёт по отзывам\n"
             "• /dataagent <запрос> — отправить запрос в DataAgent\n\n"
             "Пример:\n"
-            "/dataagent покажи, какие встречи у меня на этой неделе"
+            "/dataagent show my meetings for this week"
         )
         return
 
@@ -45,6 +46,29 @@ async def cmd_dataagent(message: Message) -> None:
     except Exception as exc:
         logger.error("DataAgent chat error: %s", exc, exc_info=True)
         await message.answer("DataAgent сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз.")
+
+
+@router.message(Command("reviews"))
+async def cmd_reviews(message: Message) -> None:
+    args = (message.text or "").split(maxsplit=1)
+    period = (args[1] if len(args) > 1 else "week").strip().lower()
+
+    if period in {"month", "месяц", "monthly"}:
+        prompt = "Build restaurant reviews report for current month"
+    else:
+        prompt = "Build restaurant reviews report for current week"
+
+    try:
+        result = await data_agent_client.chat({
+            "user_id": message.from_user.id,
+            "message": prompt,
+            "username": message.from_user.username,
+            "first_name": message.from_user.first_name,
+        })
+        await message.answer(result.get("answer", "Не удалось собрать отчёт по отзывам."))
+    except Exception as exc:
+        logger.error("DataAgent reviews error: %s", exc, exc_info=True)
+        await message.answer("Отчёт по отзывам сейчас недоступен. Проверьте сервис DataAgent и источник CSV.")
 
 
 @router.message(Command("systems"))
@@ -121,4 +145,3 @@ async def connect_waiting_for_password(message: Message, state: FSMContext) -> N
     except Exception as exc:
         logger.error("DataAgent connect error: %s", exc, exc_info=True)
         await waiting.edit_text("Сервис DataAgent сейчас недоступен или вернул ошибку подключения.")
-
