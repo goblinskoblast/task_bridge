@@ -28,9 +28,10 @@ async def set_bot_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="Начать работу с ботом"),
         BotCommand(command="panel", description="Открыть панель задач"),
-        BotCommand(command="dataagent", description="Открыть диалог DataAgent"),
-        BotCommand(command="connect", description="Подключить систему для DataAgent"),
-        BotCommand(command="systems", description="Список систем DataAgent"),
+        BotCommand(command="bigbrother", description="Открыть диалог Большого брата"),
+        BotCommand(command="dataagent", description="Открыть диалог Большого брата"),
+        BotCommand(command="connect", description="Подключить систему для Большого брата"),
+        BotCommand(command="systems", description="Список систем Большого брата"),
         BotCommand(command="reviews", description="Отчёт по отзывам"),
         BotCommand(command="support", description="Чат поддержки"),
         BotCommand(command="help", description="Справка и инструкции"),
