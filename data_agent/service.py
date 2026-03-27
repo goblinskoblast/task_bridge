@@ -1,82 +1,253 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+import time
 from datetime import datetime
-from typing import Dict, List
+from typing import List
 from uuid import uuid4
 
+from db.database import get_db_session
+from db.models import DataAgentRequestLog, DataAgentSystem, User
+from email_integration.encryption import encrypt_password
+
+from .internal_api_client import internal_api_client
 from .models import ConnectedSystem, DataAgentChatRequest, DataAgentChatResponse, SystemConnectRequest, SystemConnectResponse
 
 
 class DataAgentService:
-    """Phase-1 in-memory skeleton for the separate DataAgent node."""
-
-    def __init__(self) -> None:
-        self._systems_by_user: Dict[int, List[ConnectedSystem]] = {}
+    """Phase-2 DataAgent service with DB-backed systems and internal tool contracts."""
 
     def health(self) -> dict:
         return {
             "status": "ok",
             "service": "data_agent",
-            "mode": "phase_1_stub",
+            "mode": "phase_2_persistent",
         }
 
-    def connect_system(self, payload: SystemConnectRequest) -> SystemConnectResponse:
-        domain = payload.url.host.lower()
-        if "iiko" in domain:
-            system_name = "iiko"
-        elif "1c" in domain or "1с" in domain:
-            system_name = "1C"
-        elif "crm" in domain:
-            system_name = "CRM"
-        else:
-            system_name = "web-system"
+    async def connect_system(self, payload: SystemConnectRequest) -> SystemConnectResponse:
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == payload.user_id).first()
+            if not user:
+                user = User(
+                    telegram_id=payload.user_id,
+                    username=None,
+                    first_name=None,
+                    last_name=None,
+                    is_bot=False,
+                )
+                db.add(user)
+                db.flush()
 
-        system = ConnectedSystem(
-            system_id=str(uuid4()),
-            user_id=payload.user_id,
-            system_name=system_name,
-            url=str(payload.url),
-            login=payload.username,
-            created_at=datetime.utcnow(),
-        )
-        self._systems_by_user.setdefault(payload.user_id, []).append(system)
-        return SystemConnectResponse(success=True, system=system)
+            domain = payload.url.host.lower()
+            if "iiko" in domain:
+                system_name = "iiko"
+            elif "1c" in domain or "1с" in domain:
+                system_name = "1C"
+            elif "crm" in domain:
+                system_name = "CRM"
+            else:
+                system_name = "web-system"
+
+            existing = (
+                db.query(DataAgentSystem)
+                .filter(
+                    DataAgentSystem.user_id == user.id,
+                    DataAgentSystem.url == str(payload.url),
+                    DataAgentSystem.login == payload.username,
+                )
+                .first()
+            )
+
+            encrypted_password = encrypt_password(payload.password)
+            if existing:
+                existing.system_name = system_name
+                existing.encrypted_password = encrypted_password
+                existing.is_active = True
+                existing.last_connected_at = datetime.utcnow()
+                existing.updated_at = datetime.utcnow()
+                db.commit()
+                db.refresh(existing)
+                return SystemConnectResponse(success=True, system=self._to_connected_system(existing))
+
+            system = DataAgentSystem(
+                user_id=user.id,
+                system_name=system_name,
+                url=str(payload.url),
+                login=payload.username,
+                encrypted_password=encrypted_password,
+                secret_storage="fernet_local",
+                is_active=True,
+                metadata_json={"phase": 2},
+                last_connected_at=datetime.utcnow(),
+            )
+            db.add(system)
+            db.commit()
+            db.refresh(system)
+            return SystemConnectResponse(success=True, system=self._to_connected_system(system))
+        except Exception as exc:
+            db.rollback()
+            return SystemConnectResponse(success=False, error=str(exc))
+        finally:
+            db.close()
 
     def list_systems(self, user_id: int) -> List[ConnectedSystem]:
-        return list(self._systems_by_user.get(user_id, []))
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return []
 
-    def chat(self, payload: DataAgentChatRequest) -> DataAgentChatResponse:
-        message = payload.message.lower()
+            systems = (
+                db.query(DataAgentSystem)
+                .filter(DataAgentSystem.user_id == user.id)
+                .order_by(DataAgentSystem.created_at.desc())
+                .all()
+            )
+            return [self._to_connected_system(item) for item in systems]
+        finally:
+            db.close()
+
+    async def chat(self, payload: DataAgentChatRequest) -> DataAgentChatResponse:
+        trace_id = str(uuid4())
+        started_at = time.perf_counter()
+        selected_tools = self._select_tools(payload.message)
+        success = True
+        error_message = None
+
+        try:
+            systems = self.list_systems(payload.user_id)
+            answer_parts = []
+
+            if "email_tool" in selected_tools:
+                email_summary = await internal_api_client.get_email_summary(payload.user_id, days=7)
+                answer_parts.append(self._format_email_summary(email_summary))
+
+            if "calendar_tool" in selected_tools:
+                calendar_summary = await internal_api_client.get_calendar_events(payload.user_id, days=7)
+                answer_parts.append(self._format_calendar_summary(calendar_summary))
+
+            if "browser_tool" in selected_tools:
+                if systems:
+                    answer_parts.append(
+                        f"Подключённых внешних систем: {len(systems)}. Browser Tool будет подключён на следующем этапе."
+                    )
+                else:
+                    answer_parts.append(
+                        "Внешние системы для Browser Tool пока не подключены. Используйте /connect."
+                    )
+
+            if not answer_parts:
+                answer_parts.append(
+                    "DataAgent готов к следующим этапам. Сейчас доступны постоянные подключения систем и внутренние сводки по почте и календарю."
+                )
+
+            answer = "\n\n".join(answer_parts)
+            return DataAgentChatResponse(
+                answer=answer,
+                selected_tools=selected_tools,
+                trace_id=trace_id,
+            )
+        except Exception as exc:
+            success = False
+            error_message = str(exc)
+            return DataAgentChatResponse(
+                ok=False,
+                answer=f"DataAgent не смог обработать запрос: {exc}",
+                selected_tools=selected_tools,
+                trace_id=trace_id,
+            )
+        finally:
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            self._log_request(
+                payload=payload,
+                trace_id=trace_id,
+                selected_tools=selected_tools,
+                success=success,
+                duration_ms=duration_ms,
+                error_message=error_message,
+            )
+
+    def _log_request(
+        self,
+        payload: DataAgentChatRequest,
+        trace_id: str,
+        selected_tools: List[str],
+        success: bool,
+        duration_ms: int,
+        error_message: str | None,
+    ) -> None:
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == payload.user_id).first()
+            if not user:
+                user = User(
+                    telegram_id=payload.user_id,
+                    username=payload.username,
+                    first_name=payload.first_name,
+                    last_name=None,
+                    is_bot=False,
+                )
+                db.add(user)
+                db.flush()
+
+            log_item = DataAgentRequestLog(
+                user_id=user.id,
+                trace_id=trace_id,
+                user_message=payload.message,
+                selected_tools=selected_tools,
+                success=success,
+                duration_ms=duration_ms,
+                error_message=error_message,
+            )
+            db.add(log_item)
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+
+    def _select_tools(self, message: str) -> List[str]:
+        lowered = message.lower()
         tools: List[str] = []
-        if any(token in message for token in ["почт", "письм", "email", "gmail", "яндекс"]):
+        if any(token in lowered for token in ["почт", "письм", "email", "gmail", "яндекс"]):
             tools.append("email_tool")
-        if any(token in message for token in ["календар", "встреч", "созвон", "meeting", "call"]):
+        if any(token in lowered for token in ["календар", "встреч", "созвон", "meeting", "call"]):
             tools.append("calendar_tool")
-        if any(token in message for token in ["выручк", "erp", "crm", "отчет", "отчёт", "iiko", "1c", "1с", "система"]):
+        if any(token in lowered for token in ["выручк", "erp", "crm", "отчет", "отчёт", "iiko", "1c", "1с", "система"]):
             tools.append("browser_tool")
         if not tools:
             tools.append("orchestrator")
+        return tools
 
-        systems = self._systems_by_user.get(payload.user_id, [])
-        systems_hint = (
-            f"Подключено систем: {len(systems)}."
-            if systems
-            else "Подключённых внешних систем пока нет."
+    def _to_connected_system(self, system: DataAgentSystem) -> ConnectedSystem:
+        return ConnectedSystem(
+            system_id=str(system.id),
+            user_id=system.user.telegram_id if system.user else system.user_id,
+            system_name=system.system_name,
+            url=system.url,
+            login=system.login,
+            is_active=system.is_active,
+            created_at=system.created_at,
         )
 
-        answer = (
-            "DataAgent подключен в режиме каркаса.\n\n"
-            f"{systems_hint}\n"
-            f"Предварительно выбранные инструменты: {', '.join(tools)}.\n\n"
-            "Следующий этап: реальный OpenClaw orchestrator, Browser Tool и сохранение подключений в БД/secret storage."
-        )
+    def _format_email_summary(self, summary: dict) -> str:
+        lines = [
+            "Почта:",
+            f"- Подключённых аккаунтов: {summary.get('accounts_count', 0)}",
+            f"- Писем за период: {summary.get('messages_count', 0)}",
+        ]
+        for item in summary.get("recent_messages", [])[:5]:
+            lines.append(f"- {item.get('from_address')} -> {item.get('subject')}")
+        return "\n".join(lines)
 
-        return DataAgentChatResponse(
-            answer=answer,
-            selected_tools=tools,
-            trace_id=str(uuid4()),
-        )
+    def _format_calendar_summary(self, summary: dict) -> str:
+        lines = [
+            "Календарь:",
+            f"- Событий за период: {summary.get('events_count', 0)}",
+        ]
+        for item in summary.get("events", [])[:5]:
+            lines.append(f"- {item.get('start_at')}: {item.get('title')}")
+        return "\n".join(lines)
 
 
 service = DataAgentService()
-

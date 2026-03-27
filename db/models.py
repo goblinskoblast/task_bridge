@@ -57,6 +57,8 @@ class User(Base):
     messages = relationship("Message", back_populates="user")
     assigned_tasks = relationship("Task", secondary=task_assignees, back_populates="assignees")
     created_tasks = relationship("Task", foreign_keys="Task.created_by", back_populates="creator")
+    data_agent_systems = relationship("DataAgentSystem", back_populates="user", cascade="all, delete-orphan")
+    data_agent_request_logs = relationship("DataAgentRequestLog", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(telegram_id={self.telegram_id}, username={self.username})>"
@@ -379,3 +381,46 @@ class SupportAttachment(Base):
 
     def __repr__(self):
         return f"<SupportAttachment(id={self.id}, file_type={self.file_type}, file_name={self.file_name})>"
+
+
+class DataAgentSystem(Base):
+    """Persistent external system connection for DataAgent."""
+    __tablename__ = "data_agent_systems"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False, index=True)
+    system_name = Column(String(100), nullable=False)
+    url = Column(String(500), nullable=False)
+    login = Column(String(255), nullable=False)
+    encrypted_password = Column(Text, nullable=False)
+    secret_storage = Column(String(50), default="fernet_local")
+    is_active = Column(Boolean, default=True)
+    metadata_json = Column(JSON, nullable=True)
+    last_connected_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="data_agent_systems")
+
+    def __repr__(self):
+        return f"<DataAgentSystem(id={self.id}, user_id={self.user_id}, system_name={self.system_name})>"
+
+
+class DataAgentRequestLog(Base):
+    """Request log for DataAgent user interactions."""
+    __tablename__ = "data_agent_request_logs"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False, index=True)
+    trace_id = Column(String(64), nullable=False, index=True)
+    user_message = Column(Text, nullable=False)
+    selected_tools = Column(JSON, nullable=True)
+    success = Column(Boolean, default=True)
+    duration_ms = Column(Integer, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User", back_populates="data_agent_request_logs")
+
+    def __repr__(self):
+        return f"<DataAgentRequestLog(id={self.id}, user_id={self.user_id}, trace_id={self.trace_id})>"

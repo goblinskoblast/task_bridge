@@ -46,3 +46,27 @@ class SystemConnectResponse(BaseModel):
 class SystemsListResponse(BaseModel):
     systems: List[ConnectedSystem] = Field(default_factory=list)
 
+
+class EmailSummaryItem(BaseModel):
+    subject: str
+    from_address: str
+    date: Optional[datetime] = None
+    has_attachments: bool = False
+
+
+class EmailSummaryResponse(BaseModel):
+    accounts_count: int = 0
+    messages_count: int = 0
+    recent_messages: List[EmailSummaryItem] = Field(default_factory=list)
+
+
+class CalendarEventItem(BaseModel):
+    title: str
+    start_at: datetime
+    source: str
+    task_id: Optional[int] = None
+
+
+class CalendarEventsResponse(BaseModel):
+    events_count: int = 0
+    events: List[CalendarEventItem] = Field(default_factory=list)
