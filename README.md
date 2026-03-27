@@ -1,85 +1,82 @@
-# TaskBridge - Управление задачами из Telegram чатов
+# TaskBridge
 
-Прототип MVP-продукта для автоматического извлечения и управления задачами из групповых Telegram чатов.
+TaskBridge is a Telegram-first task management service with:
 
-## 🚀 Быстрый запуск
+- task extraction from Telegram chats
+- task extraction from connected email accounts
+- Telegram Mini App for task management
+- OpenClaw-based AI routing
+- calendar sync for tasks with due dates
+- phase 1 skeleton of a separate `data_agent` service
 
-### Windows
-Просто запустите `start_all.bat` - скрипт автоматически:
-- Активирует виртуальное окружение
-- Запустит Telegram бота
-- Запустит веб-приложение на http://localhost:8000
-- Откроет браузер
+## Current modules
 
-### Другие ОС
+- `bot/` - Telegram bot logic, task extraction, notifications, reminders
+- `webapp/` - FastAPI API and Mini App frontend
+- `db/` - database models and DB helpers
+- `email_integration/` - email encryption and IMAP helpers
+- `data_agent/` - separate DataAgent service node, phase 1 skeleton
+- `docs/` - deployment, SDD, and integration documentation
+
+## Main bot commands
+
+- `/start` - start and quick access
+- `/panel` - open the task panel
+- `/help` - usage help
+- `/support` - support chat
+- `/dataagent` - DataAgent dialog entrypoint
+- `/connect` - connect an external system for DataAgent
+- `/systems` - list connected DataAgent systems
+
+## Local run
+
+### Main service
+
 ```bash
-# 1. Запустите бота
-python bot/main.py
-
-# 2. Запустите веб-приложение (в отдельном терминале)
-uvicorn webapp.app:app --host 0.0.0.0 --port 8000
+python main.py
 ```
 
-## ✨ Возможности
+### Docker Compose
 
-### Версия 2.0 (текущая)
-- ✅ **Множественные исполнители** - назначайте несколько сотрудников на одну задачу
-- ✅ **Уведомления о комментариях** - все участники задачи получают уведомления
-- ✅ **Управление исполнителями** - добавляйте/удаляйте исполнителей через WebApp
-- ✅ **Фильтрация по создателю** - менеджеры видят только свои задачи
-- ✅ **Улучшенный парсинг времени** - понимает "утром", "в понедельник", "через 2 дня"
-- ✅ **React WebApp** - современный интерфейс с градиентами и анимациями
-- ✅ **Telegram Mini App** - полная интеграция с Telegram
-
-### Базовый функционал
-- 📝 Парсинг сообщений из групповых чатов
-- 🤖 Автоматическое определение задач с помощью AI (GPT-4)
-- 👥 Назначение задач сотрудникам через @упоминания
-- 🏷️ Автоматическая классификация задач по категориям
-- 🔔 Уведомления исполнителей в Telegram
-- 📊 Веб-панель управления задачами
-- 📱 Telegram WebApp для просмотра задач
-- 📎 Прикрепление файлов к задачам
-- 💬 Комментарии к задачам
-
-##  Структура проекта
-
-```
-TaskBridge_prototype/
-├── bot/                # Логика Telegram бота
-│   ├── __init__.py
-│   └── handlers.py     # Обработчики сообщений
-├── db/                 # База данных
-│   ├── __init__.py
-│   ├── database.py     # Подключение к БД
-│   └── models.py       # Модели данных
-├── webapp/             # Веб-приложение
-│   ├── __init__.py
-│   ├── app.py          # FastAPI backend
-│   └── index.html      # Frontend интерфейс
-├── config.py           # Конфигурация
-├── main.py             # Точка входа
-├── requirements.txt    # Зависимости
-└── README.md           # Документация
+```bash
+docker compose up --build
 ```
 
+This starts:
 
-### Ключевые слова для задач
+- `taskbridge` on port `8000`
+- `dataagent` on port `8010`
 
-Бот распознает сообщения, содержащие:
-- "сделать", "нужно", "необходимо"
-- "до", "к" (сроки)
-- "важно", "срочно"
-- "проверь", "убедись", "подготовь"
-- и другие служебные слова
+## Environment variables
 
-### Автоматическая классификация
+Core variables are documented in [.env.example](C:/Users/Владислав/Desktop/task_bridge-main/.env.example).
 
-Задачи автоматически классифицируются по категориям на основе ключевых слов в тексте:
-- **Разработка** - код, git, commit, repo, bug, issue, deploy, api, database
-- **Дизайн** - дизайн, макет, ui, ux, mockup, wireframe, figma
-- **Маркетинг** - маркетинг, реклам, пост, smm, контент, campaign, seo
-- **Аналитика** - аналитик, отчет, статистик, metric, dashboard, kpi
-- **Встречи** - встреч, собрание, звонок, meeting, call
-- **uncategorized** - если ключевые слова не найдены
+Important groups:
 
+- bot: `BOT_TOKEN`
+- AI: `OPENAI_API_KEY`, `AI_PROVIDER`, `OPENCLAW_*`
+- web app: `WEB_APP_DOMAIN`, `MINI_APP_URL`
+- database: `DATABASE_URL`
+- mail OAuth: `GOOGLE_OAUTH_*`, `YANDEX_OAUTH_*`
+- DataAgent: `DATA_AGENT_URL`, `DATA_AGENT_TIMEOUT`
+
+## DataAgent status
+
+Phase 1 is already added:
+
+- separate FastAPI node
+- `/health`, `/chat`, `/systems/connect`, `/systems/{user_id}`
+- Telegram integration via `/dataagent`, `/connect`, `/systems`
+
+Not implemented yet:
+
+- real OpenClaw orchestrator for DataAgent
+- Browser Tool
+- persistent storage for connected systems
+- credentials storage
+- internal email/calendar tools for DataAgent
+
+## Notes
+
+- The project currently uses a monorepo structure by design.
+- Browser Agent requirements and fixes are tracked separately in `BROWSER_AGENT_FIXES.md` on the Desktop and should be applied in the next DataAgent phase.
