@@ -22,8 +22,7 @@ AGENT_WELCOME = (
     "С чего начать:\n"
     "1. /connect — подключить внешнюю систему\n"
     "2. /systems — проверить подключённые системы\n"
-    "3. /reviews — получить отчёт по отзывам\n"
-    "4. /agent <запрос> — отправить запрос агенту\n\n"
+    "3. /agent <запрос> — отправить запрос агенту\n\n"
     "Примеры запросов:\n"
     "• /agent Build restaurant reviews report for current week\n"
     "• /agent show my meetings for this week\n"
@@ -57,30 +56,6 @@ async def cmd_dataagent(message: Message) -> None:
     except Exception as exc:
         logger.error("DataAgent chat error: %s", exc, exc_info=True)
         await message.answer("Агент сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз.")
-
-
-@router.message(Command("reviews"))
-async def cmd_reviews(message: Message) -> None:
-    args = (message.text or "").split(maxsplit=1)
-    period = (args[1] if len(args) > 1 else "week").strip().lower()
-
-    if period in {"month", "месяц", "monthly"}:
-        prompt = "Build restaurant reviews report for current month"
-    else:
-        prompt = "Build restaurant reviews report for current week"
-
-    try:
-        result = await data_agent_client.chat({
-            "user_id": message.from_user.id,
-            "message": prompt,
-            "username": message.from_user.username,
-            "first_name": message.from_user.first_name,
-        })
-        await message.answer(result.get("answer", "Не удалось собрать отчёт по отзывам."))
-    except Exception as exc:
-        logger.error("DataAgent reviews error: %s", exc, exc_info=True)
-        await message.answer("Отчёт по отзывам сейчас недоступен. Проверьте сервис агента и источник CSV.")
-
 
 @router.message(Command("systems"))
 async def cmd_systems(message: Message) -> None:

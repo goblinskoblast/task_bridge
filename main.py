@@ -31,7 +31,6 @@ async def set_bot_commands(bot: Bot):
         BotCommand(command="agent", description="Открыть диалог агента"),
         BotCommand(command="connect", description="Подключить систему для агента"),
         BotCommand(command="systems", description="Список систем агента"),
-        BotCommand(command="reviews", description="Отчёт по отзывам"),
         BotCommand(command="support", description="Чат поддержки"),
         BotCommand(command="help", description="Справка и инструкции"),
     ]

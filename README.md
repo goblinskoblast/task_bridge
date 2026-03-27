@@ -29,8 +29,6 @@ TaskBridge is a Telegram-first task management service with:
 - `/dataagent` and `/bigbrother` - hidden compatibility aliases
 - `/connect` - connect an external system for DataAgent
 - `/systems` - list connected DataAgent systems
-- `/reviews` - build a reviews report for the current week
-- `/reviews month` - build a reviews report for the current month
 
 ## Local run
 
@@ -49,7 +47,7 @@ docker compose up --build
 This starts:
 
 - `taskbridge` on port `8000`
-- `dataagent` on port `8010` inside the repo; on Railway it should be created as a separate service named `bigbrother`
+- `dataagent` on port `8010` inside the repo; on Railway it should be created as a separate service inside the same project
 
 ## Environment variables
 
@@ -71,7 +69,7 @@ Current status:
 
 - separate FastAPI node
 - `/health`, `/chat`, `/systems/connect`, `/systems/{user_id}`
-- Telegram integration via `/dataagent`, `/connect`, `/systems`, `/reviews`
+- Telegram integration via `/agent`, `/connect`, `/systems`
 - persistent storage for connected systems
 - internal email/calendar tools
 - AI orchestrator for tool planning and final answer synthesis
