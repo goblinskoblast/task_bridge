@@ -1,0 +1,43 @@
+from __future__ import annotations
+
+import logging
+from typing import Any, Dict, List
+
+import aiohttp
+
+from config import DATA_AGENT_TIMEOUT, DATA_AGENT_URL
+
+logger = logging.getLogger(__name__)
+
+
+class DataAgentClient:
+    def __init__(self, base_url: str | None = None, timeout_seconds: int | None = None) -> None:
+        self.base_url = (base_url or DATA_AGENT_URL).rstrip("/")
+        self.timeout_seconds = timeout_seconds or DATA_AGENT_TIMEOUT
+
+    async def health(self) -> Dict[str, Any]:
+        return await self._request("GET", "/health")
+
+    async def chat(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return await self._request("POST", "/chat", json=payload)
+
+    async def connect_system(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return await self._request("POST", "/systems/connect", json=payload)
+
+    async def list_systems(self, user_id: int) -> List[Dict[str, Any]]:
+        response = await self._request("GET", f"/systems/{user_id}")
+        return response.get("systems", [])
+
+    async def _request(self, method: str, path: str, json: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        url = f"{self.base_url}{path}"
+        timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.request(method, url, json=json) as response:
+                data = await response.json(content_type=None)
+                if response.status >= 400:
+                    raise RuntimeError(f"DataAgent request failed: {response.status} {data}")
+                return data
+
+
+data_agent_client = DataAgentClient()
+

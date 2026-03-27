@@ -51,6 +51,9 @@ OPENCLAW_SDD_SPEC_PATH = os.getenv(
 ).strip()
 OPENCLAW_SDD_MAX_CHARS = int(os.getenv("OPENCLAW_SDD_MAX_CHARS", "24000"))
 
+DATA_AGENT_URL = os.getenv("DATA_AGENT_URL", "http://localhost:8010").strip()
+DATA_AGENT_TIMEOUT = int(os.getenv("DATA_AGENT_TIMEOUT", "45"))
+
 # Google OAuth (Gmail one-click connect)
 GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
 GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()

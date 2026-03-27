@@ -8,6 +8,7 @@ from aiogram.types import BotCommand, BotCommandScopeDefault
 
 from config import BOT_TOKEN, USE_WEBHOOK, WEBHOOK_PATH, WEBHOOK_URL, HOST, PORT
 from bot.handlers import router, init_default_categories
+from bot.data_agent_handlers import router as data_agent_router
 from bot.support_handlers import router as support_router
 from bot.reminders import start_reminder_scheduler, stop_reminder_scheduler
 from db.database import init_db, get_db_session
@@ -27,6 +28,9 @@ async def set_bot_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="Начать работу с ботом"),
         BotCommand(command="panel", description="Открыть панель задач"),
+        BotCommand(command="dataagent", description="Открыть диалог DataAgent"),
+        BotCommand(command="connect", description="Подключить систему для DataAgent"),
+        BotCommand(command="systems", description="Список систем DataAgent"),
         BotCommand(command="support", description="Чат поддержки"),
         BotCommand(command="help", description="Справка и инструкции"),
     ]
@@ -55,6 +59,7 @@ async def start_bot_polling():
 
     # Р РµРіРёСЃС‚СЂРёСЂСѓРµРј СЂРѕСѓС‚РµСЂС‹
     dp.include_router(support_router)
+    dp.include_router(data_agent_router)
     dp.include_router(router)
 
     # РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј РјРµРЅСЋ РєРѕРјР°РЅРґ
@@ -101,6 +106,7 @@ async def start_bot_webhook():
 
     # Р РµРіРёСЃС‚СЂРёСЂСѓРµРј СЂРѕСѓС‚РµСЂС‹
     dp.include_router(support_router)
+    dp.include_router(data_agent_router)
     dp.include_router(router)
 
     # РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј РјРµРЅСЋ РєРѕРјР°РЅРґ
