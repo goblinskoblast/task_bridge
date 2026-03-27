@@ -25,8 +25,8 @@ TaskBridge is a Telegram-first task management service with:
 - `/panel` - open the task panel
 - `/help` - usage help
 - `/support` - support chat
-- `/bigbrother` - main entrypoint for the Big Brother orchestrator
-- `/dataagent` - compatibility alias for the same orchestrator
+- `/agent` - main entrypoint for the orchestrator
+- `/dataagent` and `/bigbrother` - hidden compatibility aliases
 - `/connect` - connect an external system for DataAgent
 - `/systems` - list connected DataAgent systems
 - `/reviews` - build a reviews report for the current week

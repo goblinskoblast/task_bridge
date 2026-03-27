@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-BIG_BROTHER_WELCOME = (
-    "Большой брат готов к работе.\n\n"
+AGENT_WELCOME = (
+    "Агент готов к работе.\n\n"
     "Что он уже умеет:\n"
     "• собирать отчёт по отзывам\n"
     "• анализировать почту и календарь\n"
@@ -23,11 +23,11 @@ BIG_BROTHER_WELCOME = (
     "1. /connect — подключить внешнюю систему\n"
     "2. /systems — проверить подключённые системы\n"
     "3. /reviews — получить отчёт по отзывам\n"
-    "4. /bigbrother <запрос> — поставить задачу оркестратору\n\n"
+    "4. /agent <запрос> — отправить запрос агенту\n\n"
     "Примеры запросов:\n"
-    "• /bigbrother Build restaurant reviews report for current week\n"
-    "• /bigbrother show my meetings for this week\n"
-    "• /bigbrother collect revenue report from the connected system"
+    "• /agent Build restaurant reviews report for current week\n"
+    "• /agent show my meetings for this week\n"
+    "• /agent collect revenue report from the connected system"
 )
 
 
@@ -37,12 +37,13 @@ class ConnectSystemState(StatesGroup):
     waiting_for_password = State()
 
 
+@router.message(Command("agent"))
 @router.message(Command("bigbrother"))
 @router.message(Command("dataagent"))
 async def cmd_dataagent(message: Message) -> None:
     args = (message.text or "").split(maxsplit=1)
     if len(args) == 1:
-        await message.answer(BIG_BROTHER_WELCOME)
+        await message.answer(AGENT_WELCOME)
         return
 
     try:
@@ -52,10 +53,10 @@ async def cmd_dataagent(message: Message) -> None:
             "username": message.from_user.username,
             "first_name": message.from_user.first_name,
         })
-        await message.answer(result.get("answer", "Большой брат не вернул ответ."))
+        await message.answer(result.get("answer", "Агент не вернул ответ."))
     except Exception as exc:
         logger.error("DataAgent chat error: %s", exc, exc_info=True)
-        await message.answer("Большой брат сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз.")
+        await message.answer("Агент сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз.")
 
 
 @router.message(Command("reviews"))
@@ -78,7 +79,7 @@ async def cmd_reviews(message: Message) -> None:
         await message.answer(result.get("answer", "Не удалось собрать отчёт по отзывам."))
     except Exception as exc:
         logger.error("DataAgent reviews error: %s", exc, exc_info=True)
-        await message.answer("Отчёт по отзывам сейчас недоступен. Проверьте сервис Большого брата и источник CSV.")
+        await message.answer("Отчёт по отзывам сейчас недоступен. Проверьте сервис агента и источник CSV.")
 
 
 @router.message(Command("systems"))
@@ -87,14 +88,14 @@ async def cmd_systems(message: Message) -> None:
         systems = await data_agent_client.list_systems(message.from_user.id)
     except Exception as exc:
         logger.error("DataAgent systems error: %s", exc, exc_info=True)
-        await message.answer("Не удалось получить список подключённых систем Большого брата.")
+        await message.answer("Не удалось получить список подключённых систем агента.")
         return
 
     if not systems:
-        await message.answer("У Большого брата пока нет подключённых систем. Используйте /connect.")
+        await message.answer("У агента пока нет подключённых систем. Используйте /connect.")
         return
 
-    lines = ["Подключённые системы Большого брата:"]
+    lines = ["Подключённые системы агента:"]
     for item in systems:
         lines.append(f"• {item.get('system_name', 'web-system')} — {item.get('url')}")
     await message.answer("\n".join(lines))
@@ -103,7 +104,7 @@ async def cmd_systems(message: Message) -> None:
 @router.message(Command("connect"))
 async def cmd_connect(message: Message, state: FSMContext) -> None:
     await state.set_state(ConnectSystemState.waiting_for_url)
-    await message.answer("Введите URL системы, которую нужно подключить для Большого брата.")
+    await message.answer("Введите URL системы, которую нужно подключить для агента.")
 
 
 @router.message(StateFilter(ConnectSystemState.waiting_for_url))
@@ -131,7 +132,7 @@ async def connect_waiting_for_password(message: Message, state: FSMContext) -> N
     except Exception:
         pass
 
-    waiting = await message.answer("Проверяю подключение системы в Большом брате...")
+    waiting = await message.answer("Проверяю подключение системы в агенте...")
     try:
         result = await data_agent_client.connect_system({
             "user_id": message.from_user.id,
@@ -142,16 +143,16 @@ async def connect_waiting_for_password(message: Message, state: FSMContext) -> N
         if result.get("success"):
             system = result.get("system") or {}
             await waiting.edit_text(
-                "Система подключена к Большому брату.\n"
+                "Система подключена к агенту.\n"
                 f"Тип: {system.get('system_name', 'web-system')}\n"
                 f"URL: {system.get('url', '')}\n\n"
                 "Следующий этап — реальная проверка логина и работа Browser Tool."
             )
         else:
             await waiting.edit_text(
-                "Большой брат не смог подключить систему.\n"
+                "Агент не смог подключить систему.\n"
                 f"Причина: {result.get('error', 'неизвестная ошибка')}"
             )
     except Exception as exc:
         logger.error("DataAgent connect error: %s", exc, exc_info=True)
-        await waiting.edit_text("Сервис Большого брата сейчас недоступен или вернул ошибку подключения.")
+        await waiting.edit_text("Сервис агента сейчас недоступен или вернул ошибку подключения.")
