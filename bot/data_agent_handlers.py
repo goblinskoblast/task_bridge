@@ -22,7 +22,7 @@ AGENT_WELCOME = (
     "С чего начать:\n"
     "1. /connect — подключить внешнюю систему\n"
     "2. /systems — проверить подключённые системы\n"
-    "3. /agent <запрос> — отправить запрос агенту\n\n"
+    "3. /agent [запрос] — отправить запрос агенту\n\n"
     "Примеры запросов:\n"
     "• /agent Build restaurant reviews report for current week\n"
     "• /agent show my meetings for this week\n"
