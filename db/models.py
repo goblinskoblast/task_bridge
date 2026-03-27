@@ -6,7 +6,7 @@ from datetime import datetime
 Base = declarative_base()
 
 
-# Промежуточная таблица для связи многие-ко-многим между Task и User (исполнители)
+# Промежуточная таблица для связи многие-ко-многим между Task и User
 task_assignees = Table(
     'task_assignees',
     Base.metadata,
@@ -17,19 +17,19 @@ task_assignees = Table(
 
 
 class Chat(Base):
-    """Модель чата, в котором работает бот"""
+    """Модель чата, в котором работает бот."""
     __tablename__ = "chats"
 
     id = Column(Integer, primary_key=True)
     chat_id = Column(BigInteger, unique=True, nullable=False, index=True)
     chat_type = Column(String(50), nullable=False)  # private, group, supergroup, channel
-    title = Column(String(500), nullable=True)  # Название группы/канала
-    username = Column(String(255), nullable=True)  # Username чата (если есть)
+    title = Column(String(500), nullable=True)  # Название группы или канала
+    username = Column(String(255), nullable=True)  # Username чата, если есть
 
     # Метаданные
     is_active = Column(Boolean, default=True)  # Активен ли бот в этом чате
     added_at = Column(DateTime, default=datetime.utcnow)  # Когда бот был добавлен
-    removed_at = Column(DateTime, nullable=True)  # Когда бот был удален (если был)
+    removed_at = Column(DateTime, nullable=True)  # Когда бот был удалён
 
     # Настройки чата
     auto_confirm_tasks = Column(Boolean, default=False)  # Автоподтверждение задач для этого чата
@@ -86,13 +86,13 @@ class Message(Base):
 
 
 class Category(Base):
-    """Модель категории задач"""
+    """Модель категории задач."""
     __tablename__ = "categories"
 
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False, unique=True)
     description = Column(Text, nullable=True)
-    keywords = Column(JSON, nullable=True)  # Список ключевых слов для автоматической классификации
+    keywords = Column(JSON, nullable=True)  # Ключевые слова для автоматической классификации
     created_at = Column(DateTime, default=datetime.utcnow)
 
     
@@ -103,14 +103,14 @@ class Category(Base):
 
 
 class Task(Base):
-    """Модель задачи"""
+    """Модель задачи."""
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True)
     message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
     category_id = Column(Integer, ForeignKey("categories.id"), nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)  # Кто создал задачу
-    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)  # DEPRECATED: используйте assignees
+    assigned_to = Column(Integer, ForeignKey("users.id"), nullable=True)  # Устаревшее поле, используйте assignees
     title = Column(String(500), nullable=False)
     description = Column(Text, nullable=True)
     status = Column(String(50), default="pending")  # pending, in_progress, completed, cancelled
@@ -135,7 +135,7 @@ class Task(Base):
 
 
 class PendingTask(Base):
-    """Модель задачи, ожидающей подтверждения руководителем"""
+    """Модель задачи, ожидающей подтверждения руководителем."""
     __tablename__ = "pending_tasks"
 
     id = Column(Integer, primary_key=True)
@@ -146,8 +146,8 @@ class PendingTask(Base):
     # Данные задачи
     title = Column(String(500), nullable=False)
     description = Column(Text, nullable=True)
-    assignee_username = Column(String(255), nullable=True)  # DEPRECATED: один исполнитель
-    assignee_usernames = Column(JSON, nullable=True)  # Список username исполнителей ["user1", "user2"]
+    assignee_username = Column(String(255), nullable=True)  # Устаревшее поле: один исполнитель
+    assignee_usernames = Column(JSON, nullable=True)  # Список username исполнителей
     due_date = Column(DateTime, nullable=True)
     priority = Column(String(50), default="normal")
 
@@ -163,7 +163,7 @@ class PendingTask(Base):
 
 
 class TaskFile(Base):
-    """Модель файла, прикрепленного к задаче (отчёт исполнителя)"""
+    """Модель файла, прикреплённого к задаче."""
     __tablename__ = "task_files"
 
     id = Column(Integer, primary_key=True)
@@ -173,7 +173,7 @@ class TaskFile(Base):
     
     file_type = Column(String(50), nullable=False)  # photo, document, video
     file_id = Column(String(500), nullable=False)  # Telegram file_id
-    file_name = Column(String(500), nullable=True)  # Имя файла (для документов)
+    file_name = Column(String(500), nullable=True)  # Имя файла
     file_size = Column(Integer, nullable=True)  # Размер в байтах
     mime_type = Column(String(100), nullable=True)  # MIME type
 
@@ -187,7 +187,7 @@ class TaskFile(Base):
 
 
 class Comment(Base):
-    """Модель комментария к задаче"""
+    """Модель комментария к задаче."""
     __tablename__ = "comments"
 
     id = Column(Integer, primary_key=True)
@@ -205,18 +205,18 @@ class Comment(Base):
 
 
 class EmailAccount(Base):
-    """Модель email аккаунта для IMAP интеграции"""
+    """Модель email-аккаунта для IMAP-интеграции."""
     __tablename__ = "email_accounts"
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False)
     email_address = Column(String(255), nullable=False, unique=True)
 
-    # IMAP настройки
+    # IMAP-настройки
     imap_server = Column(String(255), nullable=False)
     imap_port = Column(Integer, default=993)
     imap_username = Column(String(255), nullable=False)
-    imap_password = Column(Text, nullable=False)  # Пароль приложения (App Password)
+    imap_password = Column(Text, nullable=False)  # Пароль приложения или OAuth-токен
     use_ssl = Column(Boolean, default=True)
 
     # Настройки обработки
@@ -226,7 +226,7 @@ class EmailAccount(Base):
     last_uid = Column(Integer, default=0)  # Последний обработанный UID
 
     # Фильтры
-    only_from_addresses = Column(JSON, nullable=True)  # Список разрешенных отправителей
+    only_from_addresses = Column(JSON, nullable=True)  # Разрешённые отправители
     subject_keywords = Column(JSON, nullable=True)  # Ключевые слова в теме
     auto_confirm = Column(Boolean, default=False)  # Автоматическое подтверждение задач
 
@@ -243,13 +243,13 @@ class EmailAccount(Base):
 
 
 class EmailMessage(Base):
-    """Модель обработанного email сообщения"""
+    """Модель обработанного email-сообщения."""
     __tablename__ = "email_messages"
 
     id = Column(Integer, primary_key=True)
     email_account_id = Column(Integer, ForeignKey("email_accounts.id", ondelete='CASCADE'), nullable=False)
 
-    # Email метаданные
+    # Email-метаданные
     message_id = Column(String(255), unique=True, nullable=False, index=True)
     uid = Column(Integer, nullable=False)
     subject = Column(String(500))
@@ -280,7 +280,7 @@ class EmailMessage(Base):
 
 
 class EmailAttachment(Base):
-    """РњРѕРґРµР»СЊ РІР»РѕР¶РµРЅРёСЏ email СЃРѕРѕР±С‰РµРЅРёСЏ"""
+    """Модель вложения email-сообщения."""
     __tablename__ = "email_attachments"
 
     id = Column(Integer, primary_key=True)
@@ -299,7 +299,7 @@ class EmailAttachment(Base):
 
 
 class SupportSession(Base):
-    """Модель сессии чата поддержки"""
+    """Модель сессии чата поддержки."""
     __tablename__ = "support_sessions"
 
     id = Column(Integer, primary_key=True)
@@ -314,7 +314,7 @@ class SupportSession(Base):
     closed_at = Column(DateTime, nullable=True)
     last_message_at = Column(DateTime, default=datetime.utcnow)
 
-    # AI summary (создается при закрытии)
+    # AI summary создаётся при закрытии
     summary = Column(Text, nullable=True)
     resolution = Column(Text, nullable=True)
 
@@ -327,7 +327,7 @@ class SupportSession(Base):
 
 
 class SupportMessage(Base):
-    """Модель сообщения в чате поддержки"""
+    """Модель сообщения в чате поддержки."""
     __tablename__ = "support_messages"
 
     id = Column(Integer, primary_key=True)
@@ -337,10 +337,10 @@ class SupportMessage(Base):
     from_user = Column(Boolean, default=True)  # True = от пользователя, False = от AI
     message_text = Column(Text, nullable=False)
 
-    # Telegram метаданные
+    # Telegram-метаданные
     telegram_message_id = Column(BigInteger, nullable=True)
 
-    # AI метаданные (если сообщение от AI)
+    # AI-метаданные
     ai_model = Column(String(100), nullable=True)
     ai_tokens = Column(Integer, nullable=True)
 
@@ -357,7 +357,7 @@ class SupportMessage(Base):
 
 
 class SupportAttachment(Base):
-    """Модель вложения к сообщению поддержки"""
+    """Модель вложения к сообщению поддержки."""
     __tablename__ = "support_attachments"
 
     id = Column(Integer, primary_key=True)
@@ -367,10 +367,10 @@ class SupportAttachment(Base):
     telegram_file_id = Column(String(255), nullable=False)
     file_type = Column(String(50), nullable=False)  # photo, document, video, audio, voice
     file_name = Column(String(500), nullable=True)
-    file_size = Column(Integer, nullable=True)  # в байтах
+    file_size = Column(Integer, nullable=True)  # Размер в байтах
     mime_type = Column(String(100), nullable=True)
 
-    # Извлеченный текст (если применимо)
+    # Извлечённый текст, если применимо
     extracted_text = Column(Text, nullable=True)
 
     # Метаданные
@@ -424,3 +424,22 @@ class DataAgentRequestLog(Base):
 
     def __repr__(self):
         return f"<DataAgentRequestLog(id={self.id}, user_id={self.user_id}, trace_id={self.trace_id})>"
+
+
+class DataAgentProfile(Base):
+    """Basic onboarding profile for the agent."""
+    __tablename__ = "data_agent_profiles"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False, unique=True, index=True)
+    business_context = Column(Text, nullable=True)
+    primary_goal = Column(Text, nullable=True)
+    reporting_frequency = Column(String(100), nullable=True)
+    onboarding_completed = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", backref="data_agent_profile", uselist=False)
+
+    def __repr__(self):
+        return f"<DataAgentProfile(id={self.id}, user_id={self.user_id}, onboarding_completed={self.onboarding_completed})>"

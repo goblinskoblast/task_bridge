@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -28,9 +28,6 @@ async def set_bot_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="Начать работу с ботом"),
         BotCommand(command="panel", description="Открыть панель задач"),
-        BotCommand(command="agent", description="Открыть диалог агента"),
-        BotCommand(command="connect", description="Подключить систему для агента"),
-        BotCommand(command="systems", description="Список систем агента"),
         BotCommand(command="support", description="Чат поддержки"),
         BotCommand(command="help", description="Справка и инструкции"),
     ]
@@ -39,7 +36,7 @@ async def set_bot_commands(bot: Bot):
 
 
 async def start_bot_polling():
-    """Р—Р°РїСѓСЃРє Р±РѕС‚Р° РІ СЂРµР¶РёРјРµ polling (РґР»СЏ СЂР°Р·СЂР°Р±РѕС‚РєРё)"""
+    """Запуск бота в режиме polling."""
 
     init_db()
     logger.info("Database initialized")
@@ -57,12 +54,12 @@ async def start_bot_polling():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
-    # Р РµРіРёСЃС‚СЂРёСЂСѓРµРј СЂРѕСѓС‚РµСЂС‹
+    # Регистрируем роутеры
     dp.include_router(support_router)
     dp.include_router(data_agent_router)
     dp.include_router(router)
 
-    # РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј РјРµРЅСЋ РєРѕРјР°РЅРґ
+    # Устанавливаем меню команд
     await set_bot_commands(bot)
 
     logger.info("Bot started in polling mode")
@@ -104,12 +101,12 @@ async def start_bot_webhook():
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
 
-    # Р РµРіРёСЃС‚СЂРёСЂСѓРµРј СЂРѕСѓС‚РµСЂС‹
+    # Регистрируем роутеры
     dp.include_router(support_router)
     dp.include_router(data_agent_router)
     dp.include_router(router)
 
-    # РЈСЃС‚Р°РЅР°РІР»РёРІР°РµРј РјРµРЅСЋ РєРѕРјР°РЅРґ
+    # Устанавливаем меню команд
     await set_bot_commands(bot)
 
     try:
@@ -134,7 +131,7 @@ async def start_bot_webhook():
 
 
 def start_webapp():
-    """Р—Р°РїСѓСЃРє РІРµР±-РїСЂРёР»РѕР¶РµРЅРёСЏ"""
+    """Запуск веб-приложения."""
     import os
 
     port = int(os.environ.get("PORT", PORT))

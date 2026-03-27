@@ -61,7 +61,7 @@ def get_recent_chat_context(
 
 
 def init_default_categories(db: Session):
-    """Инициализация стандартных категорий задач"""
+    """Инициализация стандартных категорий задач."""
     default_categories = [
         {
             "name": "Разработка",
@@ -80,8 +80,8 @@ def init_default_categories(db: Session):
         },
         {
             "name": "Аналитика",
-            "description": "Аналитические и отчетные задачи",
-            "keywords": ["аналитик", "отчет", "статистик", "metric", "dashboard", "kpi", "analytics", "data", "metric", "report", "analysis"]
+            "description": "Аналитические и отчётные задачи",
+            "keywords": ["аналитик", "отчёт", "статистик", "metric", "dashboard", "kpi", "analytics", "data", "metric", "report", "analysis"]
         },
         {
             "name": "Встречи",
@@ -90,7 +90,7 @@ def init_default_categories(db: Session):
         },
         {
             "name": "uncategorized",
-            "description": "Задачи без определенной категории",
+            "description": "Задачи без определённой категории",
             "keywords": []
         }
     ]
@@ -135,7 +135,7 @@ def classify_task(text: str, db: Session) -> Optional[int]:
 async def get_or_create_user(bot: Bot, telegram_id: int, username: str = None,
                               first_name: str = None, last_name: str = None,
                               is_bot: bool = False, db: Session = None) -> User:
-    """Получает пользователя из БД или создает нового"""
+    """Получает пользователя из БД или создаёт нового."""
     user = db.query(User).filter(User.telegram_id == telegram_id).first()
 
     if not user:
@@ -174,7 +174,7 @@ async def get_or_create_user_by_username(db: Session, username: str) -> User:
 
 async def get_or_create_chat(chat_id: int, chat_type: str, title: str = None,
                               username: str = None, db: Session = None) -> Chat:
-    """Получает чат из БД или создает новый"""
+    """Получает чат из БД или создаёт новый."""
     chat = db.query(Chat).filter(Chat.chat_id == chat_id).first()
 
     if not chat:
@@ -190,7 +190,7 @@ async def get_or_create_chat(chat_id: int, chat_type: str, title: str = None,
         db.refresh(chat)
         logger.info(f"Registered new chat: {chat_id} ({chat_type}) - {title}")
     else:
-        # Обновляем информацию о чате, если изменилась
+        # Обновляем информацию о чате, если она изменилась
         updated = False
         if chat.title != title and title:
             chat.title = title
@@ -212,8 +212,8 @@ async def get_or_create_chat(chat_id: int, chat_type: str, title: str = None,
 
 async def notify_comment_added(bot: Bot, task_id: int, comment_author_id: int, comment_text: str, db: Session) -> None:
     """
-    Отправляет уведомления о новом комментарии всем участникам задачи
-    (создателю и исполнителям), кроме автора комментария.
+    Отправляет уведомления о новом комментарии всем участникам задачи,
+    кроме автора комментария.
     """
     try:
         task = db.query(Task).filter(Task.id == task_id).first()
@@ -223,7 +223,7 @@ async def notify_comment_added(bot: Bot, task_id: int, comment_author_id: int, c
 
         comment_author = db.query(User).filter(User.id == comment_author_id).first()
 
-        # Собираем всех участников задачи (создатель + исполнители)
+        # Собираем всех участников задачи
         participants = set()
 
         # Добавляем создателя задачи
@@ -275,7 +275,7 @@ async def notify_comment_added(bot: Bot, task_id: int, comment_author_id: int, c
 async def notify_assigned_user(bot: Bot, task_id: int, db: Session, assignee: User = None) -> bool:
     """
     Отправляет уведомление исполнителю о назначении задачи.
-    Если assignee не указан, берет первого исполнителя из task.assignees (для обратной совместимости).
+    Если assignee не указан, берёт первого исполнителя из task.assignees.
     """
     try:
         task = db.query(Task).filter(Task.id == task_id).first()
@@ -283,7 +283,7 @@ async def notify_assigned_user(bot: Bot, task_id: int, db: Session, assignee: Us
             logger.warning(f"Task {task_id} not found")
             return False
 
-        # Если исполнитель не передан, берем из связей задачи
+        # Если исполнитель не передан, берём его из связей задачи
         if not assignee:
             if task.assignees:
                 assignee = task.assignees[0]
@@ -360,7 +360,7 @@ async def notify_assigned_user(bot: Bot, task_id: int, db: Session, assignee: Us
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
-    """Обработчик команды /start"""
+    """Обработчик команды /start."""
     db = get_db_session()
 
     try:
@@ -374,22 +374,22 @@ async def cmd_start(message: Message):
             db=db
         )
 
-        # Флаг первой авторизации - если пользователь был создан по username без telegram_id
+        # Флаг первой авторизации, если пользователь ранее был создан по username
         is_first_auth = (user.telegram_id == -1 or user.telegram_id != message.from_user.id)
 
-        # Обновляем telegram_id если пользователь ранее был создан по username
+        # Обновляем telegram_id, если пользователь ранее был создан по username
         if is_first_auth:
             user.telegram_id = message.from_user.id
             db.commit()
             logger.info(f"Updated telegram_id for user @{user.username} (ID: {user.id})")
 
-        # Проверяем незавершенные задачи пользователя
+        # Проверяем незавершённые задачи пользователя
         pending_tasks = db.query(Task).join(Task.assignees).filter(
             User.id == user.id,
             Task.status.in_(["pending", "in_progress"])
         ).all()
 
-        # Отправляем уведомления о незавершенных задачах
+        # Отправляем уведомления о незавершённых задачах
         if pending_tasks:
             for task in pending_tasks:
                 task_webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}&task_id={task.id}"
@@ -403,7 +403,7 @@ async def cmd_start(message: Message):
                 ])
 
                 notification = (
-                    f"📋 <b>У вас есть незавершенная задача</b>\n\n"
+                    f"📋 <b>У вас есть незавершённая задача</b>\n\n"
                     f"<b>{task.title}</b>\n"
                     f"Статус: {task.status}\n"
                     f"Приоритет: {task.priority}\n"
@@ -419,23 +419,23 @@ async def cmd_start(message: Message):
         # Формируем приветственное сообщение
         if is_first_auth and pending_tasks:
             welcome_message = (
-                f"✅ Добро пожаловать! Вам было назначено {len(pending_tasks)} задач.\n\n"
+                f"Добро пожаловать! Вам было назначено {len(pending_tasks)} задач.\n\n"
                 "Вы можете открыть панель задач через кнопку ниже или использовать постоянную кнопку над клавиатурой."
             )
         elif pending_tasks:
             welcome_message = (
-                f"✅ С возвращением! У вас {len(pending_tasks)} незавершенных задач.\n\n"
+                f"С возвращением! У вас {len(pending_tasks)} незавершённых задач.\n\n"
                 "Используйте кнопку ниже или постоянную кнопку для доступа к панели задач."
             )
         else:
             welcome_message = (
-                "✅ Отлично! Теперь вы будете получать уведомления о задачах.\n\n"
-                "🤖 TaskBridge использует AI для автоматического извлечения задач из чатов.\n\n"
+                "Отлично! Теперь вы будете получать уведомления о задачах.\n\n"
+                "TaskBridge использует AI для автоматического извлечения задач из чатов.\n\n"
                 "Добавьте меня в групповой чат, чтобы я начал анализировать сообщения.\n\n"
                 "Используйте кнопку \"📱 Панель задач\" для быстрого доступа к вашим задачам."
             )
 
-        # Inline кнопка для одноразового использования
+        # Inline-кнопка для быстрого открытия панели
         inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(
@@ -485,7 +485,7 @@ async def cmd_start(message: Message):
 
 @router.message(Command("panel"))
 async def cmd_panel(message: Message):
-    """Обработчик команды /panel - открыть панель задач"""
+    """Обработчик команды /panel."""
     db = get_db_session()
 
     try:
@@ -527,17 +527,17 @@ async def cmd_help(message: Message):
         "<b>Команды:</b>\n"
         "/start - запуск и быстрый доступ к панели\n"
         "/panel - открыть панель задач\n"
-        "/dataagent - диалог с DataAgent\n"
-        "/connect - подключить внешнюю систему для DataAgent\n"
-        "/systems - список систем DataAgent\n"
+        "/agent - диалог с агентом\n"
+        "/connect - подключить внешнюю систему для агента\n"
+        "/systems - список систем агента\n"
         "/support - чат поддержки\n"
         "/help - справка\n\n"
         "<b>Как работать:</b>\n"
         "1. Добавьте бота в рабочий чат\n"
-        "2. Пишите задачи в сообщениях (с @username или именем исполнителя)\n"
+        "2. Пишите задачи в сообщениях с @username или именем исполнителя\n"
         "3. Подтверждайте найденные задачи и контролируйте статус в панели\n\n"
-        "📧 <b>Email интеграция:</b> подключается только через веб-панель в разделе Email.\n"
-        "🤖 <b>DataAgent:</b> отдельный контур для аналитических запросов, внешних систем, почты и календаря."
+        "📧 <b>Email-интеграция:</b> подключается только через веб-панель в разделе Email.\n"
+        "🤖 <b>Агент:</b> отдельный контур для аналитических запросов, внешних систем, почты и календаря."
     )
 
     await message.answer(help_text, parse_mode="HTML")
@@ -547,7 +547,7 @@ async def cmd_help(message: Message):
 
 @router.callback_query(F.data.startswith("task_start:"))
 async def handle_task_start(callback: CallbackQuery):
-    """Обработчик начала выполнения задачи"""
+    """Обработчик начала выполнения задачи."""
     db = get_db_session()
 
     try:
@@ -580,7 +580,7 @@ async def handle_task_start(callback: CallbackQuery):
 
         notification += f"<b>Приоритет:</b> {task.priority}\n"
         notification += f"<b>Статус:</b> в процессе\n"
-        notification += f"\n📎 Можете отправить фото/файлы как отчёт"
+        notification += f"\n📎 Можете отправить фото или файлы как отчёт"
 
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -604,11 +604,10 @@ async def handle_task_start(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("assign_user:"))
 async def handle_assign_user(callback: CallbackQuery):
-    """Обработчик выбора исполнителя из группового чата"""
-    db = get_db_session()
+    """Обработчик выбора исполнителя из группового чата."""
 
     try:
-        # Парсим callback data: assign_user:{pending_task_id}:{telegram_user_id}
+        # Разбираем callback data: assign_user:{pending_task_id}:{telegram_user_id}
         parts = callback.data.split(":")
         if len(parts) != 3:
             await callback.answer("Ошибка: неверный формат данных", show_alert=True)
@@ -617,7 +616,7 @@ async def handle_assign_user(callback: CallbackQuery):
         pending_task_id = int(parts[1])
         selected_telegram_id = int(parts[2])
 
-        # Проверяем что callback вызван создателем задачи
+        # Проверяем, что callback вызван создателем задачи
         pending_task = db.query(PendingTask).filter(PendingTask.id == pending_task_id).first()
         if not pending_task:
             await callback.answer("Задача не найдена", show_alert=True)
@@ -628,20 +627,20 @@ async def handle_assign_user(callback: CallbackQuery):
             await callback.answer("Только создатель задачи может выбрать исполнителя", show_alert=True)
             return
 
-        # Находим или создаем пользователя-исполнителя
+        # Находим или создаём пользователя-исполнителя
         assignee = db.query(User).filter(User.telegram_id == selected_telegram_id).first()
         if not assignee:
-            # Создаем временного пользователя (будет обновлен когда он запустит бота)
+            # Создаём временного пользователя, если он ещё не запускал бота
             assignee = User(
                 telegram_id=selected_telegram_id,
-                username=callback.message.reply_markup.inline_keyboard[0][0].text,  # Берем имя из кнопки
+                username=callback.message.reply_markup.inline_keyboard[0][0].text,  # Берём имя из кнопки
                 is_bot=False
             )
             db.add(assignee)
             db.commit()
             db.refresh(assignee)
 
-        # Обновляем pending_task с выбранным исполнителем
+        # Обновляем pending_task выбранным исполнителем
         pending_task.assignee_usernames = [assignee.username] if assignee.username else []
         pending_task.assignee_username = assignee.username
         db.commit()
@@ -652,7 +651,7 @@ async def handle_assign_user(callback: CallbackQuery):
         except:
             pass
 
-        # Отправляем подтверждение В ЛИЧНЫЕ СООБЩЕНИЯ создателю
+        # Отправляем подтверждение в личные сообщения создателю
         assignee_name = assignee.first_name or assignee.username or f"User {assignee.telegram_id}"
 
         confirmation_text = (
@@ -709,7 +708,7 @@ async def handle_assign_user(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("confirm_task:"))
 async def handle_confirm_task(callback: CallbackQuery):
-    """Обработчик подтверждения задачи"""
+    """Обработчик подтверждения задачи."""
     db = get_db_session()
 
     try:
@@ -724,7 +723,7 @@ async def handle_confirm_task(callback: CallbackQuery):
             await callback.answer("Задача уже обработана", show_alert=True)
             return
 
-        # Определяем исполнителей (поддержка нового и старого формата)
+        # Определяем исполнителей с поддержкой нового и старого формата
         assignee_usernames = pending_task.assignee_usernames or []
         if not assignee_usernames and pending_task.assignee_username:
             assignee_usernames = [pending_task.assignee_username]
@@ -738,7 +737,7 @@ async def handle_confirm_task(callback: CallbackQuery):
             from datetime import datetime, timedelta
             due_date = datetime.now() + timedelta(hours=24)
 
-        # Создаем задачу
+        # Создаём задачу
         task = Task(
             message_id=pending_task.message_id,
             category_id=category_id,
@@ -764,7 +763,7 @@ async def handle_confirm_task(callback: CallbackQuery):
         from bot.calendar_sync import sync_task_to_connected_calendars
         sync_task_to_connected_calendars(task, db)
 
-        # Отмечаем pending task как подтвержденный
+        # Отмечаем pending task как подтверждённый
         pending_task.status = "confirmed"
         db.commit()
 
@@ -774,7 +773,7 @@ async def handle_confirm_task(callback: CallbackQuery):
                 # Отправляем личное уведомление конкретному исполнителю
                 notification_sent = await notify_assigned_user(callback.bot, task.id, db, assignee=assignee)
 
-                # Если уведомление не отправлено (пользователь не начал чат с ботом)
+                # Если личное уведомление не отправлено, пробуем сообщить в группе
                 if not notification_sent and assignee.username:
                     try:
                         await callback.bot.send_message(
@@ -838,7 +837,7 @@ async def handle_confirm_task(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("reject_task:"))
 async def handle_reject_task(callback: CallbackQuery):
-    """Обработчик отклонения задачи"""
+    """Обработчик отклонения задачи."""
     db = get_db_session()
 
     try:
@@ -873,7 +872,7 @@ async def handle_reject_task(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("task_complete:"))
 async def handle_task_complete(callback: CallbackQuery):
-    """Обработчик отметки задачи как выполненной"""
+    """Обработчик отметки задачи как выполненной."""
     db = get_db_session()
 
     try:
@@ -909,7 +908,7 @@ async def handle_task_complete(callback: CallbackQuery):
 
 @router.message(F.chat.type.in_(["group", "supergroup"]))
 async def handle_group_message(message: Message):
-    """Обработчик сообщений из групповых чатов с AI-извлечением задач"""
+    """Обработчик сообщений из групповых чатов с AI-извлечением задач."""
     db = get_db_session()
 
     try:
@@ -917,7 +916,7 @@ async def handle_group_message(message: Message):
         if message.from_user.is_bot:
             return
 
-        # Регистрируем/обновляем чат в базе данных
+        # Регистрируем или обновляем чат в базе данных
         chat = await get_or_create_chat(
             chat_id=message.chat.id,
             chat_type=message.chat.type,
@@ -985,7 +984,7 @@ async def handle_group_message(message: Message):
         # Логируем данные от AI
         logger.info(f"Task data from AI: {task_data}")
 
-        # Извлекаем список исполнителей (новый формат) или fallback на старый
+        # Извлекаем список исполнителей из нового формата или fallback на старый
         assignee_usernames = task_data.get("assignee_usernames", [])
         if not assignee_usernames:
             # Fallback на старое поле для обратной совместимости
@@ -995,7 +994,7 @@ async def handle_group_message(message: Message):
 
         logger.info(f"Assignee usernames from AI: {assignee_usernames}")
 
-        # НОВАЯ ЛОГИКА: Если нет исполнителя - спрашиваем в ГРУППОВОМ чате
+        # Если нет исполнителя, спрашиваем его в групповом чате
         if not assignee_usernames:
             logger.info("No assignee found - asking in group chat")
 
@@ -1013,7 +1012,7 @@ async def handle_group_message(message: Message):
                             'first_name': user_obj.first_name
                         })
 
-                # Добавляем автора сообщения если его нет в списке
+                # Добавляем автора сообщения, если его нет в списке
                 author_in_list = any(m['id'] == message.from_user.id for m in chat_members)
                 if not author_in_list and not message.from_user.is_bot:
                     chat_members.append({
@@ -1024,11 +1023,11 @@ async def handle_group_message(message: Message):
 
                 if not chat_members:
                     logger.warning("No chat members found, cannot ask for assignee")
-                    # Пропускаем создание задачи если нет участников
+                    # Если участников нет, задачу не создаём
                     return
 
-                # Создаем временный pending task БЕЗ исполнителя
-                # но сохраняем его для последующего выбора
+                # Создаём временный pending task без исполнителя
+                # Позже исполнитель будет выбран вручную
                 pending_task = PendingTask(
                     message_id=message_obj.id,
                     chat_id=message.chat.id,
@@ -1045,7 +1044,7 @@ async def handle_group_message(message: Message):
                 db.commit()
                 db.refresh(pending_task)
 
-                # Формируем сообщение с кнопками выбора исполнителя В ГРУППЕ
+                # Формируем сообщение с кнопками выбора исполнителя в группе
                 ask_text = (
                     f"🤖 <b>Обнаружена задача без исполнителя</b>\n\n"
                     f"<b>Задача:</b> {pending_task.title}\n"
@@ -1056,7 +1055,7 @@ async def handle_group_message(message: Message):
 
                 ask_text += f"\n{message.from_user.first_name}, кому назначить эту задачу?"
 
-                # Создаем кнопки с участниками (максимум 2 в ряд)
+                # Создаём кнопки с участниками, максимум по две в ряд
                 buttons = []
                 row = []
                 for member in chat_members:
@@ -1070,7 +1069,7 @@ async def handle_group_message(message: Message):
                         buttons.append(row)
                         row = []
 
-                # Добавляем остаток
+                # Добавляем оставшиеся кнопки
                 if row:
                     buttons.append(row)
 
@@ -1084,7 +1083,7 @@ async def handle_group_message(message: Message):
 
                 keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
-                # Отправляем ПРЯМО В ГРУППУ
+                # Отправляем прямо в группу
                 await message.answer(
                     ask_text,
                     reply_markup=keyboard,
@@ -1092,14 +1091,14 @@ async def handle_group_message(message: Message):
                 )
 
                 logger.info(f"Sent assignee selection to group chat {message.chat.id}")
-                return  # Выходим, не создаем обычный pending task
+                return  # Выходим и не создаём обычный pending task
 
             except Exception as e:
                 logger.error(f"Error asking for assignee: {e}", exc_info=True)
-                # Если не смогли спросить - создаем задачу без исполнителя
+                # Если спросить не удалось, создаём задачу без исполнителя
                 assignee_usernames = []
 
-        # Создаем pending task (только если исполнитель УЖЕ известен)
+        # Создаём pending task, если исполнитель уже известен
         pending_task = PendingTask(
             message_id=message_obj.id,
             chat_id=message.chat.id,
@@ -1190,7 +1189,7 @@ async def handle_group_message(message: Message):
 
 @router.message(F.photo | F.document)
 async def handle_file_upload(message: Message):
-    """Обработчик загрузки файлов (фото, документы) как отчёт по задаче"""
+    """Обработчик загрузки файлов как отчёта по задаче."""
     db = get_db_session()
 
     try:
@@ -1205,7 +1204,7 @@ async def handle_file_upload(message: Message):
             db=db
         )
 
-        # Находим активные задачи пользователя (через many-to-many связь)
+        # Находим активные задачи пользователя через many-to-many связь
         active_tasks = db.query(Task).join(
             Task.assignees
         ).filter(
@@ -1296,7 +1295,7 @@ async def handle_file_upload(message: Message):
 
 @router.message()
 async def handle_other_message(message: Message):
-    """Обработчик остальных сообщений"""
+    """Обработчик остальных сообщений."""
     if message.chat.type == "private":
         await message.answer(
             "Привет! 👋\n\n"

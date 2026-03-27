@@ -1,9 +1,8 @@
-﻿import os
+import os
 from dotenv import load_dotenv
 
 
 load_dotenv()
-
 
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -22,22 +21,16 @@ OPENAI_API_KEY = OPENAI_API_KEY.strip()
 USE_WEBHOOK = os.getenv("USE_WEBHOOK", "False").lower() == "true"
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-domain.com")
-
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
-
 HOST = os.getenv("HOST", "0.0.0.0")
-
 PORT = int(os.getenv("PORT", "8000"))
 
-# РќРѕСЂРјР°Р»РёР·Р°С†РёСЏ WEB_APP_DOMAIN - СѓР±РёСЂР°РµРј СЃР»РµС€ РІ РєРѕРЅС†Рµ, РµСЃР»Рё РµСЃС‚СЊ
+# Нормализация WEB_APP_DOMAIN: убираем слеш в конце, если он есть.
 WEB_APP_DOMAIN = os.getenv("WEB_APP_DOMAIN", f"http://{HOST}:{PORT}").rstrip("/")
-
 MINI_APP_URL = os.getenv("MINI_APP_URL", f"{WEB_APP_DOMAIN}/webapp/index.html")
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
-
 OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "500"))
 
 AI_PROVIDER = os.getenv("AI_PROVIDER", "openai").strip().lower()
@@ -71,39 +64,36 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///taskbridge.db")
 
 
 TASK_KEYWORDS = [
-    # Р”РµР№СЃС‚РІРёСЏ
-    "СЃРґРµР»Р°С‚СЊ", "РЅСѓР¶РЅРѕ", "РЅРµРѕР±С…РѕРґРёРјРѕ", "РЅР°РґРѕ", "С‚СЂРµР±СѓРµС‚СЃСЏ",
-    "РІС‹РїРѕР»РЅРё", "РїРѕРґРіРѕС‚РѕРІСЊ", "СЃРѕР·РґР°Р№", "РЅР°РїРёС€Рё", "РёСЃРїСЂР°РІСЊ",
-    "РїСЂРѕРІРµСЂСЊ", "СѓР±РµРґРёСЃСЊ", "РѕСЂРіР°РЅРёР·СѓР№", "РЅР°СЃС‚СЂРѕР№",
+    # Действия
+    "сделать", "нужно", "необходимо", "надо", "требуется",
+    "выполни", "подготовь", "создай", "напиши", "исправь",
+    "проверь", "убедись", "организуй", "настрой",
 
-    # РЎСЂРѕРєРё
-    "РґРѕ", "Рє", "СЃСЂРѕС‡РЅРѕ", "РІР°Р¶РЅРѕ", "deadline",
+    # Сроки
+    "до", "к", "срочно", "важно", "deadline",
 
-    # РђРЅРіР»РёР№СЃРєРёРµ
+    # Английские
     "need", "should", "must", "todo", "task",
     "please", "fix", "create", "update", "check"
 ]
 
 
-# РќР°РїРѕРјРёРЅР°РЅРёСЏ РґР»СЏ РёСЃРїРѕР»РЅРёС‚РµР»РµР№ (РґРЅРё РґРѕ РґРµРґР»Р°Р№РЅР°)
-# РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: Р·Р° 3 РґРЅСЏ, Р·Р° 1 РґРµРЅСЊ, РІ РґРµРЅСЊ РґРµРґР»Р°Р№РЅР°
+# Напоминания для исполнителей: за 3 дня, за 1 день и в день дедлайна.
 ASSIGNEE_REMINDER_INTERVALS = [3, 1, 0]
 
-# РќР°РїРѕРјРёРЅР°РЅРёСЏ РґР»СЏ РїРѕСЃС‚Р°РЅРѕРІС‰РёРєРѕРІ (РґРЅРё РїРѕСЃР»Рµ СЃРѕР·РґР°РЅРёСЏ Р·Р°РґР°С‡Рё)
-# РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ: С‡РµСЂРµР· 1 РґРµРЅСЊ, С‡РµСЂРµР· 3 РґРЅСЏ, С‡РµСЂРµР· 7 РґРЅРµР№
+# Напоминания для постановщиков: через 1, 3 и 7 дней после создания задачи.
 CREATOR_REMINDER_INTERVALS = [1, 3, 7]
 
-# Legacy РїРѕРґРґРµСЂР¶РєР° СЃС‚Р°СЂРѕРіРѕ РЅР°Р·РІР°РЅРёСЏ
+# Legacy-поддержка старого названия.
 REMINDER_INTERVALS = ASSIGNEE_REMINDER_INTERVALS
 
 
 REMINDER_TIME_HOUR = 9
 
-# РРЅС‚РµСЂРІР°Р» РїСЂРѕРІРµСЂРєРё РЅР°РїРѕРјРёРЅР°РЅРёР№ (РІ РјРёРЅСѓС‚Р°С…)
-REMINDER_CHECK_INTERVAL = 60  
+# Интервал проверки напоминаний в минутах.
+REMINDER_CHECK_INTERVAL = 60
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Moscow")
 
 # Developer telegram ID for forwarding support screenshots and critical issues
@@ -112,9 +102,5 @@ if DEVELOPER_TELEGRAM_ID:
     DEVELOPER_TELEGRAM_ID = int(DEVELOPER_TELEGRAM_ID.strip())
 
 MAX_TASK_DESCRIPTION_LENGTH = 2000
-
 TASK_STATUSES = ["pending", "in_progress", "completed", "cancelled"]
-
 TASK_PRIORITIES = ["low", "normal", "high", "urgent"]
-
-
