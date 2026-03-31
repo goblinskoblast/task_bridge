@@ -15,7 +15,7 @@ from .prompts import (
 
 logger = logging.getLogger(__name__)
 
-KNOWN_TOOLS = {"email_tool", "calendar_tool", "browser_tool", "review_tool", "orchestrator"}
+KNOWN_TOOLS = {"email_tool", "calendar_tool", "browser_tool", "review_tool", "stoplist_tool", "blanks_tool", "orchestrator"}
 
 
 @dataclass
@@ -109,6 +109,30 @@ class DataAgentOrchestrator:
         if any(token in lowered for token in review_keywords):
             tools.append("review_tool")
 
+        stoplist_keywords = [
+            "стоп-лист",
+            "стоп лист",
+            "недоступные позиции",
+            "недоступные товары",
+            "unavailable items",
+            "stoplist",
+        ]
+        if any(token in lowered for token in stoplist_keywords):
+            tools.append("stoplist_tool")
+
+        blanks_keywords = [
+            "бланк загрузки",
+            "бланки загрузки",
+            "красные бланки",
+            "красный бланк",
+            "лимит",
+            "норматив",
+            "открыт бланк",
+            "закрыт бланк",
+        ]
+        if any(token in lowered for token in blanks_keywords):
+            tools.append("blanks_tool")
+
         if any(token in lowered for token in ["mail", "email", "gmail", "inbox", "letter", "yandex mail", "почта", "письмо", "письма", "ящик"]):
             tools.append("email_tool")
         if any(token in lowered for token in ["calendar", "meeting", "call", "deadline", "schedule", "event", "календарь", "встреча", "созвон", "срок", "расписание", "событие"]):
@@ -160,6 +184,26 @@ class DataAgentOrchestrator:
                 parts.append(
                     "Отчёт по отзывам сейчас недоступен. "
                     f"Причина: {review_result.get('message', 'источник не настроен')}"
+                )
+
+        stoplist_result = tool_results.get("stoplist_tool")
+        if stoplist_result:
+            if stoplist_result.get("status") == "ok":
+                parts.append(stoplist_result.get("report_text", "Отчёт по стоп-листу собран."))
+            else:
+                parts.append(
+                    "Стоп-лист сейчас не удалось собрать. "
+                    f"Причина: {stoplist_result.get('message', stoplist_result.get('error', 'неизвестная ошибка'))}"
+                )
+
+        blanks_result = tool_results.get("blanks_tool")
+        if blanks_result:
+            if blanks_result.get("status") == "ok":
+                parts.append(blanks_result.get("report_text", "Проверка бланков выполнена."))
+            else:
+                parts.append(
+                    "Проверку бланков сейчас не удалось выполнить. "
+                    f"Причина: {blanks_result.get('message', blanks_result.get('error', 'неизвестная ошибка'))}"
                 )
 
         if not parts:

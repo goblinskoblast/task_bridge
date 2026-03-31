@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from db.database import init_db
+from .monitor_scheduler import start_data_agent_monitor_scheduler, stop_data_agent_monitor_scheduler
 from .models import DataAgentChatRequest, DataAgentChatResponse, SystemConnectRequest, SystemConnectResponse, SystemsListResponse
 from .service import service
 
@@ -13,6 +14,12 @@ app = FastAPI(title="TaskBridge DataAgent", version="0.1.0")
 @app.on_event("startup")
 async def startup() -> None:
     init_db()
+    start_data_agent_monitor_scheduler()
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    stop_data_agent_monitor_scheduler()
 
 
 @app.get("/health")

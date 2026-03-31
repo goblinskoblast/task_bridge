@@ -65,6 +65,12 @@ class BrowserAgent:
     ) -> str:
         password = decrypt_password(encrypted_password) if encrypted_password else ""
         username = username or ""
+        logger.info(
+            "BrowserAgent extract_data start url=%s has_credentials=%s task=%s",
+            url,
+            bool(username or password),
+            user_task[:300],
+        )
         try:
             from playwright.async_api import async_playwright
         except ImportError as exc:
@@ -92,8 +98,10 @@ class BrowserAgent:
 
                     await page.goto(url, wait_until="domcontentloaded", timeout=self.TIMEOUT_PAGE)
                     await self._safe_wait(page)
+                    logger.info("BrowserAgent page loaded url=%s", page.url)
 
                     login_result = await self._login(page, username, password, progress_callback)
+                    logger.info("BrowserAgent login_result=%s", login_result)
                     if not login_result.get("success"):
                         return login_result.get("error", "Не удалось выполнить вход в систему.")
 
@@ -112,6 +120,7 @@ class BrowserAgent:
         progress_callback: Optional[ProgressCallback] = None,
     ) -> dict:
         if not username and not password:
+            logger.info("BrowserAgent login skipped: no credentials")
             return {"success": True, "mode": "skip_login_no_credentials"}
 
         username_selectors = [
@@ -141,6 +150,7 @@ class BrowserAgent:
         password_selector = await self._first_existing_selector(page, password_selectors)
 
         if not username_selector or not password_selector:
+            logger.info("BrowserAgent login form not found, proceeding without form login")
             return {"success": True, "mode": "skip_login_form_not_found"}
 
         if progress_callback:
@@ -175,6 +185,7 @@ class BrowserAgent:
 
         for step in range(self.MAX_STEPS):
             await self._safe_wait(page)
+            logger.info("BrowserAgent step=%s current_url=%s", step + 1, page.url)
 
             if self._last_download:
                 if progress_callback:
@@ -201,6 +212,7 @@ class BrowserAgent:
                 await progress_callback(f"Шаг {step}/{self.MAX_STEPS}...")
 
             action = await self._decide_next_action(page, screenshot_b64, user_task, step)
+            logger.info("BrowserAgent action step=%s action=%s", step + 1, action)
             result = await self._execute_action(page, action)
 
             if result is not None:
@@ -245,6 +257,7 @@ class BrowserAgent:
                 response_format={"type": "json_object"},
             )
             if isinstance(result, dict) and result.get("action"):
+                logger.info("BrowserAgent AI action selected step=%s action=%s", step + 1, result)
                 return result
         except Exception as exc:
             logger.warning("BrowserAgent AI action fallback used: %s", exc)
@@ -284,6 +297,7 @@ class BrowserAgent:
 
     async def _execute_action(self, page: Any, action: dict) -> Optional[str]:
         action_name = action.get("action")
+        logger.info("BrowserAgent execute action=%s url=%s", action_name, page.url)
 
         if action_name == "done":
             return str(action.get("data", "")).strip() or "Browser Agent завершил работу без данных."

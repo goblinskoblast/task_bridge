@@ -9,6 +9,8 @@ Available tools:
 - calendar_tool: upcoming task deadlines and calendar-style events
 - browser_tool: external web systems connected by the user; use for dashboards, ERP/CRM, reports, or websites
 - review_tool: restaurant review analytics from the configured Google Sheets/CSV source
+- stoplist_tool: collect unavailable items for a конкретная точка Italian Pizza via portal
+- blanks_tool: inspect upload forms and detect red blanks / limit deviations for a точка Italian Pizza
 
 Rules:
 - Prefer the smallest set of tools that can answer the request.
@@ -16,6 +18,8 @@ Rules:
 - Use calendar_tool for meetings, calendar, deadlines, schedule, calls, or upcoming events.
 - Use email_tool for mail, inbox, letters, Gmail, Yandex mail, or message summaries.
 - Use review_tool for reviews, ratings, feedback, complaints, praise, delivery quality, service quality, or kitchen quality.
+- Use stoplist_tool for стоп-лист, недоступные позиции, unavailable items, missing menu items by point.
+- Use blanks_tool for бланк загрузки, красные бланки, лимиты, норматив, закрыт/открыт бланк.
 - If no specific tool is needed, return orchestrator only.
 - Answer in JSON only.
 

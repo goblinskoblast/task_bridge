@@ -12,10 +12,13 @@ from db.models import DataAgentRequestLog, DataAgentSystem, User
 from email_integration.encryption import encrypt_password
 
 from .browser_agent import browser_agent
+from .blanks_tool import blanks_tool
 from .internal_api_client import internal_api_client
+from .italian_pizza import ITALIAN_PIZZA_PORTAL_URL, resolve_italian_pizza_point
 from .models import ConnectedSystem, DataAgentChatRequest, DataAgentChatResponse, SystemConnectRequest, SystemConnectResponse
 from .orchestrator import orchestrator
 from .review_report import review_report_service
+from .stoplist_tool import stoplist_tool
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,8 @@ class DataAgentService:
             domain = payload.url.host.lower()
             if "iiko" in domain:
                 system_name = "iiko"
+            elif "italianpizza" in domain or "tochka.italianpizza" in domain:
+                system_name = "italian_pizza"
             elif "1c" in domain or "1с" in domain:
                 system_name = "1C"
             elif "crm" in domain:
@@ -123,9 +128,12 @@ class DataAgentService:
 
         try:
             systems = self.list_systems(payload.user_id)
+            logger.info("DataAgent chat trace=%s user_id=%s systems=%s message=%s", trace_id, payload.user_id, len(systems), payload.message[:300])
             plan = await orchestrator.plan(payload.message, systems_count=len(systems))
             selected_tools = plan.selected_tools
+            logger.info("DataAgent plan trace=%s selected_tools=%s reasoning=%s", trace_id, selected_tools, plan.reasoning)
             tool_results = await self._collect_tool_results(payload.user_id, payload.message, selected_tools, systems)
+            logger.info("DataAgent tool_results trace=%s keys=%s", trace_id, list(tool_results.keys()))
             answer = await orchestrator.synthesize(payload.message, tool_results)
             return DataAgentChatResponse(
                 answer=answer,
@@ -223,6 +231,12 @@ class DataAgentService:
         if "review_tool" in selected_tools:
             tool_results["review_tool"] = await self._run_review_tool(user_message, systems, user_id)
 
+        if "stoplist_tool" in selected_tools:
+            tool_results["stoplist_tool"] = await self._run_stoplist_tool(user_message, systems, user_id)
+
+        if "blanks_tool" in selected_tools:
+            tool_results["blanks_tool"] = await self._run_blanks_tool(user_message, systems, user_id)
+
         if "orchestrator" in selected_tools and not tool_results:
             tool_results["orchestrator"] = {
                 "status": "no_tool_selected",
@@ -278,12 +292,35 @@ class DataAgentService:
 
         return targets[:5]
 
+    def _resolve_point_name(self, user_message: str) -> str | None:
+        point = resolve_italian_pizza_point(user_message)
+        if point:
+            return point.display_name
+        return None
+
+    def _find_italian_pizza_system(self, db, user_id: int) -> DataAgentSystem | None:
+        user = db.query(User).filter(User.telegram_id == user_id).first()
+        if not user:
+            return None
+
+        return (
+            db.query(DataAgentSystem)
+            .filter(
+                DataAgentSystem.user_id == user.id,
+                DataAgentSystem.is_active == True,
+                (DataAgentSystem.system_name == "italian_pizza") | (DataAgentSystem.url.contains("italianpizza")),
+            )
+            .order_by(DataAgentSystem.last_connected_at.desc().nullslast(), DataAgentSystem.created_at.desc())
+            .first()
+        )
+
     def _looks_like_public_reviews_request(self, text: str) -> bool:
         lowered = (text or "").lower()
         review_markers = ["отзыв", "отзывы", "2гис", "2gis", "яндекс карты", "yandex maps", "карты", "точка", "точки"]
         return any(marker in lowered for marker in review_markers)
 
     async def _run_review_tool(self, user_message: str, systems: List[ConnectedSystem], user_id: int) -> dict:
+        logger.info("Review tool invoked user_id=%s message=%s", user_id, user_message[:300])
         if self._looks_like_public_reviews_request(user_message):
             public_result = await self._run_public_reviews_browser(user_message)
             if public_result:
@@ -293,10 +330,11 @@ class DataAgentService:
 
     async def _run_public_reviews_browser(self, user_message: str) -> dict:
         targets = self._extract_review_targets(user_message)
+        logger.info("Public reviews resolution message=%s targets=%s", user_message[:300], targets)
         if not targets:
             return {
                 "status": "needs_targets",
-                "message": "Для сбора отзывов пришлите ссылки на карточки 2GIS/Яндекс Карт или перечислите точки отдельными строками.",
+                "message": "Не удалось выделить точку из запроса. Пришлите адрес точки, название пиццерии или ссылку на карточку 2GIS/Яндекс Карт.",
             }
 
         lowered = user_message.lower()
@@ -323,6 +361,7 @@ class DataAgentService:
             )
 
             try:
+                logger.info("Public reviews browser run target=%s url=%s provider=%s", target_label, target_url, provider)
                 data = await browser_agent.extract_data(
                     url=target_url,
                     username=None,
@@ -332,6 +371,7 @@ class DataAgentService:
                 )
                 results.append({"target": target_label, "url": target_url, "status": "ok", "data": data})
             except Exception as exc:
+                logger.warning("Public reviews browser failed target=%s error=%s", target_label, exc)
                 results.append({"target": target_label, "url": target_url, "status": "error", "error": str(exc)})
 
         ok_results = [item for item in results if item["status"] == "ok"]
@@ -353,7 +393,70 @@ class DataAgentService:
             "report_text": "\n".join(report_lines).strip(),
         }
 
+    async def _run_stoplist_tool(self, user_message: str, systems: List[ConnectedSystem], user_id: int) -> dict:
+        point_name = self._resolve_point_name(user_message)
+        logger.info("Stoplist tool invoked user_id=%s point=%s message=%s", user_id, point_name, user_message[:300])
+        if not point_name:
+            return {
+                "status": "needs_point",
+                "message": "Не удалось определить точку. Укажите город и адрес пиццерии.",
+            }
+
+        db = get_db_session()
+        try:
+            system = self._find_italian_pizza_system(db, user_id)
+            if not system:
+                return {
+                    "status": "system_not_connected",
+                    "message": "Italian Pizza портал ещё не подключён. Используйте /connect для tochka.italianpizza.ru.",
+                }
+
+            logger.info("Stoplist tool using system=%s url=%s point=%s", system.system_name, system.url, point_name)
+            return await stoplist_tool.collect_for_point(
+                url=system.url or ITALIAN_PIZZA_PORTAL_URL,
+                username=system.login,
+                encrypted_password=system.encrypted_password,
+                point_name=point_name,
+            )
+        except Exception as exc:
+            logger.error("Stoplist tool failed user_id=%s point=%s error=%s", user_id, point_name, exc, exc_info=True)
+            return {"status": "failed", "error": str(exc)}
+        finally:
+            db.close()
+
+    async def _run_blanks_tool(self, user_message: str, systems: List[ConnectedSystem], user_id: int) -> dict:
+        point_name = self._resolve_point_name(user_message)
+        logger.info("Blanks tool invoked user_id=%s point=%s message=%s", user_id, point_name, user_message[:300])
+        if not point_name:
+            return {
+                "status": "needs_point",
+                "message": "Не удалось определить точку. Укажите город и адрес пиццерии.",
+            }
+
+        db = get_db_session()
+        try:
+            system = self._find_italian_pizza_system(db, user_id)
+            if not system:
+                return {
+                    "status": "system_not_connected",
+                    "message": "Italian Pizza портал ещё не подключён. Используйте /connect для tochka.italianpizza.ru.",
+                }
+
+            logger.info("Blanks tool using system=%s url=%s point=%s", system.system_name, system.url, point_name)
+            return await blanks_tool.inspect_point(
+                url=system.url or ITALIAN_PIZZA_PORTAL_URL,
+                username=system.login,
+                encrypted_password=system.encrypted_password,
+                point_name=point_name,
+            )
+        except Exception as exc:
+            logger.error("Blanks tool failed user_id=%s point=%s error=%s", user_id, point_name, exc, exc_info=True)
+            return {"status": "failed", "error": str(exc)}
+        finally:
+            db.close()
+
     async def _run_browser_tool(self, user_message: str, systems: List[ConnectedSystem], user_id: int) -> dict:
+        logger.info("Browser tool invoked user_id=%s systems=%s message=%s", user_id, len(systems), user_message[:300])
         if not systems:
             if self._looks_like_public_reviews_request(user_message):
                 public_result = await self._run_public_reviews_browser(user_message)
@@ -386,6 +489,7 @@ class DataAgentService:
                 return {"connected_systems": 0, "systems": [], "status": "system_not_found"}
 
             try:
+                logger.info("Browser tool using connected system system=%s url=%s", system.system_name, system.url)
                 result = await browser_agent.extract_data(
                     url=system.url,
                     username=system.login,

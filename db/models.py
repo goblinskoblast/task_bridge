@@ -59,6 +59,8 @@ class User(Base):
     created_tasks = relationship("Task", foreign_keys="Task.created_by", back_populates="creator")
     data_agent_systems = relationship("DataAgentSystem", back_populates="user", cascade="all, delete-orphan")
     data_agent_request_logs = relationship("DataAgentRequestLog", back_populates="user", cascade="all, delete-orphan")
+    data_agent_monitor_configs = relationship("DataAgentMonitorConfig", back_populates="user", cascade="all, delete-orphan")
+    data_agent_monitor_events = relationship("DataAgentMonitorEvent", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(telegram_id={self.telegram_id}, username={self.username})>"
@@ -443,3 +445,52 @@ class DataAgentProfile(Base):
 
     def __repr__(self):
         return f"<DataAgentProfile(id={self.id}, user_id={self.user_id}, onboarding_completed={self.onboarding_completed})>"
+
+
+class DataAgentMonitorConfig(Base):
+    """Конфигурация периодического мониторинга для агентных сценариев."""
+    __tablename__ = "data_agent_monitor_configs"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False, index=True)
+    system_name = Column(String(100), nullable=False, default="italian_pizza")
+    monitor_type = Column(String(100), nullable=False, index=True)  # blanks, stoplist
+    point_name = Column(String(255), nullable=False)
+    point_address = Column(String(500), nullable=True)
+    check_interval_minutes = Column(Integer, nullable=False, default=60)
+    is_active = Column(Boolean, default=True)
+    last_checked_at = Column(DateTime, nullable=True)
+    last_status = Column(String(100), nullable=True)
+    last_result_json = Column(JSON, nullable=True)
+    last_alert_hash = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="data_agent_monitor_configs")
+
+    def __repr__(self):
+        return f"<DataAgentMonitorConfig(id={self.id}, type={self.monitor_type}, point={self.point_name})>"
+
+
+class DataAgentMonitorEvent(Base):
+    """Событие мониторинга агента: изменение лимита, красный бланк, изменение стоп-листа."""
+    __tablename__ = "data_agent_monitor_events"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False, index=True)
+    config_id = Column(Integer, ForeignKey("data_agent_monitor_configs.id", ondelete='CASCADE'), nullable=False, index=True)
+    system_name = Column(String(100), nullable=False, default="italian_pizza")
+    monitor_type = Column(String(100), nullable=False, index=True)
+    point_name = Column(String(255), nullable=False)
+    severity = Column(String(50), nullable=False, default="info")
+    title = Column(String(500), nullable=False)
+    body = Column(Text, nullable=True)
+    event_hash = Column(String(255), nullable=True, index=True)
+    sent_to_telegram = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    user = relationship("User", back_populates="data_agent_monitor_events")
+    config = relationship("DataAgentMonitorConfig", backref="events")
+
+    def __repr__(self):
+        return f"<DataAgentMonitorEvent(id={self.id}, type={self.monitor_type}, point={self.point_name})>"
