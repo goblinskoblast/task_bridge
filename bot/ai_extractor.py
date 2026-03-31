@@ -214,6 +214,13 @@ NOISE_MARKERS = [
     "акция",
     "промокод",
     "чек",
+    "отписаться",
+    "распродажа",
+    "sale",
+    "shop",
+    "купить",
+    "лидеры продаж",
+    "каталог",
 ]
 
 NOTIFICATION_MARKERS = [
@@ -235,6 +242,14 @@ NOTIFICATION_MARKERS = [
     "счет",
     "invoice",
     "receipt",
+    "delivery update",
+    "newsletter",
+    "digest",
+    "маркетинговая рассылка",
+    "вы получили это письмо, потому что",
+    "это письмо не требует ответа",
+    "отписаться от рассылки",
+    "мой баланс",
 ]
 
 EMAIL_SERVICE_SENDERS = [
@@ -246,6 +261,10 @@ EMAIL_SERVICE_SENDERS = [
     "notification",
     "notifications",
     "news@",
+    "digest",
+    "marketing",
+    "promo",
+    "sales",
 ]
 
 ERROR_SUBJECT_MARKERS = [
@@ -621,16 +640,37 @@ def _is_noise(text: str) -> bool:
 def _looks_like_notification_email(subject: str, body_text: str, from_address: str = "") -> bool:
     combined = f"{subject}\n{body_text}".lower()
     sender = (from_address or "").lower()
+    promo_markers = [
+        "отписаться",
+        "unsubscribe",
+        "купить",
+        "в корзину",
+        "распродажа",
+        "скидка",
+        "акция",
+        "каталог",
+        "товары",
+        "лидеры продаж",
+        "ваш баланс",
+        "мой баланс",
+        "оцените рассылку",
+        "это письмо не требует ответа",
+        "вы получили это письмо, потому что",
+    ]
+    has_strong_signal = _contains_strong_task_signal(combined) or _contains_meeting_signal(combined)
 
     if _is_noise(combined):
         return True
 
+    if any(marker in combined for marker in promo_markers) and not has_strong_signal:
+        return True
+
     if any(marker in combined for marker in NOTIFICATION_MARKERS):
-        if not (_contains_strong_task_signal(combined) or _contains_meeting_signal(combined)):
+        if not has_strong_signal:
             return True
 
     if any(marker in sender for marker in EMAIL_SERVICE_SENDERS):
-        if not (_contains_strong_task_signal(combined) or _contains_meeting_signal(combined)):
+        if not has_strong_signal:
             return True
 
     return False
@@ -880,13 +920,30 @@ async def analyze_message_with_ai(
         return None
 
 
-async def analyze_email_with_ai(text: str) -> Optional[Dict[str, Any]]:
-    if not text or not text.strip():
-        return None
+async def analyze_email_with_ai(
+    text: str = "",
+    *,
+    subject: str = "",
+    body_text: str = "",
+    from_address: str = "",
+    attachments_text: str = "",
+) -> Optional[Dict[str, Any]]:
+    if subject or body_text or attachments_text:
+        email_payload = {
+            "subject": subject or "",
+            "body": body_text or text or "",
+            "attachments_text": attachments_text or "",
+        }
+        raw_text = "\n\n".join(
+            part for part in [subject.strip(), body_text.strip(), attachments_text.strip()] if part
+        )
+    else:
+        if not text or not text.strip():
+            return None
+        email_payload = _parse_email_payload(text)
+        raw_text = text
 
-    email_payload = _parse_email_payload(text)
-
-    if _looks_like_notification_email(email_payload["subject"], email_payload["body"]):
+    if _looks_like_notification_email(email_payload["subject"], email_payload["body"], from_address):
         return {"has_task": False, "task": None}
 
     try:
@@ -898,6 +955,19 @@ async def analyze_email_with_ai(text: str) -> Optional[Dict[str, Any]]:
             attachments_text=email_payload["attachments_text"],
         )
         if normalized and normalized.get("has_task"):
+            combined = "\n".join(
+                [
+                    email_payload["subject"],
+                    email_payload["body"],
+                    email_payload["attachments_text"],
+                    normalized["task"].get("title", ""),
+                    normalized["task"].get("description", ""),
+                ]
+            )
+            if _looks_like_notification_email(email_payload["subject"], combined, from_address) and not (
+                _contains_strong_task_signal(combined) or _contains_meeting_signal(combined)
+            ):
+                return {"has_task": False, "task": None}
             return normalized
     except Exception as exc:
         logger.error("Error in email AI analysis: %s", exc, exc_info=True)
@@ -911,7 +981,7 @@ async def analyze_email_with_ai(text: str) -> Optional[Dict[str, Any]]:
     )
     if fallback:
         logger.info("Email fallback extractor found task: %s", fallback)
-        return _normalize_task_result(fallback, fallback_text=text)
+        return _normalize_task_result(fallback, fallback_text=raw_text)
 
     return {"has_task": False, "task": None}
 

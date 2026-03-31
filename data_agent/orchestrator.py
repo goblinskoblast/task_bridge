@@ -88,15 +88,32 @@ class DataAgentOrchestrator:
         lowered = message.lower()
         tools: List[str] = []
 
-        review_keywords = ["review", "feedback", "rating", "complaint", "praise", "restaurant review"]
+        review_keywords = [
+            "review",
+            "feedback",
+            "rating",
+            "complaint",
+            "praise",
+            "restaurant review",
+            "отзыв",
+            "отзывы",
+            "рейтинг",
+            "жалоба",
+            "жалобы",
+            "похвала",
+            "2гис",
+            "2gis",
+            "яндекс карты",
+            "yandex maps",
+        ]
         if any(token in lowered for token in review_keywords):
             tools.append("review_tool")
 
-        if any(token in lowered for token in ["mail", "email", "gmail", "inbox", "letter", "yandex mail"]):
+        if any(token in lowered for token in ["mail", "email", "gmail", "inbox", "letter", "yandex mail", "почта", "письмо", "письма", "ящик"]):
             tools.append("email_tool")
-        if any(token in lowered for token in ["calendar", "meeting", "call", "deadline", "schedule", "event"]):
+        if any(token in lowered for token in ["calendar", "meeting", "call", "deadline", "schedule", "event", "календарь", "встреча", "созвон", "срок", "расписание", "событие"]):
             tools.append("calendar_tool")
-        if any(token in lowered for token in ["revenue", "erp", "crm", "dashboard", "iiko", "1c", "website", "web system"]):
+        if any(token in lowered for token in ["revenue", "erp", "crm", "dashboard", "iiko", "1c", "website", "web system", "сайт", "кабинет", "внешняя система", "2гис", "2gis", "яндекс карты", "yandex maps", "точка", "точки"]):
             tools.append("browser_tool")
 
         if not tools:
@@ -146,7 +163,7 @@ class DataAgentOrchestrator:
                 )
 
         if not parts:
-            parts.append("DataAgent пока не собрал полезных данных по этому запросу.")
+            parts.append("Пока не удалось собрать полезные данные по этому запросу. Нужен более конкретный источник или уточнение задачи.")
 
         return "\n\n".join(parts)
 
