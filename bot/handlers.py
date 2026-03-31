@@ -154,6 +154,22 @@ async def get_or_create_user(bot: Bot, telegram_id: int, username: str = None,
 
 
 async def get_or_create_user_by_username(db: Session, username: str) -> User:
+    if username.startswith("tgid:"):
+        telegram_id = int(username.split(":", 1)[1])
+        user = db.query(User).filter(User.telegram_id == telegram_id).first()
+        if user:
+            return user
+        user = User(
+            telegram_id=telegram_id,
+            username=None,
+            first_name=f"user_{telegram_id}",
+            is_bot=False
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        logger.info(f"Created user placeholder by telegram id {telegram_id} (ID: {user.id})")
+        return user
 
     user = db.query(User).filter(User.username == username).first()
 
@@ -627,8 +643,9 @@ async def handle_assign_user(callback: CallbackQuery):
             db.commit()
             db.refresh(assignee)
 
-        pending_task.assignee_usernames = [assignee.username] if assignee.username else None
-        pending_task.assignee_username = assignee.username
+        assignee_token = assignee.username if assignee.username else f"tgid:{assignee.telegram_id}"
+        pending_task.assignee_usernames = [assignee_token]
+        pending_task.assignee_username = assignee_token
         db.commit()
 
         assignee_name = _format_user_mention(assignee)

@@ -244,6 +244,18 @@ class DataAgentService:
         if urls:
             return urls
 
+        explicit_patterns = [
+            r"по адресу\s+(.+?)(?:[.;]|$)",
+            r"адрес(?:а)?\s*[:\-]\s*(.+?)(?:[.;]|$)",
+            r"точк[ае]\s*[:\-]\s*(.+?)(?:[.;]|$)",
+        ]
+        for pattern in explicit_patterns:
+            match = re.search(pattern, raw, flags=re.IGNORECASE | re.DOTALL)
+            if match:
+                candidate = match.group(1).strip(" \n\t.;,")
+                if candidate and len(candidate) >= 6:
+                    return [candidate]
+
         separators = re.split(r"[\n;]+", raw)
         targets: List[str] = []
         for item in separators:
@@ -252,9 +264,17 @@ class DataAgentService:
                 continue
             if len(cleaned) < 6:
                 continue
-            if any(token in cleaned.lower() for token in ["отзывы", "собери", "посмотри", "покажи", "за сегодня", "за сутки", "за неделю"]):
+            lowered = cleaned.lower()
+            if any(token in lowered for token in ["за сегодня", "за сутки", "за неделю", "за последние", "мне нужны отзывы", "собери отзывы", "покажи отзывы"]):
                 continue
-            targets.append(cleaned)
+            cleaned = re.sub(
+                r"^(мне нужны|нужны|собери|покажи|посмотри)\s+отзывы\s+(?:за.+?\s+)?(?:по|для)\s+",
+                "",
+                cleaned,
+                flags=re.IGNORECASE,
+            ).strip(" .,:;-")
+            if cleaned:
+                targets.append(cleaned)
 
         return targets[:5]
 
