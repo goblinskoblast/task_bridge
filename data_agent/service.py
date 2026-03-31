@@ -4,6 +4,7 @@ import logging
 import time
 from datetime import datetime
 from typing import List
+from urllib.parse import quote
 from uuid import uuid4
 
 from db.database import get_db_session
@@ -220,7 +221,7 @@ class DataAgentService:
             tool_results["browser_tool"] = await self._run_browser_tool(user_message, systems, user_id)
 
         if "review_tool" in selected_tools:
-            tool_results["review_tool"] = await review_report_service.build_report(user_message)
+            tool_results["review_tool"] = await self._run_review_tool(user_message, systems, user_id)
 
         if "orchestrator" in selected_tools and not tool_results:
             tool_results["orchestrator"] = {
@@ -230,8 +231,119 @@ class DataAgentService:
 
         return tool_results
 
+    def _extract_urls(self, text: str) -> List[str]:
+        import re
+
+        return re.findall(r"https?://[^\s)]+", text or "")
+
+    def _extract_review_targets(self, text: str) -> List[str]:
+        import re
+
+        raw = (text or "").strip()
+        urls = self._extract_urls(raw)
+        if urls:
+            return urls
+
+        separators = re.split(r"[\n;]+", raw)
+        targets: List[str] = []
+        for item in separators:
+            cleaned = item.strip(" -\t")
+            if not cleaned:
+                continue
+            if len(cleaned) < 6:
+                continue
+            if any(token in cleaned.lower() for token in ["отзывы", "собери", "посмотри", "покажи", "за сегодня", "за сутки", "за неделю"]):
+                continue
+            targets.append(cleaned)
+
+        return targets[:5]
+
+    def _looks_like_public_reviews_request(self, text: str) -> bool:
+        lowered = (text or "").lower()
+        review_markers = ["отзыв", "отзывы", "2гис", "2gis", "яндекс карты", "yandex maps", "карты", "точка", "точки"]
+        return any(marker in lowered for marker in review_markers)
+
+    async def _run_review_tool(self, user_message: str, systems: List[ConnectedSystem], user_id: int) -> dict:
+        if self._looks_like_public_reviews_request(user_message):
+            public_result = await self._run_public_reviews_browser(user_message)
+            if public_result:
+                return public_result
+
+        return await review_report_service.build_report(user_message)
+
+    async def _run_public_reviews_browser(self, user_message: str) -> dict:
+        targets = self._extract_review_targets(user_message)
+        if not targets:
+            return {
+                "status": "needs_targets",
+                "message": "Для сбора отзывов пришлите ссылки на карточки 2GIS/Яндекс Карт или перечислите точки отдельными строками.",
+            }
+
+        lowered = user_message.lower()
+        provider = "2gis" if ("2гис" in lowered or "2gis" in lowered) else "yandex_maps"
+        results: List[dict] = []
+
+        for target in targets[:5]:
+            if target.startswith("http://") or target.startswith("https://"):
+                target_url = target
+                target_label = target
+            else:
+                if provider == "2gis":
+                    target_url = f"https://2gis.ru/search/{quote(target)}"
+                else:
+                    target_url = f"https://yandex.ru/maps/?text={quote(target)}"
+                target_label = target
+
+            task_text = (
+                "Собери краткий отчет по отзывам для этой точки. "
+                "Найди свежие отзывы, общую тональность, основные жалобы, основные похвалы "
+                "и если возможно укажи среднюю оценку. Ответ верни кратко и по делу.\n\n"
+                f"Точка: {target_label}\n"
+                f"Исходный запрос пользователя: {user_message}"
+            )
+
+            try:
+                data = await browser_agent.extract_data(
+                    url=target_url,
+                    username=None,
+                    encrypted_password=None,
+                    user_task=task_text,
+                    progress_callback=None,
+                )
+                results.append({"target": target_label, "url": target_url, "status": "ok", "data": data})
+            except Exception as exc:
+                results.append({"target": target_label, "url": target_url, "status": "error", "error": str(exc)})
+
+        ok_results = [item for item in results if item["status"] == "ok"]
+        if not ok_results:
+            return {
+                "status": "failed",
+                "message": "Не удалось собрать отзывы по переданным точкам.",
+                "targets": results,
+            }
+
+        report_lines = ["Отчет по отзывам по точкам:"]
+        for item in ok_results:
+            report_lines.append(f"\nТочка: {item['target']}\n{item['data']}")
+
+        return {
+            "status": "ok",
+            "source": provider,
+            "targets": results,
+            "report_text": "\n".join(report_lines).strip(),
+        }
+
     async def _run_browser_tool(self, user_message: str, systems: List[ConnectedSystem], user_id: int) -> dict:
         if not systems:
+            if self._looks_like_public_reviews_request(user_message):
+                public_result = await self._run_public_reviews_browser(user_message)
+                return {
+                    "connected_systems": 0,
+                    "systems": [],
+                    "status": public_result.get("status", "completed"),
+                    "data": public_result.get("report_text") or public_result.get("message"),
+                    "details": public_result,
+                }
             return {
                 "connected_systems": 0,
                 "systems": [],

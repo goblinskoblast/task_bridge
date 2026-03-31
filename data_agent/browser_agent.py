@@ -58,12 +58,13 @@ class BrowserAgent:
     async def extract_data(
         self,
         url: str,
-        username: str,
-        encrypted_password: str,
+        username: str | None,
+        encrypted_password: str | None,
         user_task: str,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> str:
-        password = decrypt_password(encrypted_password)
+        password = decrypt_password(encrypted_password) if encrypted_password else ""
+        username = username or ""
         try:
             from playwright.async_api import async_playwright
         except ImportError as exc:
@@ -110,6 +111,9 @@ class BrowserAgent:
         password: str,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> dict:
+        if not username and not password:
+            return {"success": True, "mode": "skip_login_no_credentials"}
+
         username_selectors = [
             "input[name='username']",
             "input[name='login']",

@@ -159,8 +159,6 @@ IMPERATIVE_MARKERS = [
     "обнови",
     "обновите",
     "подумай",
-    "посмотри",
-    "посмотрите",
     "ожидаю",
     "жду",
     "please",
@@ -201,8 +199,6 @@ IMPERATIVE_VERB_FORMS = {
     "обнови": "Обновить",
     "продумайте": "Продумать",
     "продумай": "Продумать",
-    "посмотрите": "Проверить",
-    "посмотри": "Проверить",
 }
 
 NOISE_MARKERS = [
@@ -265,6 +261,22 @@ EMAIL_SERVICE_SENDERS = [
     "marketing",
     "promo",
     "sales",
+]
+
+CALENDAR_NOTIFICATION_SENDERS = [
+    "calendar.yandex",
+    "calendar.google",
+    "calendar-notification",
+    "calendar",
+]
+
+CALENDAR_NOTIFICATION_MARKERS = [
+    "уведомление отправлено через",
+    "если вы не хотите получать такие письма",
+    "notification sent via",
+    "calendar notification",
+    "напоминание: встреча",
+    "ссылка на видеовстречу",
 ]
 
 ERROR_SUBJECT_MARKERS = [
@@ -658,6 +670,10 @@ def _looks_like_notification_email(subject: str, body_text: str, from_address: s
         "вы получили это письмо, потому что",
     ]
     has_strong_signal = _contains_strong_task_signal(combined) or _contains_meeting_signal(combined)
+
+    if any(marker in sender for marker in CALENDAR_NOTIFICATION_SENDERS):
+        if any(marker in combined for marker in CALENDAR_NOTIFICATION_MARKERS):
+            return True
 
     if _is_noise(combined):
         return True

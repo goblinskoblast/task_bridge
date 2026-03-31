@@ -273,7 +273,7 @@ async def notify_comment_added(bot: Bot, task_id: int, comment_author_id: int, c
 
 
 async def notify_assigned_user(bot: Bot, task_id: int, db: Session, assignee: User = None) -> bool:
-    """?????????? ?????? ??????????? ??????????? ? ?????????? ??????."""
+    """Отправляет назначенному исполнителю уведомление о новой задаче."""
     try:
         task = db.query(Task).filter(Task.id == task_id).first()
         if not task:
@@ -291,25 +291,25 @@ async def notify_assigned_user(bot: Bot, task_id: int, db: Session, assignee: Us
             return False
 
         notification = (
-            f"?? <b>??? ????????? ????? ??????</b>\n\n"
-            f"<b>??????:</b> {task.title}\n"
+            f"📌 <b>Вам назначили новую задачу</b>\n\n"
+            f"<b>Задача:</b> {task.title}\n"
         )
         if task.description and task.description != task.title:
-            notification += f"<b>????????:</b> {task.description}\n"
+            notification += f"<b>Описание:</b> {task.description}\n"
         if len(task.assignees) > 1:
             assignees_str = ", ".join([f"@{a.username}" for a in task.assignees if a.username])
             if assignees_str:
-                notification += f"<b>???????????:</b> {assignees_str}\n"
+                notification += f"<b>Исполнители:</b> {assignees_str}\n"
         if task.due_date:
-            notification += f"<b>????:</b> {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
-        notification += f"<b>?????????:</b> {task.priority}\n"
-        notification += f"<b>??????:</b> {task.status}"
+            notification += f"<b>Срок:</b> {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+        notification += f"<b>Приоритет:</b> {task.priority}\n"
+        notification += f"<b>Статус:</b> {task.status}"
 
         webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={assignee.id}&task_id={task.id}"
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="?? ??????? ??????", web_app=WebAppInfo(url=webapp_url))],
-            [InlineKeyboardButton(text="?? ?????? ??????????", callback_data=f"task_start:{task.id}")],
-            [InlineKeyboardButton(text="? ?????????", callback_data=f"task_complete:{task.id}")],
+            [InlineKeyboardButton(text="📱 Открыть задачу", web_app=WebAppInfo(url=webapp_url))],
+            [InlineKeyboardButton(text="▶️ Начать выполнение", callback_data=f"task_start:{task.id}")],
+            [InlineKeyboardButton(text="✅ Завершить", callback_data=f"task_complete:{task.id}")],
         ])
 
         await bot.send_message(
@@ -336,19 +336,19 @@ def _format_user_mention(user: User) -> str:
         return f"@{user.username}"
     if user.first_name:
         return user.first_name
-    return "???????"
+    return "Пользователь"
 
 
 async def _send_assignee_start_prompt(bot: Bot, chat_id: int, assignee: User, task_title: str) -> None:
     bot_info = await bot.get_me()
     start_url = _build_bot_start_url(bot_info.username)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="??????? ????", url=start_url)]])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть чат с ботом", url=start_url)]])
     mention = _format_user_mention(assignee)
     await bot.send_message(
         chat_id=chat_id,
         text=(
-            f"{mention}, ??? ????????? ?????? <b>{task_title}</b>.\n\n"
-            "??????????, ????????? ?? ??? ? ?????? ??? ? ??????? Start, ????? ???????? ?????? ? ???????? ? ???."
+            f"{mention}, вам назначили задачу <b>{task_title}</b>.\n\n"
+            "Пожалуйста, перейдите в чат со мной и нажмите Start, чтобы получать задачи и работать с ними."
         ),
         reply_markup=keyboard,
         parse_mode="HTML",
@@ -358,10 +358,10 @@ async def _send_assignee_start_prompt(bot: Bot, chat_id: int, assignee: User, ta
 async def _send_creator_start_prompt(bot: Bot, source_message: Message) -> None:
     bot_info = await bot.get_me()
     start_url = _build_bot_start_url(bot_info.username)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="??????? ? ?????? ???", url=start_url)]])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть чат с ботом", url=start_url)]])
     mention = f"@{source_message.from_user.username}" if source_message.from_user.username else source_message.from_user.first_name
     await source_message.answer(
-        f"{mention}, ????? ??????????? ????????? ??????, ???????? ?????? ??? ?? ???? ? ??????? Start.",
+        f"{mention}, чтобы подтвердить задачу, перейдите в личный чат со мной и нажмите Start.",
         reply_markup=keyboard,
     )
 
@@ -371,14 +371,14 @@ async def _send_private_assignee_selection(bot: Bot, creator: User, pending_task
         return False
 
     ask_text = (
-        f"?? <b>??????? ?????? ??? ???????????</b>\n\n"
-        f"<b>??????:</b> {pending_task.title}\n"
+        f"👤 <b>Выберите исполнителя</b>\n\n"
+        f"<b>Задача:</b> {pending_task.title}\n"
     )
     if pending_task.description:
-        ask_text += f"<b>????????:</b> {pending_task.description}\n"
+        ask_text += f"<b>Описание:</b> {pending_task.description}\n"
     if pending_task.due_date:
-        ask_text += f"<b>????:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
-    ask_text += "\n???? ????????? ??? ???????"
+        ask_text += f"<b>Срок:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+    ask_text += "\nКому назначить эту задачу?"
 
     buttons = []
     row = []
@@ -390,7 +390,7 @@ async def _send_private_assignee_selection(bot: Bot, creator: User, pending_task
             row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="? ?????????", callback_data=f"reject_task:{pending_task.id}")])
+    buttons.append([InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_task:{pending_task.id}")])
 
     sent = await bot.send_message(
         chat_id=creator.telegram_id,
@@ -404,7 +404,7 @@ async def _send_private_assignee_selection(bot: Bot, creator: User, pending_task
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
-    """?????????? ??????? /start."""
+    """Обработчик команды /start."""
     db = get_db_session()
     try:
         user = await get_or_create_user(
@@ -431,55 +431,55 @@ async def cmd_start(message: Message):
         if pending_tasks:
             for task in pending_tasks:
                 task_webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}&task_id={task.id}"
-                task_keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="?? ??????? ??????", web_app=WebAppInfo(url=task_webapp_url))]])
+                task_keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📱 Открыть задачу", web_app=WebAppInfo(url=task_webapp_url))]])
                 notification = (
-                    f"?? <b>? ??? ???? ????????????? ??????</b>\n\n"
+                    f"📌 <b>У вас есть активная задача</b>\n\n"
                     f"<b>{task.title}</b>\n"
-                    f"??????: {task.status}\n"
-                    f"?????????: {task.priority}\n"
+                    f"Статус: {task.status}\n"
+                    f"Приоритет: {task.priority}\n"
                 )
                 if task.due_date:
-                    notification += f"????: {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+                    notification += f"Срок: {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
                 await message.answer(notification, reply_markup=task_keyboard, parse_mode="HTML")
 
         webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}"
 
         if is_first_auth and pending_tasks:
             welcome_message = (
-                f"????? ??????????. ??? ???? ????????? {len(pending_tasks)} ?????.\n\n"
-                "???????? ?????? ????? ?? ?????? ???? ??? ??????????? ?????????? ?????? ??? ????? ?????."
+                f"Добро пожаловать. У вас уже есть {len(pending_tasks)} активных задач.\n\n"
+                "Откройте панель задач или переходите в карточки выше, чтобы продолжить работу."
             )
         elif pending_tasks:
             welcome_message = (
-                f"? ????????????. ? ??? {len(pending_tasks)} ????????????? ?????.\n\n"
-                "???????? ?????? ????? ?? ?????? ???? ??? ??????????? ?????????? ?????? ??? ????? ?????."
+                f"С возвращением. У вас {len(pending_tasks)} активных задач.\n\n"
+                "Откройте панель задач или используйте карточки выше, чтобы продолжить работу."
             )
         else:
             welcome_message = (
-                "TaskBridge ??????????? ?????? ?? ??????? ?????, ????? ? ????-??????????.\n\n"
-                "???????? ???? ? ??????? ???, ????? ? ??????? ??????, ? ??? ?????? ?????? ??????????? ?????? ?????? ????."
+                "TaskBridge помогает фиксировать задачи из чатов и работать с ними в мини-приложении.\n\n"
+                "Откройте панель задач, запустите агента или начните общение с поддержкой."
             )
 
         inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="?? ??????? ??? ?????? ?????", web_app=WebAppInfo(url=webapp_url))],
-            [InlineKeyboardButton(text="?? ?????", callback_data="agent_open")],
-            [InlineKeyboardButton(text="?? ??? ?????????", callback_data="support_start")],
+            [InlineKeyboardButton(text="📱 Открыть панель задач", web_app=WebAppInfo(url=webapp_url))],
+            [InlineKeyboardButton(text="🤖 Агент", callback_data="agent_open")],
+            [InlineKeyboardButton(text="💬 Поддержка", callback_data="support_start")],
         ])
 
         reply_keyboard = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="?? ?????? ?????", web_app=WebAppInfo(url=webapp_url))],
-                [KeyboardButton(text="?? ?????")],
+                [KeyboardButton(text="📱 Панель задач", web_app=WebAppInfo(url=webapp_url))],
+                [KeyboardButton(text="🤖 Агент")],
             ],
             resize_keyboard=True,
             persistent=True,
         )
 
         await message.answer(welcome_message, reply_markup=inline_keyboard, parse_mode="HTML")
-        await message.answer("??????? ???????? ???????? ???????? ????.", reply_markup=reply_keyboard)
+        await message.answer("Ниже добавил постоянную клавиатуру для быстрого доступа.", reply_markup=reply_keyboard)
     except Exception as e:
         logger.error(f"Error in /start command: {e}", exc_info=True)
-        await message.answer("????????? ??????. ?????????? ?????.")
+        await message.answer("Произошла ошибка. Попробуйте позже.")
     finally:
         db.close()
 
@@ -522,20 +522,19 @@ async def cmd_panel(message: Message):
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    """??????? ?? ????."""
+    """Показывает краткую справку по боту."""
     help_text = (
-        "?? <b>TaskBridge</b>\n\n"
-        "<b>???????:</b>\n"
-        "/start - ?????? ???? ? ??????? ?????? ? ??????\n"
-        "/panel - ??????? ?????? ?????\n"
-        "/support - ??? ?????????\n"
-        "/help - ???????\n\n"
-        "<b>??? ????????:</b>\n"
-        "1. ???????? ???? ? ??????? ???\n"
-        "2. ?????? ?????? ? ?????????? ? ??????, username ??? ????? ??????????\n"
-        "3. ????????????? ????????? ?????? ? ?????? ???? ? ????? ? ????????????? ?????? ? ??????\n\n"
-        "?? <b>?????:</b> ???????????? ????? ???-?????? ? ??????? ?????.\n"
-        "?? <b>?????:</b> ??????????? ??????? '?????' ? ?????? ???? ? ?????."
+        "📘 <b>TaskBridge</b>\n\n"
+        "<b>Команды:</b>\n"
+        "/start — открыть стартовое меню и клавиатуру\n"
+        "/panel — открыть панель задач\n"
+        "/support — открыть чат поддержки\n"
+        "/help — показать эту справку\n\n"
+        "<b>Как это работает:</b>\n"
+        "1. Напишите задачу в групповом чате.\n"
+        "2. Бот распознает задачу и отправит подтверждение постановщику в личку.\n"
+        "3. После подтверждения задача появится у исполнителя и в мини-приложении.\n\n"
+        "Агент запускается кнопкой <b>🤖 Агент</b> в личном чате с ботом."
     )
     await message.answer(help_text, parse_mode="HTML")
 
@@ -599,18 +598,18 @@ async def handle_task_start(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("assign_user:"))
 async def handle_assign_user(callback: CallbackQuery):
-    """????? ??????????? ??? pending-?????? ?? ??????? ????????? ????????????."""
+    """Выбор исполнителя для pending-задачи из личного сообщения постановщику."""
     db = get_db_session()
     try:
         _, pending_task_id, selected_telegram_id = callback.data.split(":")
         pending_task = db.query(PendingTask).filter(PendingTask.id == int(pending_task_id)).first()
         if not pending_task:
-            await callback.answer("?????? ?? ???????", show_alert=True)
+            await callback.answer("Задача не найдена", show_alert=True)
             return
 
         creator = db.query(User).filter(User.id == pending_task.created_by_id).first()
         if not creator or creator.telegram_id != callback.from_user.id:
-            await callback.answer("?????? ??????????? ?????? ????? ??????? ???????????", show_alert=True)
+            await callback.answer("Вы не можете выбирать исполнителя для этой задачи", show_alert=True)
             return
 
         selected_telegram_id = int(selected_telegram_id)
@@ -634,40 +633,40 @@ async def handle_assign_user(callback: CallbackQuery):
 
         assignee_name = _format_user_mention(assignee)
         confirmation_text = (
-            f"? <b>??????????? ??????</b>\n\n"
-            f"<b>??????:</b> {pending_task.title}\n"
-            f"<b>???????????:</b> {assignee_name}\n"
+            f"📋 <b>Подтвердите задачу</b>\n\n"
+            f"<b>Задача:</b> {pending_task.title}\n"
+            f"<b>Исполнитель:</b> {assignee_name}\n"
         )
         if pending_task.description:
-            confirmation_text += f"<b>????????:</b> {pending_task.description}\n"
+            confirmation_text += f"<b>Описание:</b> {pending_task.description}\n"
         if pending_task.due_date:
-            confirmation_text += f"<b>????:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
-        confirmation_text += f"<b>?????????:</b> {pending_task.priority}\n\n??????????? ???????? ??????:"
+            confirmation_text += f"<b>Срок:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+        confirmation_text += f"<b>Приоритет:</b> {pending_task.priority}\n\nПодтвердить создание задачи?"
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="? ???????????", callback_data=f"confirm_task:{pending_task.id}"), InlineKeyboardButton(text="? ?????????", callback_data=f"reject_task:{pending_task.id}")]])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm_task:{pending_task.id}"), InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_task:{pending_task.id}")]])
         await callback.message.edit_text(confirmation_text, reply_markup=keyboard, parse_mode="HTML")
-        await callback.answer("??????????? ??????")
+        await callback.answer("Исполнитель выбран")
     except TelegramForbiddenError:
-        await callback.answer("????? ??????? ?????? ??? ? ????? ???????? /start", show_alert=True)
+        await callback.answer("Исполнитель ещё не запускал бота. Пусть сначала нажмёт /start", show_alert=True)
     except Exception as e:
         logger.error(f"Error in assign_user callback: {e}", exc_info=True)
-        await callback.answer("????????? ??????", show_alert=True)
+        await callback.answer("Произошла ошибка", show_alert=True)
     finally:
         db.close()
 
 
 @router.callback_query(F.data.startswith("confirm_task:"))
 async def handle_confirm_task(callback: CallbackQuery):
-    """????????????? ????????? ??????."""
+    """Подтверждает pending-задачу и создаёт обычную задачу."""
     db = get_db_session()
     try:
         pending_task_id = int(callback.data.split(":")[1])
         pending_task = db.query(PendingTask).filter(PendingTask.id == pending_task_id).first()
         if not pending_task:
-            await callback.answer("?????? ?? ???????", show_alert=True)
+            await callback.answer("Задача не найдена", show_alert=True)
             return
         if pending_task.status != "pending":
-            await callback.answer("?????? ??? ??????????", show_alert=True)
+            await callback.answer("Задача уже обработана", show_alert=True)
             return
 
         assignee_usernames = pending_task.assignee_usernames or []
@@ -716,27 +715,27 @@ async def handle_confirm_task(callback: CallbackQuery):
         webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?task_id={task.id}"
         if creator:
             webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=manager&user_id={creator.id}&task_id={task.id}"
-        manager_keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="?? ??????? ??????", web_app=WebAppInfo(url=webapp_url))]])
+        manager_keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📱 Открыть задачу", web_app=WebAppInfo(url=webapp_url))]])
 
         confirmation_msg = (
-            f"? <b>?????? ???????????? ? ???????</b>\n\n"
-            f"<b>??????:</b> {task.title}\n"
+            f"✅ <b>Задача подтверждена и создана</b>\n\n"
+            f"<b>Задача:</b> {task.title}\n"
         )
         if task.assignees:
             if len(task.assignees) == 1:
-                confirmation_msg += f"<b>???????????:</b> {_format_user_mention(task.assignees[0])}\n"
+                confirmation_msg += f"<b>Исполнитель:</b> {_format_user_mention(task.assignees[0])}\n"
             else:
-                confirmation_msg += f"<b>???????????:</b> {', '.join(_format_user_mention(a) for a in task.assignees)}\n"
+                confirmation_msg += f"<b>Исполнители:</b> {', '.join(_format_user_mention(a) for a in task.assignees)}\n"
         else:
-            confirmation_msg += "<b>???????????:</b> ?? ??????\n"
-        confirmation_msg += f"<b>????:</b> {task.due_date.strftime('%d.%m.%Y %H:%M') if task.due_date else '?? ??????'}\n"
-        confirmation_msg += f"<b>?????????:</b> {task.priority}"
+            confirmation_msg += "<b>Исполнитель:</b> не выбран\n"
+        confirmation_msg += f"<b>Срок:</b> {task.due_date.strftime('%d.%m.%Y %H:%M') if task.due_date else 'не задан'}\n"
+        confirmation_msg += f"<b>Приоритет:</b> {task.priority}"
 
         await callback.message.edit_text(confirmation_msg, reply_markup=manager_keyboard, parse_mode="HTML")
-        await callback.answer("?????? ???????")
+        await callback.answer("Задача создана")
     except Exception as e:
         logger.error(f"Error confirming task: {e}", exc_info=True)
-        await callback.answer("????????? ??????", show_alert=True)
+        await callback.answer("Произошла ошибка", show_alert=True)
     finally:
         db.close()
 
@@ -814,7 +813,7 @@ async def handle_task_complete(callback: CallbackQuery):
 
 @router.message(F.chat.type.in_(["group", "supergroup"]))
 async def handle_group_message(message: Message):
-    """?????? ????????? ?? ????????? ????? ? ?????????????? ????? ?????? ? ?????."""
+    """Обрабатывает сообщения в группе и выносит подтверждение найденной задачи в личку."""
     db = get_db_session()
     try:
         if message.from_user.is_bot or not message.text:
@@ -869,7 +868,7 @@ async def handle_group_message(message: Message):
             message_id=message_obj.id,
             chat_id=message.chat.id,
             created_by_id=user.id,
-            title=task_data.get("title", "??? ????????"),
+            title=task_data.get("title", "Новая задача"),
             description=task_data.get("description"),
             assignee_usernames=assignee_usernames if assignee_usernames else None,
             assignee_username=assignee_usernames[0] if assignee_usernames else None,
@@ -909,21 +908,21 @@ async def handle_group_message(message: Message):
             return
 
         confirmation_text = (
-            f"?? <b>??????? ??????</b>\n\n"
-            f"<b>??????:</b> {pending_task.title}\n"
+            f"📋 <b>Подтвердите задачу</b>\n\n"
+            f"<b>Задача:</b> {pending_task.title}\n"
         )
         if pending_task.description and pending_task.description != pending_task.title:
-            confirmation_text += f"<b>????????:</b> {pending_task.description}\n"
+            confirmation_text += f"<b>Описание:</b> {pending_task.description}\n"
         if pending_task.assignee_usernames:
             if len(pending_task.assignee_usernames) == 1:
-                confirmation_text += f"<b>???????????:</b> @{pending_task.assignee_usernames[0]}\n"
+                confirmation_text += f"<b>Исполнитель:</b> @{pending_task.assignee_usernames[0]}\n"
             else:
-                confirmation_text += f"<b>???????????:</b> {', '.join(f'@{u}' for u in pending_task.assignee_usernames)}\n"
+                confirmation_text += f"<b>Исполнители:</b> {', '.join(f'@{u}' for u in pending_task.assignee_usernames)}\n"
         if pending_task.due_date:
-            confirmation_text += f"<b>????:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
-        confirmation_text += f"<b>?????????:</b> {pending_task.priority}\n\n??????????? ???????? ??????:"
+            confirmation_text += f"<b>Срок:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+        confirmation_text += f"<b>Приоритет:</b> {pending_task.priority}\n\nПодтвердить создание задачи?"
 
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="? ???????????", callback_data=f"confirm_task:{pending_task.id}"), InlineKeyboardButton(text="? ?????????", callback_data=f"reject_task:{pending_task.id}")]])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm_task:{pending_task.id}"), InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_task:{pending_task.id}")]])
         try:
             sent_message = await message.bot.send_message(
                 chat_id=message.from_user.id,
