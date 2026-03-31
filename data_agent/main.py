@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 
 from db.database import init_db
 from .monitor_scheduler import start_data_agent_monitor_scheduler, stop_data_agent_monitor_scheduler
 from .models import DataAgentChatRequest, DataAgentChatResponse, SystemConnectRequest, SystemConnectResponse, SystemsListResponse
 from .service import service
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 
 app = FastAPI(title="TaskBridge DataAgent", version="0.1.0")

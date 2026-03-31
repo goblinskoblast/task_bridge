@@ -37,6 +37,15 @@ class AgentOnboardingState(StatesGroup):
     waiting_for_reporting_frequency = State()
 
 
+def _normalize_connect_url(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return raw
+    if raw.startswith(("http://", "https://")):
+        return raw
+    return f"https://{raw}"
+
+
 def _get_or_create_user(
     db,
     telegram_id: int,
@@ -226,9 +235,10 @@ async def cmd_connect(message: Message, state: FSMContext) -> None:
 
 @router.message(StateFilter(ConnectSystemState.waiting_for_url), F.text)
 async def connect_waiting_for_url(message: Message, state: FSMContext) -> None:
-    await state.update_data(url=(message.text or "").strip())
+    normalized_url = _normalize_connect_url(message.text or "")
+    await state.update_data(url=normalized_url)
     await state.set_state(ConnectSystemState.waiting_for_login)
-    await message.answer("Введите логин для этой системы.")
+    await message.answer(f"URL сохранён: {normalized_url}\nТеперь введите логин для этой системы.")
 
 
 @router.message(StateFilter(ConnectSystemState.waiting_for_login), F.text)
