@@ -19,7 +19,7 @@ class ItalianPizzaPoint:
 
 ITALIAN_PIZZA_POINTS = [
     ItalianPizzaPoint("Полевской", "Ленина 11"),
-    ItalianPizzaPoint("Асбест", "ТЦ Небо, Ленинградская 26"),
+    ItalianPizzaPoint("Асбест", "ТЦ Небо, Ленинградская 26/2"),
     ItalianPizzaPoint("Сухой Лог", "Белинского 40"),
     ItalianPizzaPoint("Реж", "Ленина 17"),
     ItalianPizzaPoint("Верхний Уфалей", "Ленина 147"),
@@ -32,6 +32,15 @@ def resolve_italian_pizza_point(text: str) -> Optional[ItalianPizzaPoint]:
     lowered = (text or "").lower()
     best_point = None
     best_score = 0
+
+    alias_map = {
+        "ленинградская 26": "ленинградская 26/2",
+        "ленинградская, 26": "ленинградская 26/2",
+        "небо ленинградская 26": "тц небо, ленинградская 26/2",
+        "небо ленинградская 26/2": "тц небо, ленинградская 26/2",
+    }
+    for source, target in alias_map.items():
+        lowered = lowered.replace(source, target)
 
     for point in ITALIAN_PIZZA_POINTS:
         score = 0

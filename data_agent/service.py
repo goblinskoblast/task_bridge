@@ -40,6 +40,51 @@ class DataAgentService:
             normalized = normalized.replace("\n\n\n", "\n\n")
         return normalized
 
+    def _looks_like_point_or_followup(self, message: str) -> bool:
+        lowered = (message or "").lower()
+        if resolve_italian_pizza_point(lowered):
+            return True
+        followup_markers = [
+            "по ленина",
+            "по адресу",
+            "вот этот адрес",
+            "эта точка",
+            "по этой системе",
+            "по всем своим точкам",
+            "раз в час",
+            "раз в три часа",
+            "каждый час",
+            "каждые три часа",
+        ]
+        return any(marker in lowered for marker in followup_markers)
+
+    def _infer_followup_tools(self, user_id: int, message: str) -> List[str]:
+        if not self._looks_like_point_or_followup(message):
+            return []
+
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return []
+
+            recent_logs = (
+                db.query(DataAgentRequestLog)
+                .filter(DataAgentRequestLog.user_id == user.id)
+                .order_by(DataAgentRequestLog.created_at.desc())
+                .limit(5)
+                .all()
+            )
+
+            for item in recent_logs:
+                tools = item.selected_tools or []
+                filtered = [tool for tool in tools if tool in {"stoplist_tool", "blanks_tool", "review_tool"}]
+                if filtered:
+                    return filtered
+            return []
+        finally:
+            db.close()
+
     def health(self) -> dict:
         return {
             "status": "ok",
@@ -145,6 +190,11 @@ class DataAgentService:
             systems = self.list_systems(payload.user_id)
             logger.info("DataAgent chat trace=%s user_id=%s systems=%s message=%s", trace_id, payload.user_id, len(systems), normalized_message[:300])
             plan = await orchestrator.plan(normalized_message, systems_count=len(systems))
+            if plan.selected_tools == ["orchestrator"]:
+                inferred_tools = self._infer_followup_tools(payload.user_id, normalized_message)
+                if inferred_tools:
+                    plan.selected_tools = inferred_tools
+                    plan.reasoning = f"Контекстный follow-up routing: {', '.join(inferred_tools)}"
             selected_tools = plan.selected_tools
             logger.info("DataAgent plan trace=%s selected_tools=%s reasoning=%s", trace_id, selected_tools, plan.reasoning)
             tool_results = await self._collect_tool_results(payload.user_id, normalized_message, selected_tools, systems)
