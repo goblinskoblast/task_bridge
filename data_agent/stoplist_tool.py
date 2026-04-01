@@ -68,8 +68,6 @@ class StoplistTool:
         return any(marker in lowered for marker in _UNAVAILABLE_MARKERS)
 
     def _looks_like_good_stoplist(self, items: List[str]) -> bool:
-        if len(items) < 2:
-            return False
         meaningful = 0
         for item in items:
             lowered = item.lower()
@@ -79,6 +77,33 @@ class StoplistTool:
                 continue
             meaningful += 1
         return meaningful >= 2
+
+    async def _select_public_point(self, page, point) -> None:
+        trigger_candidates = ["Выберите адрес", point.city]
+        for candidate in trigger_candidates:
+            locator = page.locator(f"text={candidate}")
+            if await locator.count() > 0:
+                try:
+                    await locator.first.click(timeout=3000)
+                    await page.wait_for_timeout(1500)
+                    logger.info("Stoplist opened address selector via=%s", candidate)
+                    break
+                except Exception:
+                    continue
+
+        address_candidates = [point.address, point.display_name, point.city]
+        for candidate in address_candidates:
+            locator = page.locator(f"text={candidate}")
+            if await locator.count() > 0:
+                try:
+                    await locator.first.click(timeout=3000)
+                    await page.wait_for_timeout(1800)
+                    logger.info("Stoplist selected point via=%s", candidate)
+                    return
+                except Exception:
+                    continue
+
+        logger.info("Stoplist point selector not confirmed for=%s", point.display_name)
 
     async def _collect_public_stoplist_dom(self, point_name: str) -> str:
         point = resolve_italian_pizza_point(point_name)
@@ -100,14 +125,7 @@ class StoplistTool:
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
                 await page.wait_for_timeout(2500)
 
-                for candidate in [point.address, point.display_name, point.city, "Выберите адрес", "Заказать доставку"]:
-                    locator = page.locator(f"text={candidate}")
-                    if await locator.count() > 0:
-                        try:
-                            await locator.first.click(timeout=3000)
-                            await page.wait_for_timeout(1500)
-                        except Exception:
-                            continue
+                await self._select_public_point(page, point)
 
                 product_candidates: list[str] = []
                 card_selectors = [
@@ -133,12 +151,15 @@ class StoplistTool:
                             class_name = (await block.get_attribute("class") or "").lower()
                             aria_disabled = (await block.get_attribute("aria-disabled") or "").lower()
                             disabled_attr = await block.get_attribute("disabled")
+                            style_attr = (await block.get_attribute("style") or "").lower()
                             unavailable = (
                                 self._looks_like_unavailable_block(text)
                                 or "disabled" in class_name
                                 or "unavailable" in class_name
                                 or aria_disabled == "true"
                                 or disabled_attr is not None
+                                or "opacity" in style_attr
+                                or "grayscale" in style_attr
                             )
                             if not unavailable:
                                 continue
@@ -179,8 +200,10 @@ class StoplistTool:
 
         task = (
             build_stoplist_task(point.display_name)
-            + "\n\nКритично: не перечисляй категории меню, разделы сайта, кнопки или заголовки. "
-              "Нужны только реальные позиции товаров, которые сейчас недоступны для заказа у выбранной точки. "
+            + "\n\nСначала обязательно открой выбор адреса и выбери нужную точку. "
+              "Нельзя завершать задачу на первом экране, если на странице виден текст 'Выберите адрес'. "
+              "После выбора точки просмотри карточки товаров и верни только реальные недоступные товары. "
+              "Не перечисляй категории меню, кнопки, баннеры, заголовки и служебные элементы. "
               "Если не можешь подтвердить товар как недоступный, не включай его в ответ."
         )
         logger.info("Stoplist AI fallback point=%s url=%s", point.display_name, point.public_url)
