@@ -78,6 +78,63 @@ class StoplistTool:
             meaningful += 1
         return meaningful >= 2
 
+    async def _click_text_candidate(self, page, candidate: str) -> bool:
+        if not candidate:
+            return False
+        try:
+            locator = page.get_by_text(re.compile(re.escape(candidate), re.IGNORECASE))
+            if await locator.count() > 0:
+                await locator.first.click(timeout=3000)
+                await page.wait_for_timeout(1800)
+                logger.info("Stoplist selected point via text candidate=%s", candidate)
+                return True
+        except Exception:
+            pass
+        return False
+
+    async def _click_best_match_via_js(self, page, candidates: list[str]) -> bool:
+        try:
+            clicked = await page.evaluate(
+                """
+                (candidates) => {
+                  const norm = (s) => (s || '').toLowerCase().replace(/\\\\s+/g, ' ').trim();
+                  const elements = Array.from(document.querySelectorAll('button, a, div, span, li'));
+                  let best = null;
+                  let bestScore = 0;
+                  for (const el of elements) {
+                    const text = norm(el.innerText);
+                    if (!text || text.length > 300) continue;
+                    for (const candidate of candidates) {
+                      const c = norm(candidate);
+                      if (!c) continue;
+                      let score = 0;
+                      if (text.includes(c)) score += 5;
+                      for (const token of c.replace(/[,/.]/g, ' ').split(' ')) {
+                        if (token.length >= 2 && text.includes(token)) score += 1;
+                      }
+                      if (score > bestScore) {
+                        bestScore = score;
+                        best = el;
+                      }
+                    }
+                  }
+                  if (best && bestScore >= 3) {
+                    best.click();
+                    return {clicked: true, score: bestScore, text: best.innerText};
+                  }
+                  return {clicked: false, score: bestScore, text: best ? best.innerText : ''};
+                }
+                """,
+                candidates,
+            )
+            logger.info("Stoplist JS point match result=%s", clicked)
+            if clicked and clicked.get("clicked"):
+                await page.wait_for_timeout(1800)
+                return True
+        except Exception as exc:
+            logger.info("Stoplist JS point match failed error=%s", exc)
+        return False
+
     async def _select_public_point(self, page, point) -> None:
         trigger_candidates = ["Выберите адрес", point.city]
         for candidate in trigger_candidates:
@@ -91,17 +148,22 @@ class StoplistTool:
                 except Exception:
                     continue
 
-        address_candidates = [point.address, point.display_name, point.city]
+        body_after_open = (await page.locator("body").inner_text())[:1500]
+        logger.info("Stoplist body after selector open preview=%s", body_after_open.replace("\n", " | "))
+
+        address_candidates = [
+            point.address,
+            point.display_name,
+            point.city,
+            point.address.replace(",", ""),
+            point.address.split(",")[-1].strip(),
+        ]
         for candidate in address_candidates:
-            locator = page.locator(f"text={candidate}")
-            if await locator.count() > 0:
-                try:
-                    await locator.first.click(timeout=3000)
-                    await page.wait_for_timeout(1800)
-                    logger.info("Stoplist selected point via=%s", candidate)
-                    return
-                except Exception:
-                    continue
+            if await self._click_text_candidate(page, candidate):
+                return
+
+        if await self._click_best_match_via_js(page, address_candidates):
+            return
 
         logger.info("Stoplist point selector not confirmed for=%s", point.display_name)
 
