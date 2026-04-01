@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 from datetime import datetime
@@ -70,7 +70,7 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
                 await bot.send_message(
                     chat_id=user.telegram_id,
                     text=(
-                        f"🚨 <b>Проверка бланков</b>\n\n"
+                        f"Обнаружены красные бланки\n\n"
                         f"<b>Точка:</b> {config.point_name}\n"
                         f"<b>Статус:</b> найдены красные бланки\n\n"
                         f"{result.get('report_text', '')[:3500]}"

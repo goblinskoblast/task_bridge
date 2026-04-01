@@ -1,10 +1,10 @@
-import logging
+﻿import logging
 
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.data_agent_client import data_agent_client
 from db.database import get_db_session
@@ -16,12 +16,18 @@ router = Router()
 
 AGENT_BUTTON_TEXT = "🤖 Агент"
 AGENT_WELCOME = (
-    "Я на связи. Могу помочь с отчетами, почтой, календарем и внешними системами.\n\n"
+    "Я на связи. Могу помочь с отзывами, почтой, календарём и внешними системами.\n\n"
     "Что можно попросить уже сейчас:\n"
-    "• собрать отчет по отзывам\n"
+    "• собрать отчёт по отзывам\n"
     "• посмотреть письма и календарь\n"
-    "• пройти в подключенную веб-систему и собрать данные\n\n"
+    "• зайти в подключённую веб-систему и собрать данные\n\n"
     "Напишите обычным сообщением, что нужно сделать."
+)
+
+AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="Подключить свою систему", callback_data="agent_connect_system")],
+    ]
 )
 
 
@@ -92,7 +98,7 @@ async def _send_agent_request(message: Message, text: str) -> None:
         await message.answer(result.get("answer", "Не удалось получить ответ от агента."))
     except Exception as exc:
         logger.error("Agent chat error: %s", exc, exc_info=True)
-        await message.answer("Агент сейчас недоступен. Проверьте отдельный сервис и попробуйте еще раз.")
+        await message.answer("Агент сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз.")
 
 
 async def _open_agent_entry(message: Message, state: FSMContext) -> None:
@@ -113,7 +119,8 @@ async def _open_agent_entry(message: Message, state: FSMContext) -> None:
             await message.answer(
                 "Давайте быстро настроим ассистента под ваш кейс.\n\n"
                 "Шаг 1 из 3. Чем вы занимаетесь и какой у вас бизнес-контекст?\n"
-                "Например: сеть пиццерий, ресторан, e-commerce, агентство."
+                "Например: сеть пиццерий, ресторан, e-commerce, агентство.",
+                reply_markup=AGENT_ENTRY_KEYBOARD,
             )
             return
 
@@ -125,10 +132,10 @@ async def _open_agent_entry(message: Message, state: FSMContext) -> None:
             if profile.primary_goal:
                 details.append(f"• Основные задачи: {profile.primary_goal}")
             if profile.reporting_frequency:
-                details.append(f"• Периодичность отчетов: {profile.reporting_frequency}")
+                details.append(f"• Периодичность отчётов: {profile.reporting_frequency}")
             summary += "\n" + "\n".join(details)
 
-        await message.answer(summary)
+        await message.answer(summary, reply_markup=AGENT_ENTRY_KEYBOARD)
     finally:
         db.close()
 
@@ -156,6 +163,15 @@ async def callback_agent_open(callback: CallbackQuery, state: FSMContext) -> Non
         await _open_agent_entry(callback.message, state)
 
 
+@router.callback_query(F.data == "agent_connect_system")
+async def callback_agent_connect_system(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(ConnectSystemState.waiting_for_url)
+    target = callback.message or callback
+    if callback.message:
+        await callback.message.answer("Введите URL системы, которую нужно подключить.")
+
+
 @router.message(StateFilter(AgentOnboardingState.waiting_for_business_context), F.text)
 async def onboarding_business_context(message: Message, state: FSMContext) -> None:
     await state.update_data(business_context=(message.text or "").strip())
@@ -171,7 +187,7 @@ async def onboarding_primary_goal(message: Message, state: FSMContext) -> None:
     await state.update_data(primary_goal=(message.text or "").strip())
     await state.set_state(AgentOnboardingState.waiting_for_reporting_frequency)
     await message.answer(
-        "Шаг 3 из 3. Как часто вам нужны отчеты и сводки?\n"
+        "Шаг 3 из 3. Как часто вам нужны отчёты и сводки?\n"
         "Например: ежедневно, раз в неделю, по запросу."
     )
 
@@ -199,10 +215,11 @@ async def onboarding_reporting_frequency(message: Message, state: FSMContext) ->
         db.commit()
 
         await message.answer(
-            "Профиль сохранен. Теперь можно писать обычным сообщением, что нужно сделать.\n\n"
+            "Профиль сохранён. Теперь можно писать обычным сообщением, что нужно сделать.\n\n"
             f"Контекст: {profile.business_context}\n"
             f"Основные задачи: {profile.primary_goal}\n"
-            f"Периодичность: {profile.reporting_frequency}"
+            f"Периодичность: {profile.reporting_frequency}",
+            reply_markup=AGENT_ENTRY_KEYBOARD,
         )
     finally:
         db.close()
@@ -214,17 +231,17 @@ async def cmd_systems(message: Message) -> None:
         systems = await data_agent_client.list_systems(message.from_user.id)
     except Exception as exc:
         logger.error("Agent systems error: %s", exc, exc_info=True)
-        await message.answer("Не удалось получить список подключенных систем.")
+        await message.answer("Не удалось получить список подключённых систем.")
         return
 
     if not systems:
-        await message.answer("Подключенных систем пока нет.")
+        await message.answer("Подключённых систем пока нет.", reply_markup=AGENT_ENTRY_KEYBOARD)
         return
 
-    lines = ["Подключенные системы:"]
+    lines = ["Подключённые системы:"]
     for item in systems:
         lines.append(f"• {item.get('system_name', 'web-system')} — {item.get('url')}")
-    await message.answer("\n".join(lines))
+    await message.answer("\n".join(lines), reply_markup=AGENT_ENTRY_KEYBOARD)
 
 
 @router.message(Command("connect"))

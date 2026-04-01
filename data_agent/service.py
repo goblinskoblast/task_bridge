@@ -26,6 +26,20 @@ logger = logging.getLogger(__name__)
 class DataAgentService:
     """DataAgent service with persistent systems, internal tools, and Browser Agent MVP."""
 
+    def _normalize_user_message(self, message: str) -> str:
+        raw = (message or "").strip()
+        if not raw:
+            return ""
+
+        half = len(raw) // 2
+        if len(raw) > 40 and len(raw) % 2 == 0 and raw[:half].strip() == raw[half:].strip():
+            return raw[:half].strip()
+
+        normalized = raw.replace("\r\n", "\n").strip()
+        while "\n\n\n" in normalized:
+            normalized = normalized.replace("\n\n\n", "\n\n")
+        return normalized
+
     def health(self) -> dict:
         return {
             "status": "ok",
@@ -127,14 +141,15 @@ class DataAgentService:
         error_message = None
 
         try:
+            normalized_message = self._normalize_user_message(payload.message)
             systems = self.list_systems(payload.user_id)
-            logger.info("DataAgent chat trace=%s user_id=%s systems=%s message=%s", trace_id, payload.user_id, len(systems), payload.message[:300])
-            plan = await orchestrator.plan(payload.message, systems_count=len(systems))
+            logger.info("DataAgent chat trace=%s user_id=%s systems=%s message=%s", trace_id, payload.user_id, len(systems), normalized_message[:300])
+            plan = await orchestrator.plan(normalized_message, systems_count=len(systems))
             selected_tools = plan.selected_tools
             logger.info("DataAgent plan trace=%s selected_tools=%s reasoning=%s", trace_id, selected_tools, plan.reasoning)
-            tool_results = await self._collect_tool_results(payload.user_id, payload.message, selected_tools, systems)
+            tool_results = await self._collect_tool_results(payload.user_id, normalized_message, selected_tools, systems)
             logger.info("DataAgent tool_results trace=%s keys=%s", trace_id, list(tool_results.keys()))
-            answer = await orchestrator.synthesize(payload.message, tool_results)
+            answer = await orchestrator.synthesize(normalized_message, tool_results)
             return DataAgentChatResponse(
                 answer=answer,
                 selected_tools=selected_tools,
@@ -186,7 +201,7 @@ class DataAgentService:
             log_item = DataAgentRequestLog(
                 user_id=user.id,
                 trace_id=trace_id,
-                user_message=payload.message,
+                user_message=self._normalize_user_message(payload.message),
                 selected_tools=selected_tools,
                 success=success,
                 duration_ms=duration_ms,
@@ -531,3 +546,4 @@ class DataAgentService:
 
 
 service = DataAgentService()
+
