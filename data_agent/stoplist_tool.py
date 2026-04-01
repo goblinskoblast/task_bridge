@@ -4,7 +4,8 @@ import logging
 import re
 from typing import List
 
-from .italian_pizza import resolve_italian_pizza_point
+from .browser_agent import browser_agent
+from .italian_pizza import build_stoplist_task, resolve_italian_pizza_point
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ _CATEGORY_STOPWORDS = {
     "доставка",
     "заказать доставку",
     "выберите адрес",
+    "меню",
 }
 
 _UNAVAILABLE_MARKERS = [
@@ -56,15 +58,29 @@ class StoplistTool:
         if not filtered:
             return ""
 
-        candidate = filtered[0]
-        candidate = re.sub(r"\s+", " ", candidate).strip(" -•")
+        candidate = re.sub(r"\s+", " ", filtered[0]).strip(" -•")
+        if candidate.lower() in _CATEGORY_STOPWORDS:
+            return ""
         return candidate
 
     def _looks_like_unavailable_block(self, text: str) -> bool:
         lowered = (text or "").lower()
         return any(marker in lowered for marker in _UNAVAILABLE_MARKERS)
 
-    async def _collect_public_stoplist(self, point_name: str) -> str:
+    def _looks_like_good_stoplist(self, items: List[str]) -> bool:
+        if len(items) < 2:
+            return False
+        meaningful = 0
+        for item in items:
+            lowered = item.lower()
+            if lowered in _CATEGORY_STOPWORDS:
+                continue
+            if len(item) < 4:
+                continue
+            meaningful += 1
+        return meaningful >= 2
+
+    async def _collect_public_stoplist_dom(self, point_name: str) -> str:
         point = resolve_italian_pizza_point(point_name)
         if not point:
             return f"Не удалось определить публичную точку для стоп-листа: {point_name}"
@@ -105,7 +121,8 @@ class StoplistTool:
                 ]
                 for selector in card_selectors:
                     locator = page.locator(selector)
-                    count = min(await locator.count(), 120)
+                    count = min(await locator.count(), 160)
+                    logger.info("Stoplist selector=%s count=%s", selector, count)
                     for index in range(count):
                         try:
                             block = locator.nth(index)
@@ -129,33 +146,52 @@ class StoplistTool:
                             product_name = self._clean_product_name(text)
                             if not product_name:
                                 continue
-                            lowered_name = product_name.lower()
-                            if lowered_name in _CATEGORY_STOPWORDS:
-                                continue
                             if product_name not in product_candidates:
                                 product_candidates.append(product_name)
                         except Exception:
                             continue
 
-                if not product_candidates:
-                    body = (await page.locator("body").inner_text())[:4000]
-                    unavailable_lines: List[str] = []
-                    for line in body.splitlines():
-                        clean = line.strip()
-                        if not clean:
-                            continue
-                        lowered = clean.lower()
-                        if self._looks_like_unavailable_block(lowered):
-                            unavailable_lines.append(clean)
-                    if unavailable_lines:
-                        preview = "\n".join(unavailable_lines[:20])
-                        return f"Точка: {point.display_name}\nНайдены признаки стоп-листа, но нужен более точный DOM-разбор:\n{preview}"
-                    return f"Точка: {point.display_name}\nСтатус: недоступных позиций на публичном сайте не найдено."
+                logger.info("Stoplist DOM candidates point=%s items=%s", point.display_name, product_candidates[:20])
+                if self._looks_like_good_stoplist(product_candidates):
+                    return f"Точка: {point.display_name}\nСтоп-лист:\n" + "\n".join(f"- {item}" for item in product_candidates[:40])
 
-                return f"Точка: {point.display_name}\nСтоп-лист:\n" + "\n".join(f"- {item}" for item in product_candidates[:40])
+                body = (await page.locator("body").inner_text())[:4000]
+                unavailable_lines: List[str] = []
+                for line in body.splitlines():
+                    clean = line.strip()
+                    if not clean:
+                        continue
+                    lowered = clean.lower()
+                    if self._looks_like_unavailable_block(lowered):
+                        unavailable_lines.append(clean)
+                if unavailable_lines:
+                    preview = "\n".join(unavailable_lines[:20])
+                    return f"Точка: {point.display_name}\nНайдены признаки стоп-листа, но нужен более точный DOM-разбор:\n{preview}"
+                return f"Точка: {point.display_name}\nСтатус: недоступных позиций на публичном сайте не найдено."
             finally:
                 await context.close()
                 await browser.close()
+
+    async def _collect_public_stoplist_ai(self, point_name: str) -> str:
+        point = resolve_italian_pizza_point(point_name)
+        if not point:
+            return f"Не удалось определить публичную точку для стоп-листа: {point_name}"
+
+        task = (
+            build_stoplist_task(point.display_name)
+            + "\n\nКритично: не перечисляй категории меню, разделы сайта, кнопки или заголовки. "
+              "Нужны только реальные позиции товаров, которые сейчас недоступны для заказа у выбранной точки. "
+              "Если не можешь подтвердить товар как недоступный, не включай его в ответ."
+        )
+        logger.info("Stoplist AI fallback point=%s url=%s", point.display_name, point.public_url)
+        data = await browser_agent.extract_data(
+            url=point.public_url,
+            username=None,
+            encrypted_password=None,
+            user_task=task,
+            progress_callback=None,
+        )
+        return f"Точка: {point.display_name}\nСтоп-лист:\n{data}"
 
     async def collect_for_point(
         self,
@@ -165,7 +201,13 @@ class StoplistTool:
         encrypted_password: str,
         point_name: str,
     ) -> dict:
-        report_text = await self._collect_public_stoplist(point_name)
+        report_text = await self._collect_public_stoplist_dom(point_name)
+        if "Стоп-лист:" not in report_text or "недоступных позиций на публичном сайте не найдено" in report_text:
+            logger.info("Stoplist DOM result weak for point=%s, using AI fallback", point_name)
+            try:
+                report_text = await self._collect_public_stoplist_ai(point_name)
+            except Exception as exc:
+                logger.warning("Stoplist AI fallback failed point=%s error=%s", point_name, exc)
         return {
             "status": "ok",
             "point_name": point_name,
