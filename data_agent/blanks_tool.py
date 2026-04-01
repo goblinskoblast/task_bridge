@@ -7,6 +7,29 @@ from email_integration.encryption import decrypt_password
 
 
 class BlanksTool:
+    async def _select_period(self, page, period_hint: str) -> None:
+        if not period_hint:
+            return
+
+        lowered = period_hint.lower()
+        candidates: list[str] = []
+        if "3 часа" in lowered:
+            candidates = ["3 часа", "3ч", "За 3 часа", "Последние 3 часа"]
+        elif "сутки" in lowered:
+            candidates = ["Сутки", "24 часа", "За сутки", "Последние сутки"]
+        elif "сегодня" in lowered:
+            candidates = ["Сегодня"]
+
+        for candidate in candidates:
+            locator = page.locator(f"text={candidate}")
+            if await locator.count() > 0:
+                try:
+                    await locator.first.click(timeout=3000)
+                    await page.wait_for_timeout(1500)
+                    return
+                except Exception:
+                    continue
+
     async def _collect_portal_blanks(
         self,
         url: str,
@@ -77,6 +100,8 @@ class BlanksTool:
                             await page.wait_for_timeout(1500)
                         except Exception:
                             continue
+
+                await self._select_period(page, period_hint)
 
                 body = (await page.locator("body").inner_text())[:8000]
                 if period_hint:
