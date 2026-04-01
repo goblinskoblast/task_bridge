@@ -258,17 +258,25 @@ class DataAgentService:
         if urls:
             return urls
 
+        point_name = self._resolve_point_name(raw)
         explicit_patterns = [
-            r"по адресу\s+(.+?)(?:[.;]|$)",
-            r"адрес(?:а)?\s*[:\-]\s*(.+?)(?:[.;]|$)",
-            r"точк[ае]\s*[:\-]\s*(.+?)(?:[.;]|$)",
+            r"по адресу\s+(.+?)(?:$|\n|;)",
+            r"адрес(?:а)?\s*[:\-]\s*(.+?)(?:$|\n|;)",
+            r"точк[ае]\s*[:\-]\s*(.+?)(?:$|\n|;)",
         ]
         for pattern in explicit_patterns:
             match = re.search(pattern, raw, flags=re.IGNORECASE | re.DOTALL)
             if match:
                 candidate = match.group(1).strip(" \n\t.;,")
+                if point_name and "italian pizza" not in candidate.lower():
+                    candidate = f"Italian Pizza, {candidate}"
                 if candidate and len(candidate) >= 6:
                     return [candidate]
+
+        if point_name and ("по адресу" in raw.lower() or "адрес" in raw.lower()):
+            address_match = re.search(r"(ул\.?\s*[^;\n]+|улица\s+[^;\n]+)", raw, flags=re.IGNORECASE)
+            if address_match:
+                return [f"Italian Pizza, {address_match.group(1).strip(' ,.;')}"]
 
         separators = re.split(r"[\n;]+", raw)
         targets: List[str] = []
@@ -289,6 +297,13 @@ class DataAgentService:
             ).strip(" .,:;-")
             if cleaned:
                 targets.append(cleaned)
+
+        if not targets and point_name:
+            address_match = re.search(r"(ул\.?\s*[^;\n]+|улица\s+[^;\n]+)", raw, flags=re.IGNORECASE)
+            if address_match:
+                targets.append(f"Italian Pizza, {address_match.group(1).strip(' ,.;')}")
+            else:
+                targets.append(point_name)
 
         return targets[:5]
 

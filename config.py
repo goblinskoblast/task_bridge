@@ -13,10 +13,8 @@ BOT_TOKEN = BOT_TOKEN.strip()
 
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY environment variable is required")
-
-OPENAI_API_KEY = OPENAI_API_KEY.strip()
+OPENAI_API_KEY = OPENAI_API_KEY.strip() if OPENAI_API_KEY else ""
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 
 USE_WEBHOOK = os.getenv("USE_WEBHOOK", "False").lower() == "true"
 
@@ -30,6 +28,7 @@ WEB_APP_DOMAIN = os.getenv("WEB_APP_DOMAIN", f"http://{HOST}:{PORT}").rstrip("/"
 MINI_APP_URL = os.getenv("MINI_APP_URL", f"{WEB_APP_DOMAIN}/webapp/index.html")
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-3-7-sonnet-latest").strip()
 OPENAI_TEMPERATURE = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
 OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "500"))
 
@@ -95,6 +94,11 @@ REMINDER_CHECK_INTERVAL = 60
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Moscow")
+
+if AI_PROVIDER == "anthropic" and not ANTHROPIC_API_KEY:
+    raise ValueError("ANTHROPIC_API_KEY environment variable is required when AI_PROVIDER=anthropic")
+if AI_PROVIDER == "openai" and not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY environment variable is required when AI_PROVIDER=openai")
 
 # Developer telegram ID for forwarding support screenshots and critical issues
 DEVELOPER_TELEGRAM_ID = os.getenv("DEVELOPER_TELEGRAM_ID")
