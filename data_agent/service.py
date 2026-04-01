@@ -378,6 +378,18 @@ class DataAgentService:
             return point.display_name
         return None
 
+    def _extract_period_hint(self, message: str) -> str:
+        lowered = (message or "").lower()
+        if "последние 3 часа" in lowered or "за три часа" in lowered:
+            return "последние 3 часа"
+        if "за сутки" in lowered or "последние сутки" in lowered:
+            return "последние сутки"
+        if "сегодня" in lowered:
+            return "сегодня"
+        if "раз в час" in lowered or "каждый час" in lowered:
+            return "текущий бланк, проверка каждый час"
+        return "текущий бланк"
+
     def _find_italian_pizza_system(self, db, user_id: int) -> DataAgentSystem | None:
         user = db.query(User).filter(User.telegram_id == user_id).first()
         if not user:
@@ -484,18 +496,11 @@ class DataAgentService:
 
         db = get_db_session()
         try:
-            system = self._find_italian_pizza_system(db, user_id)
-            if not system:
-                return {
-                    "status": "system_not_connected",
-                    "message": "Italian Pizza портал ещё не подключён. Используйте /connect для tochka.italianpizza.ru.",
-                }
-
-            logger.info("Stoplist tool using system=%s url=%s point=%s", system.system_name, system.url, point_name)
+            logger.info("Stoplist tool using public ordering site point=%s", point_name)
             return await stoplist_tool.collect_for_point(
-                url=system.url or ITALIAN_PIZZA_PORTAL_URL,
-                username=system.login,
-                encrypted_password=system.encrypted_password,
+                url="",
+                username="",
+                encrypted_password="",
                 point_name=point_name,
             )
         except Exception as exc:
@@ -522,12 +527,14 @@ class DataAgentService:
                     "message": "Italian Pizza портал ещё не подключён. Используйте /connect для tochka.italianpizza.ru.",
                 }
 
-            logger.info("Blanks tool using system=%s url=%s point=%s", system.system_name, system.url, point_name)
+            period_hint = self._extract_period_hint(user_message)
+            logger.info("Blanks tool using system=%s url=%s point=%s period=%s", system.system_name, system.url, point_name, period_hint)
             return await blanks_tool.inspect_point(
                 url=system.url or ITALIAN_PIZZA_PORTAL_URL,
                 username=system.login,
                 encrypted_password=system.encrypted_password,
                 point_name=point_name,
+                period_hint=period_hint,
             )
         except Exception as exc:
             logger.error("Blanks tool failed user_id=%s point=%s error=%s", user_id, point_name, exc, exc_info=True)

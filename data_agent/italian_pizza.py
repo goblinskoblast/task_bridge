@@ -11,37 +11,45 @@ ITALIAN_PIZZA_PORTAL_URL = "https://tochka.italianpizza.ru/login"
 class ItalianPizzaPoint:
     city: str
     address: str
+    public_slug: str
 
     @property
     def display_name(self) -> str:
         return f"{self.city}, {self.address}"
 
+    @property
+    def public_url(self) -> str:
+        return f"https://{self.public_slug}.italianpizza.ru"
+
 
 ITALIAN_PIZZA_POINTS = [
-    ItalianPizzaPoint("Полевской", "Ленина 11"),
-    ItalianPizzaPoint("Асбест", "ТЦ Небо, Ленинградская 26/2"),
-    ItalianPizzaPoint("Сухой Лог", "Белинского 40"),
-    ItalianPizzaPoint("Реж", "Ленина 17"),
-    ItalianPizzaPoint("Верхний Уфалей", "Ленина 147"),
-    ItalianPizzaPoint("Артёмовский", "Гагарина 2а"),
-    ItalianPizzaPoint("Екатеринбург", "ул. Сулимова, 31А"),
+    ItalianPizzaPoint("Полевской", "Ленина 11", "polevskoi"),
+    ItalianPizzaPoint("Асбест", "ТЦ Небо, Ленинградская 26/2", "asbest"),
+    ItalianPizzaPoint("Сухой Лог", "Белинского 40", "slog"),
+    ItalianPizzaPoint("Реж", "Ленина 17", "rezh"),
+    ItalianPizzaPoint("Верхний Уфалей", "Ленина 147", "ufaley"),
+    ItalianPizzaPoint("Артёмовский", "Гагарина 2а", "artemovsky"),
+    ItalianPizzaPoint("Екатеринбург", "ул. Сулимова, 31А", "ekb"),
 ]
+
+
+ALIASES = {
+    "ленинградская 26": "ленинградская 26/2",
+    "ленинградская, 26": "ленинградская 26/2",
+    "небо ленинградская 26": "тц небо, ленинградская 26/2",
+    "небо ленинградская 26/2": "тц небо, ленинградская 26/2",
+    "сулимова 31а": "ул. сулимова, 31а",
+    "ленина, 147": "ленина 147",
+}
 
 
 def resolve_italian_pizza_point(text: str) -> Optional[ItalianPizzaPoint]:
     lowered = (text or "").lower()
-    best_point = None
-    best_score = 0
-
-    alias_map = {
-        "ленинградская 26": "ленинградская 26/2",
-        "ленинградская, 26": "ленинградская 26/2",
-        "небо ленинградская 26": "тц небо, ленинградская 26/2",
-        "небо ленинградская 26/2": "тц небо, ленинградская 26/2",
-    }
-    for source, target in alias_map.items():
+    for source, target in ALIASES.items():
         lowered = lowered.replace(source, target)
 
+    best_point = None
+    best_score = 0
     for point in ITALIAN_PIZZA_POINTS:
         score = 0
         city = point.city.lower()
@@ -52,10 +60,11 @@ def resolve_italian_pizza_point(text: str) -> Optional[ItalianPizzaPoint]:
         for token in city.replace(",", " ").split():
             if token and token in lowered:
                 score += 1
+
         if address in lowered:
-            score += 3
-        for token in address.replace(",", " ").replace(".", " ").split():
-            if len(token) >= 3 and token in lowered:
+            score += 4
+        for token in address.replace(",", " ").replace(".", " ").replace("/", " ").split():
+            if len(token) >= 2 and token in lowered:
                 score += 1
 
         if score > best_score:
@@ -67,25 +76,27 @@ def resolve_italian_pizza_point(text: str) -> Optional[ItalianPizzaPoint]:
 
 def build_stoplist_task(point_name: str) -> str:
     return (
-        "Авторизуйся в личном кабинете Italian Pizza и собери актуальный стоп-лист "
+        "Открой публичный сайт заказа Italian Pizza как обычный клиент и проверь недоступные позиции "
         f"для точки «{point_name}».\n\n"
-        "Нужно найти недоступные позиции именно для этой точки и вернуть короткий отчёт:\n"
-        "1. Точка\n"
-        "2. Список недоступных позиций\n"
-        "3. Если доступна дата или время добавления в стоп-лист, укажи её\n"
-        "4. Если позиций нет, так и напиши"
+        "Нужно:\n"
+        "1. Выбрать нужную точку на публичном сайте\n"
+        "2. Найти позиции, которые серые, disabled или недоступны для заказа\n"
+        "3. Вернуть короткий отчёт со списком недоступных позиций\n"
+        "4. Если недоступных позиций нет, так и напиши"
     )
 
 
-def build_blanks_task(point_name: str) -> str:
+def build_blanks_task(point_name: str, period_hint: str = "") -> str:
+    period_line = f"\nПериод проверки: {period_hint}" if period_hint else ""
     return (
         "Авторизуйся в личном кабинете Italian Pizza, выбери точку "
-        f"«{point_name}» и открой раздел «Бланк загрузки».\n\n"
-        "Нужно проверить наличие красных бланков и отклонений:\n"
+        f"«{point_name}» и открой отчёт по перегрузкам / бланк загрузки.\n\n"
+        "Нужно проверить:\n"
         "1. Есть ли красные бланки\n"
         "2. Какие позиции или строки подсвечены красным\n"
         "3. Открыт или закрыт бланк\n"
-        "4. Есть ли изменения лимита или отклонения от норматива\n"
+        "4. Есть ли изменения лимита или отклонения от норматива"
+        f"{period_line}\n"
         "Ответ верни кратко и по делу."
     )
 

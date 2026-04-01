@@ -7,7 +7,14 @@ from email_integration.encryption import decrypt_password
 
 
 class BlanksTool:
-    async def _collect_portal_blanks(self, url: str, username: str, encrypted_password: str, point_name: str) -> str:
+    async def _collect_portal_blanks(
+        self,
+        url: str,
+        username: str,
+        encrypted_password: str,
+        point_name: str,
+        period_hint: str,
+    ) -> str:
         password = decrypt_password(encrypted_password) if encrypted_password else ""
         try:
             from playwright.async_api import async_playwright
@@ -51,7 +58,8 @@ class BlanksTool:
                         break
                 await page.wait_for_timeout(1800)
 
-                for candidate in [point_name, point_name.split(",")[0], point_name.split(",")[-1].strip()]:
+                point_candidates = [point_name, point_name.split(",")[0], point_name.split(",")[-1].strip()]
+                for candidate in point_candidates:
                     locator = page.locator(f"text={candidate}")
                     if await locator.count() > 0:
                         try:
@@ -70,7 +78,10 @@ class BlanksTool:
                         except Exception:
                             continue
 
-                return (await page.locator("body").inner_text())[:5000]
+                body = (await page.locator("body").inner_text())[:8000]
+                if period_hint:
+                    body = f"Период: {period_hint}\n{body}"
+                return body
             finally:
                 await context.close()
                 await browser.close()
@@ -91,7 +102,16 @@ class BlanksTool:
                 continue
             filtered.append(line)
 
-        body = "\n".join(filtered[:60]).strip() or raw[:3500]
+        signal_lines: list[str] = []
+        for line in filtered:
+            lowered = line.lower()
+            if any(marker in lowered for marker in ["красн", "перегруз", "отклон", "лимит", "норматив", "закрыт", "открыт"]):
+                signal_lines.append(line)
+
+        body = "\n".join(signal_lines[:20]).strip()
+        if not body:
+            body = "\n".join(filtered[:60]).strip() or raw[:3500]
+
         has_red_flags = bool(re.search(r"красн|red|ошиб|отклон|лимит|закрыт|перегруз", body, flags=re.IGNORECASE))
         status_line = "найдены красные бланки или отклонения" if has_red_flags else "красных бланков не найдено"
         return f"Точка: {point_name}\nСтатус: {status_line}\n{body}", has_red_flags
@@ -103,8 +123,9 @@ class BlanksTool:
         username: str,
         encrypted_password: str,
         point_name: str,
+        period_hint: str = "",
     ) -> dict:
-        data = await self._collect_portal_blanks(url, username, encrypted_password, point_name)
+        data = await self._collect_portal_blanks(url, username, encrypted_password, point_name, period_hint)
         report_text, has_red_flags = self._normalize_report(point_name, data)
         alert_hash = hashlib.sha256(report_text.encode("utf-8", errors="ignore")).hexdigest()
         return {
@@ -113,6 +134,7 @@ class BlanksTool:
             "has_red_flags": has_red_flags,
             "alert_hash": alert_hash,
             "report_text": report_text,
+            "period_hint": period_hint or "текущий бланк",
         }
 
 
