@@ -1,33 +1,69 @@
 ﻿from __future__ import annotations
 
-import re
+from typing import List
 
-from .browser_agent import browser_agent
-from .italian_pizza import build_stoplist_task
+from .italian_pizza import resolve_italian_pizza_point
 
 
 class StoplistTool:
-    def _normalize_report(self, point_name: str, data: str) -> str:
-        raw = (data or "").strip()
-        if not raw:
-            return (
-                f"Стоп-лист для точки {point_name} не удалось собрать. "
-                "Нужно повторить запуск и проверить доступность раздела стоп-листа."
-            )
+    async def _collect_public_stoplist(self, point_name: str) -> str:
+        point = resolve_italian_pizza_point(point_name)
+        if not point:
+            return f"Не удалось определить публичную точку для стоп-листа: {point_name}"
 
-        lines = [line.strip() for line in raw.splitlines() if line.strip()]
-        filtered: list[str] = []
-        for line in lines:
-            lowered = line.lower()
-            if any(marker in lowered for marker in ["cookie", "войти", "login", "пароль", "скачать приложение"]):
-                continue
-            filtered.append(line)
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError as exc:
+            raise RuntimeError("Playwright is not installed") from exc
 
-        body = "\n".join(filtered[:40]).strip() or raw[:3000]
-        if re.search(r"нет\s+позици|стоп[- ]?лист\s+пуст|недоступных\s+позиций\s+нет", body, flags=re.IGNORECASE):
-            return f"Точка: {point_name}\nСтатус: активных позиций в стоп-листе не найдено."
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True)
+            context = await browser.new_context(locale="ru-RU", timezone_id="Europe/Moscow")
+            page = await context.new_page()
+            try:
+                await page.goto(point.public_url, wait_until="domcontentloaded", timeout=20000)
+                await page.wait_for_timeout(2000)
 
-        return f"Точка: {point_name}\nСтоп-лист:\n{body}"
+                for candidate in [point.address, point.display_name, point.city, "Выберите адрес"]:
+                    locator = page.locator(f"text={candidate}")
+                    if await locator.count() > 0:
+                        try:
+                            await locator.first.click(timeout=3000)
+                            await page.wait_for_timeout(1500)
+                        except Exception:
+                            continue
+
+                unavailable_selectors = [
+                    "[disabled]",
+                    "[aria-disabled='true']",
+                    "[class*='disabled']",
+                    "[class*='disable']",
+                    "[class*='unavailable']",
+                    "text=Недоступно",
+                ]
+
+                items: List[str] = []
+                for selector in unavailable_selectors:
+                    locator = page.locator(selector)
+                    count = min(await locator.count(), 40)
+                    for index in range(count):
+                        try:
+                            text = (await locator.nth(index).inner_text()).strip()
+                            if text and text not in items and len(text) <= 200:
+                                items.append(text)
+                        except Exception:
+                            continue
+
+                if not items:
+                    body = (await page.locator("body").inner_text())[:2500]
+                    if "недоступ" in body.lower() or "законч" in body.lower():
+                        return f"Точка: {point.display_name}\nНа странице есть признаки недоступных позиций, но нужен более точный DOM-разбор.\n\n{body}"
+                    return f"Точка: {point.display_name}\nСтатус: недоступных позиций на публичном сайте не найдено."
+
+                return f"Точка: {point.display_name}\nСтоп-лист:\n" + "\n".join(f"- {item}" for item in items[:30])
+            finally:
+                await context.close()
+                await browser.close()
 
     async def collect_for_point(
         self,
@@ -37,14 +73,7 @@ class StoplistTool:
         encrypted_password: str,
         point_name: str,
     ) -> dict:
-        data = await browser_agent.extract_data(
-            url=url,
-            username=username,
-            encrypted_password=encrypted_password,
-            user_task=build_stoplist_task(point_name),
-            progress_callback=None,
-        )
-        report_text = self._normalize_report(point_name, data)
+        report_text = await self._collect_public_stoplist(point_name)
         return {
             "status": "ok",
             "point_name": point_name,
