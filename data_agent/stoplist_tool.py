@@ -2,44 +2,16 @@
 
 import logging
 import re
-from typing import List
 
 from .italian_pizza import resolve_italian_pizza_point
 
 logger = logging.getLogger(__name__)
 
 _CATEGORY_STOPWORDS = {
-    "пицца",
-    "комбо",
-    "детское меню",
-    "десерты",
-    "напитки",
-    "закуски",
-    "салаты",
-    "соусы",
-    "роллы",
-    "бургеры",
-    "паста",
-    "горячее",
-    "супы",
-    "войти",
-    "контакты",
-    "доставка",
-    "заказать доставку",
-    "выберите адрес",
-    "меню",
-    "фильтры",
-    "еще",
+    "пицца", "комбо", "детское меню", "десерты", "напитки", "закуски", "салаты", "соусы",
+    "роллы", "бургеры", "паста", "горячее", "супы", "войти", "контакты", "доставка",
+    "заказать доставку", "выберите адрес", "меню", "фильтры", "еще",
 }
-
-_UNAVAILABLE_MARKERS = [
-    "недоступ",
-    "нет в наличии",
-    "временно недоступ",
-    "законч",
-    "sold out",
-    "unavailable",
-]
 
 
 class StoplistTool:
@@ -55,10 +27,8 @@ class StoplistTool:
             if len(line) < 3:
                 continue
             filtered.append(line)
-
         if not filtered:
             return ""
-
         candidate = re.sub(r"\s+", " ", filtered[0]).strip(" -•")
         lowered = candidate.lower()
         if lowered in _CATEGORY_STOPWORDS:
@@ -93,9 +63,7 @@ class StoplistTool:
                     const text = norm(el.innerText || '');
                     if (!text || text.length > 180) continue;
                     const lowered = text.toLowerCase();
-                    if (lowered.includes(city.toLowerCase()) || /\\\\d/.test(text) || lowered.includes('адрес')) {
-                      out.push(text);
-                    }
+                    if (lowered.includes(city.toLowerCase()) || /\\d/.test(text) || lowered.includes('адрес')) out.push(text);
                   }
                   return [...new Set(out)].slice(0, 30);
                 }
@@ -133,7 +101,7 @@ class StoplistTool:
                       }
                     }
                   }
-                  if (best && bestScore >= 6) {
+                  if (best && bestScore >= 8) {
                     best.click();
                     return {clicked: true, score: bestScore, text: best.innerText};
                   }
@@ -150,6 +118,37 @@ class StoplistTool:
             logger.info("Stoplist JS point match failed error=%s", exc)
         return False
 
+    async def _fill_address_and_select(self, page, point) -> bool:
+        address_query = point.address
+        input_selectors = [
+            "input[placeholder*='Введите адрес']",
+            "input[placeholder*='адрес']",
+            "input[type='text']",
+        ]
+        for selector in input_selectors:
+            try:
+                locator = page.locator(selector)
+                if await locator.count() == 0:
+                    continue
+                await locator.first.fill("")
+                await locator.first.fill(address_query)
+                await page.wait_for_timeout(1800)
+                logger.info("Stoplist filled address input selector=%s value=%s", selector, address_query)
+                suggestion_candidates = [
+                    f"{point.city}, {point.address}",
+                    point.address,
+                    point.address.replace(",", ""),
+                    point.address.split(",")[-1].strip(),
+                ]
+                for candidate in suggestion_candidates:
+                    if await self._click_text_candidate(page, candidate):
+                        return True
+                if await self._click_best_match_via_js(page, suggestion_candidates):
+                    return True
+            except Exception as exc:
+                logger.info("Stoplist address input flow failed selector=%s error=%s", selector, exc)
+        return False
+
     async def _scroll_all(self, page) -> None:
         for _ in range(10):
             try:
@@ -159,8 +158,7 @@ class StoplistTool:
             await page.wait_for_timeout(700)
 
     async def _select_public_point(self, page, point) -> bool:
-        trigger_candidates = ["Выберите адрес", point.city]
-        for candidate in trigger_candidates:
+        for candidate in ["Выберите адрес", point.city]:
             locator = page.locator(f"text={candidate}")
             if await locator.count() > 0:
                 try:
@@ -175,18 +173,19 @@ class StoplistTool:
         logger.info("Stoplist body after selector open preview=%s", body_after_open.replace("\n", " | "))
         await self._log_address_candidates(page, point.city)
 
+        if await self._fill_address_and_select(page, point):
+            return True
+
         address_candidates = [
             point.display_name,
             point.address,
             point.address.replace(",", ""),
             point.address.split(",")[-1].strip(),
             f"{point.city} {point.address}",
-            point.city,
         ]
         for candidate in address_candidates:
             if await self._click_text_candidate(page, candidate):
                 return True
-
         if await self._click_best_match_via_js(page, address_candidates):
             return True
 
@@ -216,7 +215,6 @@ class StoplistTool:
                       || cls.includes('gray')
                       || style.filter.includes('grayscale');
                     if (!disabled) continue;
-
                     const card = btn.closest('article, li, [class*="item"], [class*="card"], [class*="product"], div');
                     if (!card) continue;
                     const text = norm(card.innerText || '');
@@ -226,7 +224,7 @@ class StoplistTool:
                       const lowered = line.toLowerCase();
                       if (['выбрать', 'фильтры', 'меню'].includes(lowered)) return false;
                       if (line.length < 3 || line.length > 120) return false;
-                      if (/\\\\d+\\\\s*(₽|руб|г|кг)$/.test(lowered)) return false;
+                      if (/\\d+\\s*(₽|руб|г|кг)$/.test(lowered)) return false;
                       return true;
                     });
                     if (!product) continue;
@@ -292,20 +290,9 @@ class StoplistTool:
                 await context.close()
                 await browser.close()
 
-    async def collect_for_point(
-        self,
-        *,
-        url: str,
-        username: str,
-        encrypted_password: str,
-        point_name: str,
-    ) -> dict:
+    async def collect_for_point(self, *, url: str, username: str, encrypted_password: str, point_name: str) -> dict:
         report_text = await self._collect_public_stoplist(point_name)
-        return {
-            "status": "ok",
-            "point_name": point_name,
-            "report_text": report_text,
-        }
+        return {"status": "ok", "point_name": point_name, "report_text": report_text}
 
 
 stoplist_tool = StoplistTool()
