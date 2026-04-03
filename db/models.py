@@ -494,3 +494,25 @@ class DataAgentMonitorEvent(Base):
 
     def __repr__(self):
         return f"<DataAgentMonitorEvent(id={self.id}, type={self.monitor_type}, point={self.point_name})>"
+
+
+
+class DataAgentSession(Base):
+    """Short-lived structured state for the new agent runtime."""
+    __tablename__ = "data_agent_sessions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False, index=True, unique=True)
+    active_scenario = Column(String(100), nullable=True, index=True)
+    status = Column(String(50), nullable=False, default="idle")
+    slots_json = Column(JSON, nullable=True)
+    last_selected_tools = Column(JSON, nullable=True)
+    last_user_message = Column(Text, nullable=True)
+    last_answer = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", backref="data_agent_sessions")
+
+    def __repr__(self):
+        return f"<DataAgentSession(id={self.id}, user_id={self.user_id}, scenario={self.active_scenario})>"
