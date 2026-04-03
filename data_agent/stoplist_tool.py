@@ -4,8 +4,7 @@ import logging
 import re
 from typing import List
 
-from .browser_agent import browser_agent
-from .italian_pizza import build_stoplist_task, resolve_italian_pizza_point
+from .italian_pizza import resolve_italian_pizza_point
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +28,8 @@ _CATEGORY_STOPWORDS = {
     "заказать доставку",
     "выберите адрес",
     "меню",
+    "фильтры",
+    "еще",
 }
 
 _UNAVAILABLE_MARKERS = [
@@ -49,7 +50,7 @@ class StoplistTool:
             lowered = line.lower()
             if lowered in _CATEGORY_STOPWORDS:
                 continue
-            if any(marker in lowered for marker in ["₽", "руб", "доставка", "войти", "контакты", "заказать"]):
+            if any(marker in lowered for marker in ["₽", "руб", "доставка", "войти", "контакты", "заказать", " г", " кг"]):
                 continue
             if len(line) < 3:
                 continue
@@ -59,24 +60,12 @@ class StoplistTool:
             return ""
 
         candidate = re.sub(r"\s+", " ", filtered[0]).strip(" -•")
-        if candidate.lower() in _CATEGORY_STOPWORDS:
+        lowered = candidate.lower()
+        if lowered in _CATEGORY_STOPWORDS:
+            return ""
+        if any(lowered.startswith(prefix) for prefix in ["заказ по телефону", "франшиза", "акции"]):
             return ""
         return candidate
-
-    def _looks_like_unavailable_block(self, text: str) -> bool:
-        lowered = (text or "").lower()
-        return any(marker in lowered for marker in _UNAVAILABLE_MARKERS)
-
-    def _looks_like_good_stoplist(self, items: List[str]) -> bool:
-        meaningful = 0
-        for item in items:
-            lowered = item.lower()
-            if lowered in _CATEGORY_STOPWORDS:
-                continue
-            if len(item) < 4:
-                continue
-            meaningful += 1
-        return meaningful >= 2
 
     async def _click_text_candidate(self, page, candidate: str) -> bool:
         if not candidate:
@@ -92,12 +81,37 @@ class StoplistTool:
             pass
         return False
 
+    async def _log_address_candidates(self, page, city: str) -> None:
+        try:
+            candidates = await page.evaluate(
+                """
+                (city) => {
+                  const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+                  const elements = Array.from(document.querySelectorAll('button, a, div, span, li'));
+                  const out = [];
+                  for (const el of elements) {
+                    const text = norm(el.innerText || '');
+                    if (!text || text.length > 180) continue;
+                    const lowered = text.toLowerCase();
+                    if (lowered.includes(city.toLowerCase()) || /\\\\d/.test(text) || lowered.includes('адрес')) {
+                      out.push(text);
+                    }
+                  }
+                  return [...new Set(out)].slice(0, 30);
+                }
+                """,
+                city,
+            )
+            logger.info("Stoplist address candidates=%s", candidates)
+        except Exception as exc:
+            logger.info("Stoplist address candidate log failed error=%s", exc)
+
     async def _click_best_match_via_js(self, page, candidates: list[str]) -> bool:
         try:
             clicked = await page.evaluate(
                 """
                 (candidates) => {
-                  const norm = (s) => (s || '').toLowerCase().replace(/\\\\s+/g, ' ').trim();
+                  const norm = (s) => (s || '').toLowerCase().replace(/\\s+/g, ' ').trim();
                   const elements = Array.from(document.querySelectorAll('button, a, div, span, li'));
                   let best = null;
                   let bestScore = 0;
@@ -108,9 +122,10 @@ class StoplistTool:
                       const c = norm(candidate);
                       if (!c) continue;
                       let score = 0;
+                      if (text === c) score += 10;
                       if (text.includes(c)) score += 5;
                       for (const token of c.replace(/[,/.]/g, ' ').split(' ')) {
-                        if (token.length >= 2 && text.includes(token)) score += 1;
+                        if (token.length >= 2 && text.includes(token)) score += 2;
                       }
                       if (score > bestScore) {
                         bestScore = score;
@@ -118,7 +133,7 @@ class StoplistTool:
                       }
                     }
                   }
-                  if (best && bestScore >= 3) {
+                  if (best && bestScore >= 6) {
                     best.click();
                     return {clicked: true, score: bestScore, text: best.innerText};
                   }
@@ -135,7 +150,15 @@ class StoplistTool:
             logger.info("Stoplist JS point match failed error=%s", exc)
         return False
 
-    async def _select_public_point(self, page, point) -> None:
+    async def _scroll_all(self, page) -> None:
+        for _ in range(10):
+            try:
+                await page.mouse.wheel(0, 1800)
+            except Exception:
+                await page.evaluate("window.scrollBy(0, 1800)")
+            await page.wait_for_timeout(700)
+
+    async def _select_public_point(self, page, point) -> bool:
         trigger_candidates = ["Выберите адрес", point.city]
         for candidate in trigger_candidates:
             locator = page.locator(f"text={candidate}")
@@ -150,24 +173,78 @@ class StoplistTool:
 
         body_after_open = (await page.locator("body").inner_text())[:1500]
         logger.info("Stoplist body after selector open preview=%s", body_after_open.replace("\n", " | "))
+        await self._log_address_candidates(page, point.city)
 
         address_candidates = [
-            point.address,
             point.display_name,
-            point.city,
+            point.address,
             point.address.replace(",", ""),
             point.address.split(",")[-1].strip(),
+            f"{point.city} {point.address}",
+            point.city,
         ]
         for candidate in address_candidates:
             if await self._click_text_candidate(page, candidate):
-                return
+                return True
 
         if await self._click_best_match_via_js(page, address_candidates):
-            return
+            return True
 
         logger.info("Stoplist point selector not confirmed for=%s", point.display_name)
+        return False
 
-    async def _collect_public_stoplist_dom(self, point_name: str) -> str:
+    async def _collect_disabled_products(self, page) -> list[str]:
+        try:
+            items = await page.evaluate(
+                """
+                () => {
+                  const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+                  const buttons = Array.from(document.querySelectorAll('button, a, div, span'));
+                  const results = [];
+                  const seen = new Set();
+                  for (const btn of buttons) {
+                    const btnText = norm(btn.innerText || '');
+                    if (btnText !== 'Выбрать') continue;
+                    const style = window.getComputedStyle(btn);
+                    const cls = (btn.className || '').toString().toLowerCase();
+                    const disabled = btn.hasAttribute('disabled')
+                      || btn.getAttribute('aria-disabled') === 'true'
+                      || style.pointerEvents === 'none'
+                      || parseFloat(style.opacity || '1') < 0.7
+                      || cls.includes('disabled')
+                      || cls.includes('unavailable')
+                      || cls.includes('gray')
+                      || style.filter.includes('grayscale');
+                    if (!disabled) continue;
+
+                    const card = btn.closest('article, li, [class*="item"], [class*="card"], [class*="product"], div');
+                    if (!card) continue;
+                    const text = norm(card.innerText || '');
+                    if (!text || text.length > 700) continue;
+                    const lines = text.split(/\n+/).map(norm).filter(Boolean);
+                    const product = lines.find(line => {
+                      const lowered = line.toLowerCase();
+                      if (['выбрать', 'фильтры', 'меню'].includes(lowered)) return false;
+                      if (line.length < 3 || line.length > 120) return false;
+                      if (/\\\\d+\\\\s*(₽|руб|г|кг)$/.test(lowered)) return false;
+                      return true;
+                    });
+                    if (!product) continue;
+                    if (!seen.has(product)) {
+                      seen.add(product);
+                      results.push(product);
+                    }
+                  }
+                  return results;
+                }
+                """
+            )
+            return items or []
+        except Exception as exc:
+            logger.info("Stoplist disabled-product collect failed error=%s", exc)
+            return []
+
+    async def _collect_public_stoplist(self, point_name: str) -> str:
         point = resolve_italian_pizza_point(point_name)
         if not point:
             return f"Не удалось определить публичную точку для стоп-листа: {point_name}"
@@ -187,96 +264,33 @@ class StoplistTool:
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
                 await page.wait_for_timeout(2500)
 
-                await self._select_public_point(page, point)
+                selected = await self._select_public_point(page, point)
+                logger.info("Stoplist point selected=%s point=%s", selected, point.display_name)
 
-                product_candidates: list[str] = []
-                card_selectors = [
-                    "[data-testid*='product']",
-                    "[data-qa*='product']",
-                    "[class*='product']",
-                    "[class*='item']",
-                    "[class*='card']",
-                    "article",
-                    "li",
-                ]
-                for selector in card_selectors:
-                    locator = page.locator(selector)
-                    count = min(await locator.count(), 160)
-                    logger.info("Stoplist selector=%s count=%s", selector, count)
-                    for index in range(count):
-                        try:
-                            block = locator.nth(index)
-                            text = (await block.inner_text()).strip()
-                            if not text or len(text) > 500:
-                                continue
+                await self._scroll_all(page)
 
-                            class_name = (await block.get_attribute("class") or "").lower()
-                            aria_disabled = (await block.get_attribute("aria-disabled") or "").lower()
-                            disabled_attr = await block.get_attribute("disabled")
-                            style_attr = (await block.get_attribute("style") or "").lower()
-                            unavailable = (
-                                self._looks_like_unavailable_block(text)
-                                or "disabled" in class_name
-                                or "unavailable" in class_name
-                                or aria_disabled == "true"
-                                or disabled_attr is not None
-                                or "opacity" in style_attr
-                                or "grayscale" in style_attr
-                            )
-                            if not unavailable:
-                                continue
+                product_candidates = await self._collect_disabled_products(page)
+                logger.info("Stoplist disabled button candidates point=%s items=%s", point.display_name, product_candidates[:60])
+                if product_candidates:
+                    cleaned = []
+                    for item in product_candidates:
+                        name = self._clean_product_name(item)
+                        if name and name not in cleaned:
+                            cleaned.append(name)
+                    if cleaned:
+                        return f"Точка: {point.display_name}\nСтоп-лист:\n" + "\n".join(f"- {item}" for item in cleaned[:60])
 
-                            product_name = self._clean_product_name(text)
-                            if not product_name:
-                                continue
-                            if product_name not in product_candidates:
-                                product_candidates.append(product_name)
-                        except Exception:
-                            continue
-
-                logger.info("Stoplist DOM candidates point=%s items=%s", point.display_name, product_candidates[:20])
-                if self._looks_like_good_stoplist(product_candidates):
-                    return f"Точка: {point.display_name}\nСтоп-лист:\n" + "\n".join(f"- {item}" for item in product_candidates[:40])
-
-                body = (await page.locator("body").inner_text())[:4000]
-                unavailable_lines: List[str] = []
-                for line in body.splitlines():
-                    clean = line.strip()
-                    if not clean:
-                        continue
-                    lowered = clean.lower()
-                    if self._looks_like_unavailable_block(lowered):
-                        unavailable_lines.append(clean)
-                if unavailable_lines:
-                    preview = "\n".join(unavailable_lines[:20])
-                    return f"Точка: {point.display_name}\nНайдены признаки стоп-листа, но нужен более точный DOM-разбор:\n{preview}"
-                return f"Точка: {point.display_name}\nСтатус: недоступных позиций на публичном сайте не найдено."
+                body = (await page.locator("body").inner_text())[:5000]
+                preview = body[:2000]
+                return (
+                    f"Точка: {point.display_name}\n"
+                    "Статус: не удалось выделить недоступные позиции детерминированно.\n"
+                    f"Точка выбрана: {'да' if selected else 'нет'}\n\n"
+                    f"Фрагмент страницы:\n{preview}"
+                )
             finally:
                 await context.close()
                 await browser.close()
-
-    async def _collect_public_stoplist_ai(self, point_name: str) -> str:
-        point = resolve_italian_pizza_point(point_name)
-        if not point:
-            return f"Не удалось определить публичную точку для стоп-листа: {point_name}"
-
-        task = (
-            build_stoplist_task(point.display_name)
-            + "\n\nСначала обязательно открой выбор адреса и выбери нужную точку. "
-              "Нельзя завершать задачу на первом экране, если на странице виден текст 'Выберите адрес'. "
-              "После выбора точки просмотри карточки товаров и верни только реальные недоступные товары. "
-              "Не перечисляй категории меню, кнопки, баннеры, заголовки и служебные элементы. "
-              "Если не можешь подтвердить товар как недоступный, не включай его в ответ."
-        )
-        logger.info("Stoplist AI fallback point=%s url=%s", point.display_name, point.public_url)
-        data = await browser_agent.extract_data(
-            url=point.public_url,
-            username=None,
-            encrypted_password=None,
-            user_task=task,
-            progress_callback=None,
-        )
-        return f"Точка: {point.display_name}\nСтоп-лист:\n{data}"
 
     async def collect_for_point(
         self,
@@ -286,13 +300,7 @@ class StoplistTool:
         encrypted_password: str,
         point_name: str,
     ) -> dict:
-        report_text = await self._collect_public_stoplist_dom(point_name)
-        if "Стоп-лист:" not in report_text or "недоступных позиций на публичном сайте не найдено" in report_text:
-            logger.info("Stoplist DOM result weak for point=%s, using AI fallback", point_name)
-            try:
-                report_text = await self._collect_public_stoplist_ai(point_name)
-            except Exception as exc:
-                logger.warning("Stoplist AI fallback failed point=%s error=%s", point_name, exc)
+        report_text = await self._collect_public_stoplist(point_name)
         return {
             "status": "ok",
             "point_name": point_name,
