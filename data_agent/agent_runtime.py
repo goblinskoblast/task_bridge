@@ -117,7 +117,8 @@ class DataAgentRuntime:
             base = rule_decision
         merged_slots = dict(session.slots or {})
         merged_slots.update(base.slots or {})
-        if not merged_slots.get("point_name") and self._is_followup(base.slots.get("source_message", ""), session):
+        source_message = str(base.slots.get("source_message") or "")
+        if not merged_slots.get("point_name") and self._is_followup(source_message, session):
             if session.slots.get("point_name"):
                 merged_slots["point_name"] = session.slots.get("point_name")
         if not merged_slots.get("period_hint") and base.scenario == session.scenario and session.slots.get("period_hint"):
@@ -134,7 +135,7 @@ class DataAgentRuntime:
         )
 
     def _rule_based_decision(self, message: str, session: AgentSessionSnapshot, systems_count: int) -> AgentDecision:
-        lowered = (message or "").lower().strip()
+        lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
         scenario = "general"
         reasoning = "Rule-based routing"
         if any(token in lowered for token in ["стоп-лист", "стоп лист", "недоступн", "нет в наличии"]):
@@ -157,7 +158,13 @@ class DataAgentRuntime:
         if scenario == "blanks_report" and not slots.get("period_hint"):
             slots["period_hint"] = session.slots.get("period_hint") or "текущий бланк"
         missing = [slot for slot in self._required_slots(scenario) if not slots.get(slot)]
-        return AgentDecision(scenario=scenario, selected_tools=SCENARIO_TOOL_MAP.get(scenario, ["orchestrator"]), slots=slots, missing_slots=missing, reasoning=reasoning)
+        return AgentDecision(
+            scenario=scenario,
+            selected_tools=SCENARIO_TOOL_MAP.get(scenario, ["orchestrator"]),
+            slots=slots,
+            missing_slots=missing,
+            reasoning=reasoning,
+        )
 
     async def _llm_decision(self, message: str, session: AgentSessionSnapshot, systems_count: int) -> Optional[AgentDecision]:
         provider = get_ai_provider()
@@ -213,16 +220,16 @@ class DataAgentRuntime:
         interval = self._extract_monitor_interval(message)
         if interval:
             slots["monitor_interval_minutes"] = interval
-        lowered = (message or "").lower()
+        lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
         if any(marker in lowered for marker in FOLLOWUP_MARKERS) and session.slots.get("point_name"):
             slots.setdefault("point_name", session.slots.get("point_name"))
         return slots
 
     def _extract_period_hint(self, message: str) -> Optional[str]:
-        lowered = (message or "").lower()
-        if "12 часов" in lowered:
+        lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
+        if "12 часов" in lowered or "предыдущие 12" in lowered:
             return "предыдущие 12 часов"
-        if "3 часа" in lowered or "три час" in lowered:
+        if "3 часа" in lowered or "три час" in lowered or "предыдущие 3" in lowered:
             return "предыдущие 3 часа"
         if "сутки" in lowered or "24 часа" in lowered:
             return "последние сутки"
@@ -233,7 +240,7 @@ class DataAgentRuntime:
         return None
 
     def _extract_monitor_interval(self, message: str) -> Optional[int]:
-        lowered = (message or "").lower()
+        lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
         if "раз в час" in lowered or "каждый час" in lowered:
             return 60
         if "раз в три часа" in lowered or "каждые три часа" in lowered:
@@ -249,7 +256,7 @@ class DataAgentRuntime:
         return []
 
     def _is_followup(self, message: str, session: AgentSessionSnapshot) -> bool:
-        lowered = (message or "").lower()
+        lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
         if any(marker in lowered for marker in FOLLOWUP_MARKERS):
             return True
         if session.scenario in {"stoplist_report", "blanks_report", "reviews_report"} and len(lowered) < 120 and resolve_italian_pizza_point(message):

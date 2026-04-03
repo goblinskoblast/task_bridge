@@ -97,21 +97,11 @@ class ItalianPizzaPublicAdapter:
         return False
 
     async def _confirm_selected_point(self, page, point) -> bool:
-        page_text = (await page.locator("body").inner_text()).lower()
+        page_text = re.sub(r"\s+", " ", (await page.locator("body").inner_text()).lower()).strip()
         tail = point.address.split(",")[-1].strip().lower()
         if tail and tail in page_text:
             logger.info("Stoplist inferred point selection by page text address=%s", point.address)
             return True
-        for candidate in [point.address, point.display_name, tail]:
-            if not candidate:
-                continue
-            try:
-                locator = page.get_by_text(re.compile(re.escape(candidate), re.IGNORECASE))
-                if await locator.count() > 0:
-                    logger.info("Stoplist found address candidate in DOM=%s", candidate)
-                    return True
-            except Exception:
-                continue
         logger.info("Stoplist point selector not confirmed for=%s", point.display_name)
         return False
 
@@ -124,60 +114,54 @@ class ItalianPizzaPublicAdapter:
             await page.wait_for_timeout(600)
 
     async def _collect_disabled_products(self, page) -> list[str]:
+        results: list[str] = []
         try:
-            items = await page.evaluate(
-                """
-                () => {
-                  const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
-                  const looksLikePriceOrWeight = (s) => {
-                    const lowered = s.toLowerCase();
-                    const hasDigit = Array.from(lowered).some(ch => ch >= '0' && ch <= '9');
-                    if (!hasDigit) return false;
-                    return lowered.endsWith('₽') || lowered.endsWith('руб') || lowered.endsWith('г') || lowered.endsWith('кг');
-                  };
-                  const buttons = Array.from(document.querySelectorAll('button, a, div, span'));
-                  const results = [];
-                  const seen = new Set();
-                  for (const btn of buttons) {
-                    const btnText = norm(btn.innerText || '');
-                    if (btnText !== 'Выбрать') continue;
-                    const style = window.getComputedStyle(btn);
-                    const cls = (btn.className || '').toString().toLowerCase();
-                    const disabled = btn.hasAttribute('disabled')
-                      || btn.getAttribute('aria-disabled') === 'true'
-                      || style.pointerEvents === 'none'
-                      || parseFloat(style.opacity || '1') < 0.7
-                      || cls.includes('disabled')
-                      || cls.includes('unavailable')
-                      || cls.includes('gray')
-                      || style.filter.includes('grayscale');
-                    if (!disabled) continue;
-                    const card = btn.closest('article, li, [class*="item"], [class*="card"], [class*="product"], div');
-                    if (!card) continue;
-                    const text = norm(card.innerText || '');
-                    if (!text || text.length > 700) continue;
-                    const lines = text.split('\n').map(norm).filter(Boolean);
-                    const product = lines.find((line) => {
-                      const lowered = line.toLowerCase();
-                      if (['выбрать', 'фильтры', 'меню'].includes(lowered)) return false;
-                      if (line.length < 3 || line.length > 120) return false;
-                      if (looksLikePriceOrWeight(lowered)) return false;
-                      return true;
-                    });
-                    if (!product) continue;
-                    if (!seen.has(product)) {
-                      seen.add(product);
-                      results.push(product);
-                    }
-                  }
-                  return results;
-                }
-                """
-            )
-            return items or []
+            buttons = page.get_by_text("Выбрать", exact=True)
+            count = await buttons.count()
+            for idx in range(count):
+                btn = buttons.nth(idx)
+                try:
+                    if not await btn.is_visible():
+                        continue
+                    candidate = await btn.evaluate(
+                        """
+                        (node) => {
+                          const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
+                          const style = window.getComputedStyle(node);
+                          const cls = (node.className || '').toString().toLowerCase();
+                          const disabled = node.hasAttribute('disabled')
+                            || node.getAttribute('aria-disabled') === 'true'
+                            || style.pointerEvents === 'none'
+                            || parseFloat(style.opacity || '1') < 0.7
+                            || cls.includes('disabled')
+                            || cls.includes('unavailable')
+                            || cls.includes('gray')
+                            || style.filter.includes('grayscale');
+                          if (!disabled) return null;
+                          const card = node.closest('article, li, [class*=item], [class*=card], [class*=product], div');
+                          if (!card) return null;
+                          const text = norm(card.innerText || '');
+                          if (!text || text.length > 700) return null;
+                          const lines = text.split(/\n+/).map(norm).filter(Boolean);
+                          for (const line of lines) {
+                            const lowered = line.toLowerCase();
+                            const hasDigit = /\d/.test(lowered);
+                            if (["выбрать", "фильтры", "меню"].includes(lowered)) continue;
+                            if (line.length < 3 || line.length > 120) continue;
+                            if (hasDigit && (lowered.endsWith('₽') || lowered.endsWith('руб') || lowered.endsWith('г') || lowered.endsWith('кг'))) continue;
+                            return line;
+                          }
+                          return null;
+                        }
+                        """
+                    )
+                    if candidate and candidate not in results:
+                        results.append(candidate)
+                except Exception as exc:
+                    logger.info("Stoplist disabled button inspect failed index=%s error=%s", idx, exc)
         except Exception as exc:
             logger.info("Stoplist disabled-product collect failed error=%s", exc)
-            return []
+        return results
 
     async def collect_stoplist(self, point_name: str) -> dict:
         point = resolve_italian_pizza_point(point_name)
