@@ -119,6 +119,19 @@ class StoplistTool:
             logger.info("Stoplist JS point match failed error=%s", exc)
         return False
 
+    async def _try_delivery_mode(self, page) -> None:
+        for candidate in ["Доставка", "Самовывоз"]:
+            locator = page.locator(f"text={candidate}")
+            if await locator.count() > 0:
+                try:
+                    await locator.first.click(timeout=2000)
+                    await page.wait_for_timeout(800)
+                    logger.info("Stoplist address mode clicked=%s", candidate)
+                    if candidate == "Доставка":
+                        return
+                except Exception:
+                    continue
+
     async def _fill_address_and_select(self, page, point) -> bool:
         address_query = point.address.split(",")[-1].strip() or point.address
         input_selectors = [
@@ -136,8 +149,16 @@ class StoplistTool:
                 await locator.first.fill(address_query)
                 await locator.first.dispatch_event("input")
                 await locator.first.dispatch_event("change")
-                await page.wait_for_timeout(1800)
+                await page.wait_for_timeout(1200)
                 logger.info("Stoplist filled address input selector=%s value=%s", selector, address_query)
+
+                for key in ["ArrowDown", "Enter"]:
+                    await locator.first.press(key)
+                    await page.wait_for_timeout(900)
+                logger.info("Stoplist used keyboard suggestion flow selector=%s", selector)
+
+                body_after_keyboard = (await page.locator("body").inner_text())[:1200]
+                logger.info("Stoplist body after keyboard select preview=%s", body_after_keyboard.replace("\n", " | "))
 
                 suggestion_candidates = [
                     f"{point.city}, {point.address}",
@@ -151,12 +172,10 @@ class StoplistTool:
                 if await self._click_best_match_via_js(page, suggestion_candidates):
                     return True
 
-                await locator.first.press("Enter")
-                await page.wait_for_timeout(1800)
-                logger.info("Stoplist pressed Enter after address input selector=%s", selector)
-                for candidate in suggestion_candidates:
-                    if await self._click_text_candidate(page, candidate):
-                        return True
+                page_text = (await page.locator("body").inner_text()).lower()
+                if point.address.split(",")[-1].strip().lower() in page_text:
+                    logger.info("Stoplist inferred point selection by page text address=%s", point.address)
+                    return True
             except Exception as exc:
                 logger.info("Stoplist address input flow failed selector=%s error=%s", selector, exc)
         return False
@@ -180,6 +199,8 @@ class StoplistTool:
                     break
                 except Exception:
                     continue
+
+        await self._try_delivery_mode(page)
 
         body_after_open = (await page.locator("body").inner_text())[:1500]
         logger.info("Stoplist body after selector open preview=%s", body_after_open.replace("\n", " | "))
