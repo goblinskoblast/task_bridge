@@ -1,24 +1,24 @@
-# Stage 1: Build React app
+﻿# Stage 1: Build React app
 FROM node:18-alpine AS frontend-builder
 
 WORKDIR /app/webapp
 
-# Copy package files
 COPY webapp/package*.json ./
+RUN npm ci --no-audit --no-fund
 
-# Install dependencies
-RUN npm ci
-
-# Copy source files
 COPY webapp/ ./
-
-# Build React app
 RUN npm run build
 
 # Stage 2: Python app
 FROM python:3.10-slim
 
 WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # System dependencies for Playwright Chromium
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -55,21 +55,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && playwright install chromium
+RUN pip install -r requirements.txt
+RUN playwright install --only-shell chromium
 
-# Copy application code
 COPY . .
-
-# Copy built React app from frontend-builder stage
 COPY --from=frontend-builder /app/webapp/dist /app/webapp/dist
 
-# Create data directory
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data /ms-playwright
 
-# Environment variables
-ENV PYTHONUNBUFFERED=1
-
-# Run the application
 CMD ["python", "main.py"]
