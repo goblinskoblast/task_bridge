@@ -59,6 +59,80 @@ class ItalianPizzaPublicAdapter:
             except Exception:
                 pass
 
+    async def _collect_suggestion_candidates(self, page, query: str) -> list[str]:
+        street = query.split()[0].lower()
+        number_tokens = [token for token in query.split() if any(ch.isdigit() for ch in token)]
+        js = """
+        (params) => {
+          const street = String(params.street || '').toLowerCase();
+          const numbers = Array.isArray(params.numbers) ? params.numbers.map(String) : [];
+          const isVisible = (el) => {
+            const style = window.getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            return style && style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
+          };
+          const texts = [];
+          for (const el of document.querySelectorAll('button, [role="option"], [role="button"], li, div, span')) {
+            if (!isVisible(el)) continue;
+            const text = String(el.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean).join(' ');
+            if (!text || text.length > 140) continue;
+            const lower = text.toLowerCase();
+            if (street && !lower.includes(street) && !numbers.some((token) => lower.includes(token))) continue;
+            if (lower.includes('выберите адрес') || lower === 'доставка' || lower === 'самовывоз') continue;
+            texts.push(text);
+          }
+          return Array.from(new Set(texts)).slice(0, 30);
+        }
+        """
+        try:
+            return await page.evaluate(js, {"street": street, "numbers": number_tokens})
+        except Exception as exc:
+            logger.info("Stoplist suggestion candidate collect failed error=%s", exc)
+            return []
+
+    async def _click_suggestion(self, page, query: str) -> bool:
+        street = query.split()[0].lower()
+        tail = query.lower()
+        number_tokens = [token for token in query.split() if any(ch.isdigit() for ch in token)]
+        js = """
+        (params) => {
+          const street = String(params.street || '').toLowerCase();
+          const tail = String(params.tail || '').toLowerCase();
+          const numbers = Array.isArray(params.numbers) ? params.numbers.map(String) : [];
+          const isVisible = (el) => {
+            const style = window.getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            return style && style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
+          };
+          let best = null;
+          for (const el of document.querySelectorAll('button, [role="option"], [role="button"], li, div, span')) {
+            if (!isVisible(el)) continue;
+            const text = String(el.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean).join(' ');
+            if (!text || text.length > 140) continue;
+            const lower = text.toLowerCase();
+            if (lower.includes('выберите адрес') || lower === 'доставка' || lower === 'самовывоз') continue;
+            let score = 0;
+            if (tail && lower.includes(tail)) score += 10;
+            if (street && lower.includes(street)) score += 4;
+            for (const token of numbers) {
+              if (token && lower.includes(token)) score += 6;
+            }
+            if (score < 8) continue;
+            if (!best || score > best.score) best = { score, text, el };
+          }
+          if (!best) return { clicked: false, score: 0, text: '' };
+          best.el.click();
+          return { clicked: true, score: best.score, text: best.text };
+        }
+        """
+        try:
+            result = await page.evaluate(js, {"street": street, "tail": tail, "numbers": number_tokens})
+            logger.info("Stoplist suggestion click result=%s", result)
+            return bool(result and result.get("clicked"))
+        except Exception as exc:
+            logger.info("Stoplist suggestion click failed error=%s", exc)
+            return False
+
     async def _fill_address(self, page, point) -> bool:
         query = point.address.split(",")[-1].strip() or point.address
         selectors = [
@@ -84,8 +158,13 @@ class ItalianPizzaPublicAdapter:
                     await field.fill(query)
                     await field.dispatch_event("input")
                     await field.dispatch_event("change")
-                    await page.wait_for_timeout(1000)
+                    await page.wait_for_timeout(1200)
                     logger.info("Stoplist filled address input selector=%s index=%s value=%s", selector, idx, query)
+                    suggestion_candidates = await self._collect_suggestion_candidates(page, query)
+                    logger.info("Stoplist suggestion candidates=%s", suggestion_candidates)
+                    if await self._click_suggestion(page, query):
+                        await page.wait_for_timeout(1500)
+                        return True
                     await field.press("ArrowDown")
                     await page.wait_for_timeout(500)
                     await field.press("Enter")
@@ -97,10 +176,14 @@ class ItalianPizzaPublicAdapter:
         return False
 
     async def _confirm_selected_point(self, page, point) -> bool:
-        page_text = re.sub(r"\s+", " ", (await page.locator("body").inner_text()).lower()).strip()
+        body_text = await page.locator("body").inner_text()
+        page_text = re.sub(r"\s+", " ", body_text.lower()).strip()
         tail = point.address.split(",")[-1].strip().lower()
         if tail and tail in page_text:
             logger.info("Stoplist inferred point selection by page text address=%s", point.address)
+            return True
+        if "выберите адрес" not in page_text and point.city.lower() in page_text:
+            logger.info("Stoplist inferred point selection by closed modal city=%s", point.city)
             return True
         logger.info("Stoplist point selector not confirmed for=%s", point.display_name)
         return False
@@ -123,12 +206,9 @@ class ItalianPizzaPublicAdapter:
                 try:
                     if not await btn.is_visible():
                         continue
-                    card_text = await btn.evaluate(
+                    card_info = await btn.evaluate(
                         """
                         (node) => {
-                          const clean = (value) => String(value || '').split(/?
-/).join('
-').trim();
                           const style = window.getComputedStyle(node);
                           const cls = String(node.className || '').toLowerCase();
                           const disabled = node.hasAttribute('disabled')
@@ -142,13 +222,17 @@ class ItalianPizzaPublicAdapter:
                           if (!disabled) return null;
                           const card = node.closest('article, li, [class*=item], [class*=card], [class*=product], div');
                           if (!card) return null;
-                          return clean(card.innerText || '');
+                          return {
+                            buttonClass: cls,
+                            text: String(card.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean).join('\n')
+                          };
                         }
                         """
                     )
-                    if not card_text:
+                    if not card_info:
                         continue
-                    for raw_line in str(card_text).splitlines():
+                    card_text = str(card_info.get("text") or "")
+                    for raw_line in card_text.splitlines():
                         candidate = self._clean_product_name(raw_line)
                         if candidate and candidate not in results:
                             results.append(candidate)

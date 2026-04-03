@@ -10,19 +10,101 @@ logger = logging.getLogger(__name__)
 
 
 class ItalianPizzaPortalAdapter:
+    def _period_candidates(self, lowered: str) -> list[str]:
+        if "12 часов" in lowered:
+            return ["12 часов", "12ч", "За 12 часов", "Последние 12 часов", "12"]
+        if "3 часа" in lowered:
+            return ["3 часа", "3ч", "За 3 часа", "Последние 3 часа", "3"]
+        if "сутки" in lowered or "24 часа" in lowered:
+            return ["Сутки", "24 часа", "За сутки", "Последние сутки", "24"]
+        if "сегодня" in lowered:
+            return ["Сегодня"]
+        return []
+
+    async def _visible_period_controls(self, page) -> list[str]:
+        js = """
+        () => {
+          const isVisible = (el) => {
+            const style = window.getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            return style && style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
+          };
+          const texts = [];
+          for (const el of document.querySelectorAll('button, [role="button"], [role="tab"], label, span, div, li, option')) {
+            if (!isVisible(el)) continue;
+            const text = String(el.innerText || el.textContent || '').split('\n').map((s) => s.trim()).filter(Boolean).join(' ');
+            if (!text || text.length > 80) continue;
+            const lower = text.toLowerCase();
+            if (!(lower.includes('час') || lower.includes('сут') || lower.includes('сегод') || lower === '12' || lower === '3' || lower === '24' || lower === '15')) continue;
+            texts.push(text);
+          }
+          return Array.from(new Set(texts)).slice(0, 40);
+        }
+        """
+        try:
+            return await page.evaluate(js)
+        except Exception as exc:
+            logger.info("Blanks period control collect failed error=%s", exc)
+            return []
+
+    async def _click_best_period_candidate(self, page, candidates: list[str]) -> bool:
+        lowered_candidates = [candidate.lower() for candidate in candidates if candidate]
+        js = """
+        (wanted) => {
+          const isVisible = (el) => {
+            const style = window.getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            return style && style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
+          };
+          let best = null;
+          for (const el of document.querySelectorAll('button, [role="button"], [role="tab"], label, span, div, li, option')) {
+            if (!isVisible(el)) continue;
+            const text = String(el.innerText || el.textContent || '').split('\n').map((s) => s.trim()).filter(Boolean).join(' ');
+            if (!text || text.length > 80) continue;
+            const lower = text.toLowerCase();
+            let score = 0;
+            for (const candidate of wanted) {
+              if (!candidate) continue;
+              if (lower === candidate) score += 10;
+              else if (lower.includes(candidate)) score += 4;
+            }
+            if (lower.includes('час')) score += 1;
+            if (score < 5) continue;
+            if (!best || score > best.score) best = { score, text, el };
+          }
+          if (!best) return { clicked: false, text: '' };
+          best.el.click();
+          return { clicked: true, text: best.text, score: best.score };
+        }
+        """
+        try:
+            result = await page.evaluate(js, lowered_candidates)
+            logger.info("Blanks period click result=%s", result)
+            return bool(result and result.get("clicked"))
+        except Exception as exc:
+            logger.info("Blanks period click failed error=%s", exc)
+            return False
+
+    async def _open_period_menu_if_needed(self, page) -> None:
+        openers = ["15 часов", "12 часов", "3 часа", "Сутки", "Период", "За период"]
+        for candidate in openers:
+            locator = page.locator(f"text={candidate}")
+            if await locator.count() > 0:
+                try:
+                    await locator.first.click(timeout=2000)
+                    await page.wait_for_timeout(900)
+                    logger.info("Blanks period opener clicked=%s", candidate)
+                    return
+                except Exception:
+                    continue
+
     async def _select_period(self, page, period_hint: str) -> None:
         if not period_hint:
             return
         lowered = period_hint.lower()
-        candidates: list[str] = []
-        if "12 часов" in lowered:
-            candidates = ["12 часов", "12ч", "За 12 часов", "Последние 12 часов"]
-        elif "3 часа" in lowered:
-            candidates = ["3 часа", "3ч", "За 3 часа", "Последние 3 часа"]
-        elif "сутки" in lowered:
-            candidates = ["Сутки", "24 часа", "За сутки", "Последние сутки"]
-        elif "сегодня" in lowered:
-            candidates = ["Сегодня"]
+        candidates = self._period_candidates(lowered)
+        if not candidates:
+            return
         for candidate in candidates:
             locator = page.locator(f"text={candidate}")
             if await locator.count() > 0:
@@ -33,6 +115,12 @@ class ItalianPizzaPortalAdapter:
                     return
                 except Exception:
                     continue
+        visible_controls = await self._visible_period_controls(page)
+        logger.info("Blanks visible period controls=%s", visible_controls)
+        await self._open_period_menu_if_needed(page)
+        if await self._click_best_period_candidate(page, candidates):
+            await page.wait_for_timeout(1500)
+            return
         logger.info("Blanks period selector not found for period=%s candidates=%s", period_hint, candidates)
 
     def _normalize_report(self, point_name: str, data: str) -> tuple[str, bool]:
