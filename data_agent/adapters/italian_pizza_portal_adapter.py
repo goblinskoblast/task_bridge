@@ -1,9 +1,12 @@
 ﻿from __future__ import annotations
 
 import hashlib
+import logging
 import re
 
 from email_integration.encryption import decrypt_password
+
+logger = logging.getLogger(__name__)
 
 
 class ItalianPizzaPortalAdapter:
@@ -26,9 +29,11 @@ class ItalianPizzaPortalAdapter:
                 try:
                     await locator.first.click(timeout=3000)
                     await page.wait_for_timeout(1500)
+                    logger.info("Blanks period selected candidate=%s", candidate)
                     return
                 except Exception:
                     continue
+        logger.info("Blanks period selector not found for period=%s candidates=%s", period_hint, candidates)
 
     def _normalize_report(self, point_name: str, data: str) -> tuple[str, bool]:
         raw = (data or "").strip()

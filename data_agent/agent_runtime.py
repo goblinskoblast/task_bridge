@@ -147,6 +147,9 @@ class DataAgentRuntime:
         elif any(token in lowered for token in ["отзыв", "отзывы", "рейтинг", "2гис", "2gis", "яндекс карты"]):
             scenario = "reviews_report"
             reasoning = "Определен сценарий отзывов"
+        elif self._is_point_only_followup(message, session):
+            scenario = session.scenario or "general"
+            reasoning = f"Точка обновляет текущий сценарий {scenario}"
         elif systems_count > 0 and any(token in lowered for token in ["сайт", "кабинет", "crm", "dashboard", "отчет", "отчёт", "внешн"]):
             scenario = "browser_report"
             reasoning = "Определен сценарий внешней системы"
@@ -255,11 +258,22 @@ class DataAgentRuntime:
             return ["point_name"]
         return []
 
+    def _is_point_only_followup(self, message: str, session: AgentSessionSnapshot) -> bool:
+        lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
+        if session.scenario not in {"stoplist_report", "blanks_report", "reviews_report"}:
+            return False
+        if not resolve_italian_pizza_point(message):
+            return False
+        scenario_markers = ["стоп", "бланк", "отзыв", "рейтинг", "карты", "сайт", "кабинет"]
+        if any(marker in lowered for marker in scenario_markers):
+            return False
+        return len(lowered) <= 120
+
     def _is_followup(self, message: str, session: AgentSessionSnapshot) -> bool:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
         if any(marker in lowered for marker in FOLLOWUP_MARKERS):
             return True
-        if session.scenario in {"stoplist_report", "blanks_report", "reviews_report"} and len(lowered) < 120 and resolve_italian_pizza_point(message):
+        if self._is_point_only_followup(message, session):
             return True
         return False
 

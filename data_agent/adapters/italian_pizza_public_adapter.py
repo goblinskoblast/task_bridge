@@ -123,40 +123,36 @@ class ItalianPizzaPublicAdapter:
                 try:
                     if not await btn.is_visible():
                         continue
-                    candidate = await btn.evaluate(
+                    card_text = await btn.evaluate(
                         """
                         (node) => {
-                          const norm = (s) => (s || '').replace(/\s+/g, ' ').trim();
+                          const clean = (value) => String(value || '').split(/?
+/).join('
+').trim();
                           const style = window.getComputedStyle(node);
-                          const cls = (node.className || '').toString().toLowerCase();
+                          const cls = String(node.className || '').toLowerCase();
                           const disabled = node.hasAttribute('disabled')
                             || node.getAttribute('aria-disabled') === 'true'
                             || style.pointerEvents === 'none'
-                            || parseFloat(style.opacity || '1') < 0.7
+                            || Number.parseFloat(style.opacity || '1') < 0.7
                             || cls.includes('disabled')
                             || cls.includes('unavailable')
                             || cls.includes('gray')
-                            || style.filter.includes('grayscale');
+                            || String(style.filter || '').includes('grayscale');
                           if (!disabled) return null;
                           const card = node.closest('article, li, [class*=item], [class*=card], [class*=product], div');
                           if (!card) return null;
-                          const text = norm(card.innerText || '');
-                          if (!text || text.length > 700) return null;
-                          const lines = text.split(/\n+/).map(norm).filter(Boolean);
-                          for (const line of lines) {
-                            const lowered = line.toLowerCase();
-                            const hasDigit = /\d/.test(lowered);
-                            if (["выбрать", "фильтры", "меню"].includes(lowered)) continue;
-                            if (line.length < 3 || line.length > 120) continue;
-                            if (hasDigit && (lowered.endsWith('₽') || lowered.endsWith('руб') || lowered.endsWith('г') || lowered.endsWith('кг'))) continue;
-                            return line;
-                          }
-                          return null;
+                          return clean(card.innerText || '');
                         }
                         """
                     )
-                    if candidate and candidate not in results:
-                        results.append(candidate)
+                    if not card_text:
+                        continue
+                    for raw_line in str(card_text).splitlines():
+                        candidate = self._clean_product_name(raw_line)
+                        if candidate and candidate not in results:
+                            results.append(candidate)
+                            break
                 except Exception as exc:
                     logger.info("Stoplist disabled button inspect failed index=%s error=%s", idx, exc)
         except Exception as exc:
