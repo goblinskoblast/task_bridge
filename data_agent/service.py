@@ -62,28 +62,13 @@ class DataAgentService:
         if not self._looks_like_point_or_followup(message):
             return []
 
-        db = get_db_session()
-        try:
-            user = db.query(User).filter(User.telegram_id == user_id).first()
-            if not user:
-                return []
-
-            recent_logs = (
-                db.query(DataAgentRequestLog)
-                .filter(DataAgentRequestLog.user_id == user.id)
-                .order_by(DataAgentRequestLog.created_at.desc())
-                .limit(5)
-                .all()
-            )
-
-            for item in recent_logs:
-                tools = item.selected_tools or []
-                filtered = [tool for tool in tools if tool in {"stoplist_tool", "blanks_tool", "review_tool"}]
-                if filtered:
-                    return filtered
-            return []
-        finally:
-            db.close()
+        recent_logs = self._get_recent_request_logs(user_id, limit=5)
+        for item in recent_logs:
+            tools = item.selected_tools or []
+            filtered = [tool for tool in tools if tool in {"stoplist_tool", "blanks_tool", "review_tool"}]
+            if filtered:
+                return filtered
+        return []
 
     def health(self) -> dict:
         return {
@@ -486,7 +471,7 @@ class DataAgentService:
         }
 
     async def _run_stoplist_tool(self, user_message: str, systems: List[ConnectedSystem], user_id: int) -> dict:
-        point_name = self._resolve_point_name(user_message)
+        point_name = self._resolve_point_name(user_message, user_id)
         logger.info("Stoplist tool invoked user_id=%s point=%s message=%s", user_id, point_name, user_message[:300])
         if not point_name:
             return {
@@ -510,7 +495,7 @@ class DataAgentService:
             db.close()
 
     async def _run_blanks_tool(self, user_message: str, systems: List[ConnectedSystem], user_id: int) -> dict:
-        point_name = self._resolve_point_name(user_message)
+        point_name = self._resolve_point_name(user_message, user_id)
         logger.info("Blanks tool invoked user_id=%s point=%s message=%s", user_id, point_name, user_message[:300])
         if not point_name:
             return {
