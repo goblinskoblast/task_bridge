@@ -75,6 +75,27 @@ class StoplistTool:
         except Exception as exc:
             logger.info("Stoplist address candidate log failed error=%s", exc)
 
+    async def _log_input_candidates(self, page) -> None:
+        try:
+            inputs = await page.evaluate(
+                """
+                () => {
+                  return Array.from(document.querySelectorAll('input')).map((el, idx) => ({
+                    idx,
+                    type: el.type || '',
+                    name: el.name || '',
+                    placeholder: el.placeholder || '',
+                    aria: el.getAttribute('aria-label') || '',
+                    value: el.value || '',
+                    visible: !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length),
+                  }));
+                }
+                """
+            )
+            logger.info("Stoplist input candidates=%s", inputs)
+        except Exception as exc:
+            logger.info("Stoplist input candidate log failed error=%s", exc)
+
     async def _click_best_match_via_js(self, page, candidates: list[str]) -> bool:
         try:
             clicked = await page.evaluate(
@@ -134,48 +155,60 @@ class StoplistTool:
 
     async def _fill_address_and_select(self, page, point) -> bool:
         address_query = point.address.split(",")[-1].strip() or point.address
+        await self._log_input_candidates(page)
         input_selectors = [
             "input[placeholder*='Введите адрес']",
+            "input[aria-label*='адрес']",
+            "input[name*='address']",
             "input[placeholder*='адрес']",
             "input[type='text']",
         ]
         for selector in input_selectors:
             try:
                 locator = page.locator(selector)
-                if await locator.count() == 0:
+                count = await locator.count()
+                if count == 0:
                     continue
-                await locator.first.click()
-                await locator.first.fill("")
-                await locator.first.fill(address_query)
-                await locator.first.dispatch_event("input")
-                await locator.first.dispatch_event("change")
-                await page.wait_for_timeout(1200)
-                logger.info("Stoplist filled address input selector=%s value=%s", selector, address_query)
+                for idx in range(count):
+                    field = locator.nth(idx)
+                    try:
+                        visible = await field.is_visible()
+                    except Exception:
+                        visible = False
+                    if not visible:
+                        continue
+                    await field.click()
+                    await field.fill("")
+                    await field.fill(address_query)
+                    await field.dispatch_event("input")
+                    await field.dispatch_event("change")
+                    await page.wait_for_timeout(1200)
+                    logger.info("Stoplist filled address input selector=%s index=%s value=%s", selector, idx, address_query)
 
-                for key in ["ArrowDown", "Enter"]:
-                    await locator.first.press(key)
-                    await page.wait_for_timeout(900)
-                logger.info("Stoplist used keyboard suggestion flow selector=%s", selector)
+                    for key in ["ArrowDown", "Enter"]:
+                        await field.press(key)
+                        await page.wait_for_timeout(900)
+                    logger.info("Stoplist used keyboard suggestion flow selector=%s index=%s", selector, idx)
 
-                body_after_keyboard = (await page.locator("body").inner_text())[:1200]
-                logger.info("Stoplist body after keyboard select preview=%s", body_after_keyboard.replace("\n", " | "))
+                    body_after_keyboard = (await page.locator("body").inner_text())[:1200]
+                    logger.info("Stoplist body after keyboard select preview=%s", body_after_keyboard.replace("\n", " | "))
 
-                suggestion_candidates = [
-                    f"{point.city}, {point.address}",
-                    point.address,
-                    point.address.replace(",", ""),
-                    point.address.split(",")[-1].strip(),
-                ]
-                for candidate in suggestion_candidates:
-                    if await self._click_text_candidate(page, candidate):
+                    suggestion_candidates = [
+                        f"{point.city}, {point.address}",
+                        point.address,
+                        point.address.replace(",", ""),
+                        point.address.split(",")[-1].strip(),
+                    ]
+                    for candidate in suggestion_candidates:
+                        if await self._click_text_candidate(page, candidate):
+                            return True
+                    if await self._click_best_match_via_js(page, suggestion_candidates):
                         return True
-                if await self._click_best_match_via_js(page, suggestion_candidates):
-                    return True
 
-                page_text = (await page.locator("body").inner_text()).lower()
-                if point.address.split(",")[-1].strip().lower() in page_text:
-                    logger.info("Stoplist inferred point selection by page text address=%s", point.address)
-                    return True
+                    page_text = (await page.locator("body").inner_text()).lower()
+                    if point.address.split(",")[-1].strip().lower() in page_text:
+                        logger.info("Stoplist inferred point selection by page text address=%s", point.address)
+                        return True
             except Exception as exc:
                 logger.info("Stoplist address input flow failed selector=%s error=%s", selector, exc)
         return False
@@ -258,7 +291,7 @@ class StoplistTool:
                     if (!card) continue;
                     const text = norm(card.innerText || '');
                     if (!text || text.length > 700) continue;
-                    const lines = text.split(/\n+/).map(norm).filter(Boolean);
+                    const lines = text.split('\n').map(norm).filter(Boolean);
                     const product = lines.find(line => {
                       const lowered = line.toLowerCase();
                       if (['выбрать', 'фильтры', 'меню'].includes(lowered)) return false;
