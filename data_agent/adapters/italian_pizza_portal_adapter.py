@@ -21,68 +21,65 @@ class ItalianPizzaPortalAdapter:
             return ["Сегодня"]
         return []
 
+    async def _iter_period_controls(self, page, max_items: int = 200) -> list[tuple[int, str]]:
+        locator = page.locator("button, [role='button'], [role='tab'], label, span, div, li, option")
+        count = min(await locator.count(), max_items)
+        results: list[tuple[int, str]] = []
+        for idx in range(count):
+            item = locator.nth(idx)
+            try:
+                if not await item.is_visible():
+                    continue
+                text = (await item.inner_text()).strip()
+            except Exception:
+                continue
+            if not text or len(text) > 80:
+                continue
+            normalized = re.sub(r"\s+", " ", text)
+            lowered = normalized.lower()
+            if not ("час" in lowered or "сут" in lowered or "сегод" in lowered or lowered in {"12", "3", "24", "15"}):
+                continue
+            results.append((idx, normalized))
+        return results
+
     async def _visible_period_controls(self, page) -> list[str]:
-        js = """
-        () => {
-          const isVisible = (el) => {
-            const style = window.getComputedStyle(el);
-            const rect = el.getBoundingClientRect();
-            return style && style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
-          };
-          const texts = [];
-          for (const el of document.querySelectorAll('button, [role="button"], [role="tab"], label, span, div, li, option')) {
-            if (!isVisible(el)) continue;
-            const text = String(el.innerText || el.textContent || '').split('\n').map((s) => s.trim()).filter(Boolean).join(' ');
-            if (!text || text.length > 80) continue;
-            const lower = text.toLowerCase();
-            if (!(lower.includes('час') || lower.includes('сут') || lower.includes('сегод') || lower === '12' || lower === '3' || lower === '24' || lower === '15')) continue;
-            texts.push(text);
-          }
-          return Array.from(new Set(texts)).slice(0, 40);
-        }
-        """
-        try:
-            return await page.evaluate(js)
-        except Exception as exc:
-            logger.info("Blanks period control collect failed error=%s", exc)
-            return []
+        controls = await self._iter_period_controls(page)
+        seen: list[str] = []
+        for _, text in controls:
+            if text not in seen:
+                seen.append(text)
+        return seen[:40]
 
     async def _click_best_period_candidate(self, page, candidates: list[str]) -> bool:
-        lowered_candidates = [candidate.lower() for candidate in candidates if candidate]
-        js = """
-        (wanted) => {
-          const isVisible = (el) => {
-            const style = window.getComputedStyle(el);
-            const rect = el.getBoundingClientRect();
-            return style && style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
-          };
-          let best = null;
-          for (const el of document.querySelectorAll('button, [role="button"], [role="tab"], label, span, div, li, option')) {
-            if (!isVisible(el)) continue;
-            const text = String(el.innerText || el.textContent || '').split('\n').map((s) => s.trim()).filter(Boolean).join(' ');
-            if (!text || text.length > 80) continue;
-            const lower = text.toLowerCase();
-            let score = 0;
-            for (const candidate of wanted) {
-              if (!candidate) continue;
-              if (lower === candidate) score += 10;
-              else if (lower.includes(candidate)) score += 4;
-            }
-            if (lower.includes('час')) score += 1;
-            if (score < 5) continue;
-            if (!best || score > best.score) best = { score, text, el };
-          }
-          if (!best) return { clicked: false, text: '' };
-          best.el.click();
-          return { clicked: true, text: best.text, score: best.score };
-        }
-        """
+        wanted = [candidate.lower() for candidate in candidates if candidate]
+        locator = page.locator("button, [role='button'], [role='tab'], label, span, div, li, option")
+        controls = await self._iter_period_controls(page)
+        best_idx = None
+        best_text = ""
+        best_score = 0
+        for idx, text in controls:
+            lowered = text.lower()
+            score = 0
+            for candidate in wanted:
+                if lowered == candidate:
+                    score += 10
+                elif candidate in lowered:
+                    score += 4
+            if "час" in lowered:
+                score += 1
+            if score > best_score:
+                best_idx = idx
+                best_text = text
+                best_score = score
+        if best_idx is None or best_score < 5:
+            logger.info("Blanks period click result=%s", {"clicked": False, "text": best_text, "score": best_score})
+            return False
         try:
-            result = await page.evaluate(js, lowered_candidates)
-            logger.info("Blanks period click result=%s", result)
-            return bool(result and result.get("clicked"))
+            await locator.nth(best_idx).click(timeout=2500)
+            logger.info("Blanks period click result=%s", {"clicked": True, "text": best_text, "score": best_score})
+            return True
         except Exception as exc:
-            logger.info("Blanks period click failed error=%s", exc)
+            logger.info("Blanks period click failed idx=%s text=%s error=%s", best_idx, best_text, exc)
             return False
 
     async def _open_period_menu_if_needed(self, page) -> None:

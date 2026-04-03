@@ -59,78 +59,81 @@ class ItalianPizzaPublicAdapter:
             except Exception:
                 pass
 
+    async def _iter_text_candidates(self, page, selector: str, max_items: int = 160) -> list[tuple[int, str]]:
+        locator = page.locator(selector)
+        count = min(await locator.count(), max_items)
+        results: list[tuple[int, str]] = []
+        for idx in range(count):
+            item = locator.nth(idx)
+            try:
+                if not await item.is_visible():
+                    continue
+                text = (await item.inner_text()).strip()
+            except Exception:
+                continue
+            if not text or len(text) > 140:
+                continue
+            normalized = re.sub(r"\s+", " ", text)
+            results.append((idx, normalized))
+        return results
+
     async def _collect_suggestion_candidates(self, page, query: str) -> list[str]:
         street = query.split()[0].lower()
-        number_tokens = [token for token in query.split() if any(ch.isdigit() for ch in token)]
-        js = """
-        (params) => {
-          const street = String(params.street || '').toLowerCase();
-          const numbers = Array.isArray(params.numbers) ? params.numbers.map(String) : [];
-          const isVisible = (el) => {
-            const style = window.getComputedStyle(el);
-            const rect = el.getBoundingClientRect();
-            return style && style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
-          };
-          const texts = [];
-          for (const el of document.querySelectorAll('button, [role="option"], [role="button"], li, div, span')) {
-            if (!isVisible(el)) continue;
-            const text = String(el.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean).join(' ');
-            if (!text || text.length > 140) continue;
-            const lower = text.toLowerCase();
-            if (street && !lower.includes(street) && !numbers.some((token) => lower.includes(token))) continue;
-            if (lower.includes('выберите адрес') || lower === 'доставка' || lower === 'самовывоз') continue;
-            texts.push(text);
-          }
-          return Array.from(new Set(texts)).slice(0, 30);
-        }
-        """
-        try:
-            return await page.evaluate(js, {"street": street, "numbers": number_tokens})
-        except Exception as exc:
-            logger.info("Stoplist suggestion candidate collect failed error=%s", exc)
-            return []
+        number_tokens = [token.lower() for token in query.split() if any(ch.isdigit() for ch in token)]
+        candidates: list[str] = []
+        for _, text in await self._iter_text_candidates(page, "button, [role='option'], [role='button'], li, div, span"):
+            lowered = text.lower()
+            if lowered in {"доставка", "самовывоз"} or "выберите адрес" in lowered:
+                continue
+            if street and street not in lowered and not any(token in lowered for token in number_tokens):
+                continue
+            if text not in candidates:
+                candidates.append(text)
+        return candidates[:30]
 
     async def _click_suggestion(self, page, query: str) -> bool:
         street = query.split()[0].lower()
         tail = query.lower()
-        number_tokens = [token for token in query.split() if any(ch.isdigit() for ch in token)]
-        js = """
-        (params) => {
-          const street = String(params.street || '').toLowerCase();
-          const tail = String(params.tail || '').toLowerCase();
-          const numbers = Array.isArray(params.numbers) ? params.numbers.map(String) : [];
-          const isVisible = (el) => {
-            const style = window.getComputedStyle(el);
-            const rect = el.getBoundingClientRect();
-            return style && style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0;
-          };
-          let best = null;
-          for (const el of document.querySelectorAll('button, [role="option"], [role="button"], li, div, span')) {
-            if (!isVisible(el)) continue;
-            const text = String(el.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean).join(' ');
-            if (!text || text.length > 140) continue;
-            const lower = text.toLowerCase();
-            if (lower.includes('выберите адрес') || lower === 'доставка' || lower === 'самовывоз') continue;
-            let score = 0;
-            if (tail && lower.includes(tail)) score += 10;
-            if (street && lower.includes(street)) score += 4;
-            for (const token of numbers) {
-              if (token && lower.includes(token)) score += 6;
-            }
-            if (score < 8) continue;
-            if (!best || score > best.score) best = { score, text, el };
-          }
-          if (!best) return { clicked: false, score: 0, text: '' };
-          best.el.click();
-          return { clicked: true, score: best.score, text: best.text };
-        }
-        """
+        number_tokens = [token.lower() for token in query.split() if any(ch.isdigit() for ch in token)]
+        locator = page.locator("button, [role='option'], [role='button'], li, div, span")
+        count = min(await locator.count(), 180)
+        best_idx = None
+        best_text = ""
+        best_score = 0
+        for idx in range(count):
+            item = locator.nth(idx)
+            try:
+                if not await item.is_visible():
+                    continue
+                text = re.sub(r"\s+", " ", (await item.inner_text()).strip())
+            except Exception:
+                continue
+            if not text or len(text) > 140:
+                continue
+            lowered = text.lower()
+            if lowered in {"доставка", "самовывоз"} or "выберите адрес" in lowered:
+                continue
+            score = 0
+            if tail and tail in lowered:
+                score += 10
+            if street and street in lowered:
+                score += 4
+            for token in number_tokens:
+                if token in lowered:
+                    score += 6
+            if score > best_score:
+                best_idx = idx
+                best_text = text
+                best_score = score
+        if best_idx is None or best_score < 8:
+            logger.info("Stoplist suggestion click result=%s", {"clicked": False, "score": best_score, "text": best_text})
+            return False
         try:
-            result = await page.evaluate(js, {"street": street, "tail": tail, "numbers": number_tokens})
-            logger.info("Stoplist suggestion click result=%s", result)
-            return bool(result and result.get("clicked"))
+            await locator.nth(best_idx).click(timeout=2500)
+            logger.info("Stoplist suggestion click result=%s", {"clicked": True, "score": best_score, "text": best_text})
+            return True
         except Exception as exc:
-            logger.info("Stoplist suggestion click failed error=%s", exc)
+            logger.info("Stoplist suggestion click failed index=%s text=%s error=%s", best_idx, best_text, exc)
             return False
 
     async def _fill_address(self, page, point) -> bool:
@@ -150,14 +153,9 @@ class ItalianPizzaPublicAdapter:
                 try:
                     if not await field.is_visible():
                         continue
-                except Exception:
-                    continue
-                try:
                     await field.click()
                     await field.fill("")
                     await field.fill(query)
-                    await field.dispatch_event("input")
-                    await field.dispatch_event("change")
                     await page.wait_for_timeout(1200)
                     logger.info("Stoplist filled address input selector=%s index=%s value=%s", selector, idx, query)
                     suggestion_candidates = await self._collect_suggestion_candidates(page, query)
@@ -196,51 +194,67 @@ class ItalianPizzaPublicAdapter:
                 await page.evaluate("window.scrollBy(0, 1800)")
             await page.wait_for_timeout(600)
 
+    async def _is_disabled_button(self, btn) -> bool:
+        try:
+            disabled_attr = await btn.get_attribute("disabled")
+            aria_disabled = await btn.get_attribute("aria-disabled")
+            classes = (await btn.get_attribute("class") or "").lower()
+            if disabled_attr is not None or aria_disabled == "true":
+                return True
+            if any(token in classes for token in ["disabled", "unavailable", "gray"]):
+                return True
+            if not await btn.is_enabled():
+                return True
+            try:
+                await btn.click(trial=True, timeout=800)
+                return False
+            except Exception:
+                return True
+        except Exception:
+            return False
+
+    async def _extract_card_text(self, btn) -> str:
+        xpaths = [
+            "xpath=ancestor::article[1]",
+            "xpath=ancestor::li[1]",
+            "xpath=ancestor::*[contains(@class,'item')][1]",
+            "xpath=ancestor::*[contains(@class,'card')][1]",
+            "xpath=ancestor::*[contains(@class,'product')][1]",
+            "xpath=ancestor::div[1]",
+        ]
+        for xpath in xpaths:
+            locator = btn.locator(xpath)
+            try:
+                if await locator.count() == 0:
+                    continue
+                text = (await locator.first.inner_text()).strip()
+                if text and len(text) > 2:
+                    return text
+            except Exception:
+                continue
+        return ""
+
     async def _collect_disabled_products(self, page) -> list[str]:
         results: list[str] = []
-        try:
-            buttons = page.get_by_text("Выбрать", exact=True)
-            count = await buttons.count()
-            for idx in range(count):
-                btn = buttons.nth(idx)
-                try:
-                    if not await btn.is_visible():
-                        continue
-                    card_info = await btn.evaluate(
-                        """
-                        (node) => {
-                          const style = window.getComputedStyle(node);
-                          const cls = String(node.className || '').toLowerCase();
-                          const disabled = node.hasAttribute('disabled')
-                            || node.getAttribute('aria-disabled') === 'true'
-                            || style.pointerEvents === 'none'
-                            || Number.parseFloat(style.opacity || '1') < 0.7
-                            || cls.includes('disabled')
-                            || cls.includes('unavailable')
-                            || cls.includes('gray')
-                            || String(style.filter || '').includes('grayscale');
-                          if (!disabled) return null;
-                          const card = node.closest('article, li, [class*=item], [class*=card], [class*=product], div');
-                          if (!card) return null;
-                          return {
-                            buttonClass: cls,
-                            text: String(card.innerText || '').split('\n').map((s) => s.trim()).filter(Boolean).join('\n')
-                          };
-                        }
-                        """
-                    )
-                    if not card_info:
-                        continue
-                    card_text = str(card_info.get("text") or "")
-                    for raw_line in card_text.splitlines():
-                        candidate = self._clean_product_name(raw_line)
-                        if candidate and candidate not in results:
-                            results.append(candidate)
-                            break
-                except Exception as exc:
-                    logger.info("Stoplist disabled button inspect failed index=%s error=%s", idx, exc)
-        except Exception as exc:
-            logger.info("Stoplist disabled-product collect failed error=%s", exc)
+        buttons = page.get_by_text("Выбрать", exact=True)
+        count = await buttons.count()
+        for idx in range(count):
+            btn = buttons.nth(idx)
+            try:
+                if not await btn.is_visible():
+                    continue
+                if not await self._is_disabled_button(btn):
+                    continue
+                card_text = await self._extract_card_text(btn)
+                if not card_text:
+                    continue
+                for raw_line in card_text.splitlines():
+                    candidate = self._clean_product_name(raw_line)
+                    if candidate and candidate not in results:
+                        results.append(candidate)
+                        break
+            except Exception as exc:
+                logger.info("Stoplist disabled button inspect failed index=%s error=%s", idx, exc)
         return results
 
     async def collect_stoplist(self, point_name: str) -> dict:
