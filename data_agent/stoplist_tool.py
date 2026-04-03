@@ -57,13 +57,14 @@ class StoplistTool:
                 """
                 (city) => {
                   const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+                  const hasDigit = (s) => Array.from(s).some(ch => ch >= '0' && ch <= '9');
                   const elements = Array.from(document.querySelectorAll('button, a, div, span, li'));
                   const out = [];
                   for (const el of elements) {
                     const text = norm(el.innerText || '');
                     if (!text || text.length > 180) continue;
                     const lowered = text.toLowerCase();
-                    if (lowered.includes(city.toLowerCase()) || /\\d/.test(text) || lowered.includes('адрес')) out.push(text);
+                    if (lowered.includes(city.toLowerCase()) || hasDigit(text) || lowered.includes('адрес')) out.push(text);
                   }
                   return [...new Set(out)].slice(0, 30);
                 }
@@ -119,7 +120,7 @@ class StoplistTool:
         return False
 
     async def _fill_address_and_select(self, page, point) -> bool:
-        address_query = point.address
+        address_query = point.address.split(",")[-1].strip() or point.address
         input_selectors = [
             "input[placeholder*='Введите адрес']",
             "input[placeholder*='адрес']",
@@ -130,10 +131,14 @@ class StoplistTool:
                 locator = page.locator(selector)
                 if await locator.count() == 0:
                     continue
+                await locator.first.click()
                 await locator.first.fill("")
                 await locator.first.fill(address_query)
+                await locator.first.dispatch_event("input")
+                await locator.first.dispatch_event("change")
                 await page.wait_for_timeout(1800)
                 logger.info("Stoplist filled address input selector=%s value=%s", selector, address_query)
+
                 suggestion_candidates = [
                     f"{point.city}, {point.address}",
                     point.address,
@@ -145,6 +150,13 @@ class StoplistTool:
                         return True
                 if await self._click_best_match_via_js(page, suggestion_candidates):
                     return True
+
+                await locator.first.press("Enter")
+                await page.wait_for_timeout(1800)
+                logger.info("Stoplist pressed Enter after address input selector=%s", selector)
+                for candidate in suggestion_candidates:
+                    if await self._click_text_candidate(page, candidate):
+                        return True
             except Exception as exc:
                 logger.info("Stoplist address input flow failed selector=%s error=%s", selector, exc)
         return False
@@ -198,6 +210,12 @@ class StoplistTool:
                 """
                 () => {
                   const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+                  const looksLikePriceOrWeight = (s) => {
+                    const lowered = s.toLowerCase();
+                    const hasDigit = Array.from(lowered).some(ch => ch >= '0' && ch <= '9');
+                    if (!hasDigit) return false;
+                    return lowered.endsWith('₽') || lowered.endsWith('руб') || lowered.endsWith('г') || lowered.endsWith('кг');
+                  };
                   const buttons = Array.from(document.querySelectorAll('button, a, div, span'));
                   const results = [];
                   const seen = new Set();
@@ -224,7 +242,7 @@ class StoplistTool:
                       const lowered = line.toLowerCase();
                       if (['выбрать', 'фильтры', 'меню'].includes(lowered)) return false;
                       if (line.length < 3 || line.length > 120) return false;
-                      if (/\\d+\\s*(₽|руб|г|кг)$/.test(lowered)) return false;
+                      if (looksLikePriceOrWeight(lowered)) return false;
                       return true;
                     });
                     if (!product) continue;
