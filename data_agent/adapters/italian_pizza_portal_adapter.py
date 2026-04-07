@@ -1074,6 +1074,7 @@ class ItalianPizzaPortalAdapter:
                     return True
                 await button.click(timeout=3500, force=True)
                 if await self._wait_for_blank_hour_applied(page, hour_value):
+                    await page.wait_for_timeout(500)
                     logger.info("Blanks blank-hour chip clicked value=%s selector=data-cy", hour_value)
                     return True
             except Exception as exc:
@@ -1100,6 +1101,7 @@ class ItalianPizzaPortalAdapter:
             try:
                 await item.click(timeout=2500, force=True)
                 if await self._wait_for_blank_hour_applied(page, hour_value):
+                    await page.wait_for_timeout(500)
                     logger.info("Blanks blank-hour chip clicked value=%s idx=%s", hour_value, idx)
                     return True
             except Exception as exc:
@@ -1150,40 +1152,93 @@ class ItalianPizzaPortalAdapter:
     const match = String(value || "").match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/i);
     return match ? match.slice(1, 4).map(Number) : null;
   };
-  const isRedLike = (backgroundColor, className, rowLabel, value) => {
-    const rgb = parseRgb(backgroundColor);
-    if (rgb) {
-      const [r, g, b] = rgb;
-      if (r >= 180 && g <= 160 && b <= 160) {
-        return true;
+  const hasRedDominance = (rgb) => {
+    if (!rgb) return false;
+    const [r, g, b] = rgb;
+    return r >= 150 && r - Math.max(g, b) >= 25 && g <= 220 && b <= 220;
+  };
+  const styleLooksRed = (style, rawStyle = "") => {
+    const colors = [
+      style.backgroundColor,
+      style.color,
+      style.borderTopColor,
+      style.borderRightColor,
+      style.borderBottomColor,
+      style.borderLeftColor,
+      style.fill,
+      style.stroke,
+      rawStyle,
+    ];
+    return colors.some((value) => hasRedDominance(parseRgb(value)));
+  };
+  const attrsLookRed = (node) => {
+    const blob = [
+      node.className || "",
+      node.getAttribute?.("data-cy") || "",
+      node.getAttribute?.("data-testid") || "",
+      node.getAttribute?.("title") || "",
+      node.getAttribute?.("aria-label") || "",
+      node.getAttribute?.("style") || "",
+    ].join(" ");
+    return /jss261|red|danger|error|critical|alarm|negative|alert|overload|limit|warning/i.test(blob);
+  };
+  const inspectCell = (cell, rowLabel, value) => {
+    const queue = [cell, ...Array.from(cell.querySelectorAll("*")).slice(0, 40)];
+    for (const node of queue) {
+      const style = getComputedStyle(node);
+      const rawStyle = String(node.getAttribute?.("style") || "");
+      if (styleLooksRed(style, rawStyle) || attrsLookRed(node)) {
+        return {
+          matched: true,
+          sample: {
+            tag: String(node.tagName || "").toLowerCase(),
+            class_name: String(node.className || ""),
+            data_cy: String(node.getAttribute?.("data-cy") || ""),
+            background_color: style.backgroundColor || "",
+            text_color: style.color || "",
+            border_color: style.borderTopColor || "",
+          },
+        };
       }
-    }
-    const cls = String(className || "");
-    if (/jss261|red|danger|error|critical|alarm/i.test(cls)) {
-      return true;
     }
     const normalizedRow = clean(rowLabel).toLowerCase();
     const normalizedValue = clean(value).replace(",", ".");
     if (normalizedRow === "остаток") {
       const numeric = Number(normalizedValue);
       if (!Number.isNaN(numeric) && numeric <= 0) {
-        return true;
+        return {
+          matched: true,
+          sample: {
+            tag: String(cell.tagName || "").toLowerCase(),
+            class_name: String(cell.className || ""),
+            data_cy: String(cell.getAttribute?.("data-cy") || ""),
+            background_color: getComputedStyle(cell).backgroundColor || "",
+            text_color: getComputedStyle(cell).color || "",
+            border_color: getComputedStyle(cell).borderTopColor || "",
+          },
+        };
       }
     }
-    return false;
+    return { matched: false, sample: null };
   };
 
   const cards = Array.from(document.querySelectorAll("[data-cy^='timesection-']"));
   const signals = [];
+  const styledCellSamples = [];
+  let tableCount = 0;
   for (const card of cards) {
     const slotId = clean((card.getAttribute("data-cy") || "").replace("timesection-", ""));
-    const tables = Array.from(card.querySelectorAll("table[data-cy^='delivery-']"));
+    const tables = Array.from(card.querySelectorAll("table"));
+    tableCount += tables.length;
     let fallbackColumns = [];
     for (const table of tables) {
       const headRows = Array.from(table.querySelectorAll("thead tr"));
-      const headerParts = Array.from(headRows[0]?.querySelectorAll("h5") || []).map((node) => clean(node.innerText)).filter(Boolean);
-      const service = headerParts[0] || "";
-      const timeRange = headerParts[1] || "";
+      const headerParts = Array.from(
+        table.querySelectorAll("thead h5, thead h4, thead h3, caption, [data-cy*='header'] h5, [data-cy*='header'] h4")
+      ).map((node) => clean(node.innerText)).filter(Boolean);
+      const cardHeadings = Array.from(card.querySelectorAll("h5, h4, h3")).map((node) => clean(node.innerText)).filter(Boolean);
+      const service = headerParts[0] || cardHeadings[0] || "";
+      const timeRange = headerParts[1] || cardHeadings[1] || slotId;
       const parsedColumns = Array.from(headRows[1]?.querySelectorAll("th") || []).slice(1).map((node) => clean(node.innerText));
       const hasNamedColumns = parsedColumns.some((item) => item);
       const columns = hasNamedColumns ? parsedColumns : fallbackColumns;
@@ -1199,10 +1254,20 @@ class ItalianPizzaPortalAdapter:
         tds.slice(1).forEach((td, idx) => {
           const column = columns[idx] || `Колонка ${idx + 1}`;
           const value = clean(td.innerText);
-          const backgroundColor = getComputedStyle(td).backgroundColor || "";
-          const className = String(td.className || "");
-          if (!isRedLike(backgroundColor, className, rowLabel, value)) {
+          const cellMatch = inspectCell(td, rowLabel, value);
+          if (!cellMatch.matched) {
             return;
+          }
+          if (styledCellSamples.length < 20) {
+            styledCellSamples.push({
+              slot_id: slotId,
+              service,
+              time_range: timeRange,
+              column,
+              row_label: rowLabel,
+              value,
+              ...cellMatch.sample,
+            });
           }
 
           const key = `${service}|${timeRange}|${column}`;
@@ -1218,8 +1283,12 @@ class ItalianPizzaPortalAdapter:
           grouped.get(key).rows.push({
             row_label: rowLabel,
             value,
-            background_color: backgroundColor,
-            class_name: className,
+            background_color: cellMatch.sample?.background_color || "",
+            text_color: cellMatch.sample?.text_color || "",
+            border_color: cellMatch.sample?.border_color || "",
+            class_name: cellMatch.sample?.class_name || "",
+            data_cy: cellMatch.sample?.data_cy || "",
+            matched_tag: cellMatch.sample?.tag || "",
           });
         });
       }
@@ -1232,8 +1301,10 @@ class ItalianPizzaPortalAdapter:
 
   return {
     slot_count: cards.length,
+    table_count: tableCount,
     first_slot: clean((cards[0]?.getAttribute("data-cy") || "").replace("timesection-", "")),
     signals,
+    styled_cell_samples: styledCellSamples,
   };
 }
 """
@@ -1287,11 +1358,16 @@ class ItalianPizzaPortalAdapter:
         inspected_hours: list[str] = []
         inspected_slots: list[str] = []
         aggregated_signals: list[dict] = []
+        observed_slot_counts: list[int] = []
+        observed_table_counts: list[int] = []
+        styled_cell_samples: list[dict] = []
 
         if not scan_hours:
             snapshot = await self._read_blank_red_signals(page)
             if snapshot.get("first_slot"):
                 inspected_slots.append(snapshot["first_slot"])
+            observed_slot_counts.append(int(snapshot.get("slot_count") or 0))
+            observed_table_counts.append(int(snapshot.get("table_count") or 0))
             report_text, has_red_flags = self._build_blank_report_from_signals(
                 point_name=point_name,
                 period_hint=period_hint,
@@ -1305,8 +1381,10 @@ class ItalianPizzaPortalAdapter:
                 "visible_period_controls": await self._visible_blank_hour_controls(page),
                 "inspected_hours": inspected_hours,
                 "inspected_slots": inspected_slots,
-                "slot_count": snapshot.get("slot_count") or 0,
+                "slot_count": max(observed_slot_counts or [0]),
+                "table_count": max(observed_table_counts or [0]),
                 "red_signal_count": len(snapshot.get("signals") or []),
+                "styled_cell_samples": snapshot.get("styled_cell_samples") or [],
             }
 
         for hour_value in scan_hours:
@@ -1323,7 +1401,13 @@ class ItalianPizzaPortalAdapter:
             snapshot = await self._read_blank_red_signals(page)
             if snapshot.get("first_slot"):
                 inspected_slots.append(snapshot["first_slot"])
+            observed_slot_counts.append(int(snapshot.get("slot_count") or 0))
+            observed_table_counts.append(int(snapshot.get("table_count") or 0))
             aggregated_signals.extend(snapshot.get("signals") or [])
+            for sample in snapshot.get("styled_cell_samples") or []:
+                if len(styled_cell_samples) >= 20:
+                    break
+                styled_cell_samples.append(sample)
 
         unique_signals: list[dict] = []
         seen_keys: set[str] = set()
@@ -1358,8 +1442,10 @@ class ItalianPizzaPortalAdapter:
             "visible_period_controls": await self._visible_blank_hour_controls(page),
             "inspected_hours": inspected_hours,
             "inspected_slots": inspected_slots,
-            "slot_count": len(inspected_slots) * 12 if inspected_slots else 0,
+            "slot_count": max(observed_slot_counts or [0]),
+            "table_count": max(observed_table_counts or [0]),
             "red_signal_count": len(unique_signals),
+            "styled_cell_samples": styled_cell_samples,
         }
 
     async def _iter_period_controls(self, page, max_items: int = 200) -> list[tuple[int, str]]:

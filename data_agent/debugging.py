@@ -131,7 +131,7 @@ def _summarize_tool_result(tool_name: str, result: Dict[str, Any]) -> dict:
     if url:
         item["url"] = _compact_text(str(url), limit=240)
 
-    for key in ("point_selected", "period_selected", "address_filled", "products_found"):
+    for key in ("point_selected", "period_selected", "address_filled", "products_found", "slot_count", "table_count", "red_signal_count"):
         if key in diagnostics:
             item[key] = diagnostics[key]
 
@@ -140,10 +140,38 @@ def _summarize_tool_result(tool_name: str, result: Dict[str, Any]) -> dict:
         if value:
             item[key] = _compact_text(str(value), limit=160)
 
-    for key in ("point_candidates", "visible_point_controls", "visible_period_controls"):
+    for key in ("point_candidates", "visible_point_controls", "visible_period_controls", "inspected_hours", "inspected_slots"):
         value = diagnostics.get(key)
         if isinstance(value, list) and value:
             item[key] = [_compact_text(str(entry), limit=120) for entry in value[:12]]
+
+    styled_samples = diagnostics.get("styled_cell_samples")
+    if isinstance(styled_samples, list) and styled_samples:
+        compact_samples = []
+        for sample in styled_samples[:6]:
+            if not isinstance(sample, dict):
+                compact_samples.append(_compact_text(str(sample), limit=120))
+                continue
+            compact_samples.append(
+                _compact_text(
+                    " | ".join(
+                        str(part)
+                        for part in [
+                            sample.get("slot_id") or "",
+                            sample.get("service") or "",
+                            sample.get("time_range") or "",
+                            sample.get("column") or "",
+                            sample.get("row_label") or "",
+                            sample.get("value") or "",
+                            sample.get("class_name") or sample.get("data_cy") or sample.get("matched_tag") or "",
+                        ]
+                        if part
+                    ),
+                    limit=160,
+                )
+            )
+        if compact_samples:
+            item["styled_cell_samples"] = compact_samples
 
     target = _extract_target_label(result)
     if target:

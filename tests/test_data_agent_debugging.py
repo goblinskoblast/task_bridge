@@ -164,6 +164,48 @@ class DataAgentDebuggingTest(unittest.TestCase):
         self.assertEqual(tool["point_menu_opener"], "Выбрать точку продаж")
         self.assertEqual(tool["point_search_query"], "Верхний Уфалей")
 
+    def test_build_debug_artifacts_keeps_blank_scan_diagnostics(self):
+        payload, _ = build_debug_artifacts(
+            trace_id="trace-902",
+            scenario="blanks_report",
+            status="completed",
+            selected_tools=["blanks_tool"],
+            tool_results={
+                "blanks_tool": {
+                    "status": "ok",
+                    "diagnostics": {
+                        "stage": "report_read",
+                        "url": "https://tochka.example.com/#/",
+                        "slot_count": 12,
+                        "table_count": 4,
+                        "red_signal_count": 1,
+                        "inspected_hours": ["15", "18", "21"],
+                        "inspected_slots": ["T15:00", "T18:00", "T21:00"],
+                        "styled_cell_samples": [
+                            {
+                                "slot_id": "T15:00",
+                                "service": "Delivery",
+                                "time_range": "16:45 - 17:00",
+                                "column": "Snacks",
+                                "row_label": "Max",
+                                "value": "15",
+                                "class_name": "MuiTableCell-root red-cell",
+                            }
+                        ],
+                    },
+                }
+            },
+        )
+
+        tool = payload["tools"][0]
+        self.assertEqual(tool["slot_count"], 12)
+        self.assertEqual(tool["table_count"], 4)
+        self.assertEqual(tool["red_signal_count"], 1)
+        self.assertEqual(tool["inspected_hours"], ["15", "18", "21"])
+        self.assertEqual(tool["inspected_slots"], ["T15:00", "T18:00", "T21:00"])
+        self.assertIn("Delivery", tool["styled_cell_samples"][0])
+        self.assertIn("Snacks", tool["styled_cell_samples"][0])
+
 
 if __name__ == "__main__":
     unittest.main()
