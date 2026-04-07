@@ -1,6 +1,8 @@
 ﻿from __future__ import annotations
 
 import logging
+import json
+import hashlib
 from datetime import datetime
 
 import pytz
@@ -12,6 +14,7 @@ from db.database import get_db_session
 from db.models import DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentProfile, DataAgentSystem, User
 
 from .blanks_tool import blanks_tool
+from .debugging import build_debug_artifacts
 from .review_report import review_report_service
 from .stoplist_tool import stoplist_tool
 
@@ -34,6 +37,73 @@ def _resolve_monitor_delivery_chat_id(db, user: User | None) -> int | None:
     return None
 
 
+def _build_monitor_failure_hash(config: DataAgentMonitorConfig, result: dict) -> str:
+    payload = {
+        "monitor_type": config.monitor_type,
+        "point_name": config.point_name,
+        "result": result,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _build_monitor_failure_message(config: DataAgentMonitorConfig, summary: str) -> str:
+    return (
+        "Мониторинг завершился с ошибкой\n\n"
+        f"Тип: {config.monitor_type}\n"
+        f"Точка: {config.point_name}\n\n"
+        f"{summary}"
+    )[:3500]
+
+
+async def _record_monitor_failure(bot: Bot, db, config: DataAgentMonitorConfig, result: dict, tool_name: str) -> None:
+    config.last_checked_at = datetime.utcnow()
+    config.last_status = result.get("status") or "failed"
+    config.last_result_json = result
+
+    failure_hash = result.get("alert_hash") or _build_monitor_failure_hash(config, result)
+    if failure_hash == config.last_alert_hash:
+        db.commit()
+        return
+
+    payload, summary = build_debug_artifacts(
+        trace_id=f"monitor-{config.id}",
+        scenario=f"{config.monitor_type}_monitor",
+        status="failed",
+        selected_tools=[tool_name],
+        tool_results={tool_name: result},
+    )
+
+    event = DataAgentMonitorEvent(
+        user_id=config.user_id,
+        config_id=config.id,
+        system_name=config.system_name,
+        monitor_type=config.monitor_type,
+        point_name=config.point_name,
+        severity="error",
+        title=f"Мониторинг завершился с ошибкой: {config.point_name}",
+        body=summary,
+        event_hash=failure_hash,
+        sent_to_telegram=False,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    user = db.query(User).filter(User.id == config.user_id).first()
+    delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user)
+    if delivery_chat_id:
+        await bot.send_message(
+            chat_id=delivery_chat_id,
+            text=_build_monitor_failure_message(config, summary),
+        )
+        event.sent_to_telegram = True
+
+    config.last_alert_hash = failure_hash
+    config.last_result_json = payload
+    db.commit()
+
+
 async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
     db = get_db_session()
     try:
@@ -48,9 +118,16 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
             .first()
         )
         if not system:
-            config.last_status = "system_not_found"
-            config.last_checked_at = datetime.utcnow()
-            db.commit()
+            await _record_monitor_failure(
+                bot,
+                db,
+                config,
+                {
+                    "status": "system_not_connected",
+                    "message": "Italian Pizza портал не подключён для мониторинга бланков.",
+                },
+                "blanks_tool",
+            )
             return
 
         result = await blanks_tool.inspect_point(
@@ -60,8 +137,13 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
             point_name=config.point_name,
         )
 
+        result_status = result.get("status") or "ok"
+        if result_status in {"failed", "error", "system_not_connected"}:
+            await _record_monitor_failure(bot, db, config, result, "blanks_tool")
+            return
+
         config.last_checked_at = datetime.utcnow()
-        config.last_status = "ok"
+        config.last_status = result_status
         config.last_result_json = result
 
         if result.get("has_red_flags") and result.get("alert_hash") != config.last_alert_hash:
@@ -116,15 +198,18 @@ async def _run_stoplist_monitor(bot: Bot, config: DataAgentMonitorConfig) -> Non
             point_name=config.point_name,
         )
 
+        result_status = result.get("status") or "ok"
+        if result_status in {"failed", "error", "system_not_connected"}:
+            await _record_monitor_failure(bot, db, config, result, "stoplist_tool")
+            return
+
         config.last_checked_at = datetime.utcnow()
-        config.last_status = result.get("status") or "ok"
+        config.last_status = result_status
         config.last_result_json = result
 
         report_text = str(result.get("report_text") or "").strip()
         report_hash = result.get("alert_hash") or None
         if report_text and report_hash is None:
-            import hashlib
-
             report_hash = hashlib.sha256(report_text.encode("utf-8", errors="ignore")).hexdigest()
 
         if report_hash and report_hash != config.last_alert_hash:
@@ -181,15 +266,18 @@ async def _run_reviews_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None
 
         result = await review_report_service.build_report_for_window_label(window_label)
 
+        result_status = result.get("status") or "ok"
+        if result_status in {"failed", "error", "system_not_connected"}:
+            await _record_monitor_failure(bot, db, config, result, "review_tool")
+            return
+
         config.last_checked_at = datetime.utcnow()
-        config.last_status = result.get("status") or "ok"
+        config.last_status = result_status
         config.last_result_json = result
 
         report_text = str(result.get("report_text") or "").strip()
         report_hash = result.get("alert_hash") or None
         if report_text and report_hash is None:
-            import hashlib
-
             report_hash = hashlib.sha256(report_text.encode("utf-8", errors="ignore")).hexdigest()
 
         if report_hash and report_hash != config.last_alert_hash:
