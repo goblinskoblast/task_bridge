@@ -20,12 +20,13 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
             "Тестовая точка",
             "Портал вернул отказ в доступе.",
             "текущий бланк",
-            diagnostics={"stage": "login_submit"},
+            diagnostics={"stage": "login_submit", "point_selected": False},
         )
         self.assertEqual(result["status"], "failed")
         self.assertFalse(result["has_red_flags"])
         self.assertIn("Портал вернул отказ", result["report_text"])
         self.assertEqual(result["diagnostics"]["stage"], "login_submit")
+        self.assertFalse(result["diagnostics"]["point_selected"])
 
 
 if __name__ == "__main__":

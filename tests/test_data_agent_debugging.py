@@ -49,6 +49,34 @@ class DataAgentDebuggingTest(unittest.TestCase):
         self.assertIn("Этап: login_submit", summary)
         self.assertIn("portal.example.com/login", summary)
 
+    def test_build_debug_artifacts_includes_selection_diagnostics(self):
+        payload, summary = build_debug_artifacts(
+            trace_id="trace-789",
+            scenario="stoplist_report",
+            status="failed",
+            selected_tools=["stoplist_tool"],
+            tool_results={
+                "stoplist_tool": {
+                    "status": "failed",
+                    "message": "Не удалось подтвердить выбор точки.",
+                    "diagnostics": {
+                        "stage": "confirm_point",
+                        "url": "https://pizza.example.com/store",
+                        "point_selected": False,
+                        "address_filled": False,
+                        "products_found": 0,
+                    },
+                }
+            },
+        )
+
+        self.assertFalse(payload["tools"][0]["point_selected"])
+        self.assertFalse(payload["tools"][0]["address_filled"])
+        self.assertEqual(payload["tools"][0]["products_found"], 0)
+        self.assertIn("Точка: не подтверждена", summary)
+        self.assertIn("Адрес: не удалось заполнить", summary)
+        self.assertIn("Найдено позиций: 0", summary)
+
     def test_build_debug_artifacts_uses_failed_target_error(self):
         payload, summary = build_debug_artifacts(
             trace_id="trace-456",

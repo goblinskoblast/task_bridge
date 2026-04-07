@@ -93,6 +93,18 @@ def render_debug_summary(payload: Dict[str, Any]) -> str:
             lines.append(f"Цель: {primary_tool['target']}")
         if primary_tool.get("url"):
             lines.append(f"URL: {primary_tool['url']}")
+        if primary_tool.get("point_selected") is False:
+            lines.append("Точка: не подтверждена")
+        if primary_tool.get("period_selected") is False:
+            lines.append("Период: не подтверждён")
+        if primary_tool.get("address_filled") is False:
+            lines.append("Адрес: не удалось заполнить")
+        if primary_tool.get("matched_point"):
+            lines.append(f"Точка в UI: {primary_tool['matched_point']}")
+        if primary_tool.get("matched_period"):
+            lines.append(f"Период в UI: {primary_tool['matched_period']}")
+        if primary_tool.get("products_found") is not None:
+            lines.append(f"Найдено позиций: {primary_tool['products_found']}")
     elif payload.get("error_message"):
         lines.append(f"Причина: {payload['error_message']}")
 
@@ -117,6 +129,15 @@ def _summarize_tool_result(tool_name: str, result: Dict[str, Any]) -> dict:
     url = diagnostics.get("url")
     if url:
         item["url"] = _compact_text(str(url), limit=240)
+
+    for key in ("point_selected", "period_selected", "address_filled", "products_found"):
+        if key in diagnostics:
+            item[key] = diagnostics[key]
+
+    for key in ("matched_point", "matched_period"):
+        value = diagnostics.get(key)
+        if value:
+            item[key] = _compact_text(str(value), limit=160)
 
     target = _extract_target_label(result)
     if target:

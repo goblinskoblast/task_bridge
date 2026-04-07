@@ -10,6 +10,49 @@ logger = logging.getLogger(__name__)
 
 
 class ItalianPizzaPortalAdapter:
+    def _build_diagnostics(self, stage: str, url: str, **extra) -> dict:
+        diagnostics = {"stage": stage, "url": url}
+        for key, value in extra.items():
+            if value is None:
+                continue
+            diagnostics[key] = value
+        return diagnostics
+
+    def _point_variants(self, point_name: str) -> list[str]:
+        variants: list[str] = []
+        for raw in [point_name, point_name.split(",")[0], point_name.split(",")[-1].strip()]:
+            normalized = re.sub(r"\s+", " ", (raw or "").strip())
+            if normalized and normalized not in variants:
+                variants.append(normalized)
+        return variants
+
+    def _point_appears_selected(self, text: str, point_name: str) -> bool:
+        lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+        return any(
+            candidate.lower() in lowered
+            for candidate in self._point_variants(point_name)
+            if len(candidate) >= 3
+        )
+
+    async def _select_point(self, page, point_name: str) -> dict:
+        matched_point = None
+        for candidate in self._point_variants(point_name):
+            locator = page.locator(f"text={candidate}")
+            if await locator.count() == 0:
+                continue
+            try:
+                await locator.first.click(timeout=3000)
+                await page.wait_for_timeout(1500)
+                matched_point = candidate
+                break
+            except Exception:
+                continue
+        return {
+            "selected": matched_point is not None,
+            "matched_point": matched_point,
+            "point_candidates": self._point_variants(point_name),
+        }
+
     def _detect_terminal_issue(self, text: str) -> str | None:
         lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
         if not lowered:
@@ -126,13 +169,13 @@ class ItalianPizzaPortalAdapter:
                 except Exception:
                     continue
 
-    async def _select_period(self, page, period_hint: str) -> None:
+    async def _select_period(self, page, period_hint: str) -> dict:
         if not period_hint:
-            return
+            return {"selected": True, "matched_period": None, "visible_period_controls": []}
         lowered = period_hint.lower()
         candidates = self._period_candidates(lowered)
         if not candidates:
-            return
+            return {"selected": False, "matched_period": None, "visible_period_controls": []}
         for candidate in candidates:
             locator = page.locator(f"text={candidate}")
             if await locator.count() > 0:
@@ -140,7 +183,7 @@ class ItalianPizzaPortalAdapter:
                     await locator.first.click(timeout=3000)
                     await page.wait_for_timeout(1500)
                     logger.info("Blanks period selected candidate=%s", candidate)
-                    return
+                    return {"selected": True, "matched_period": candidate, "visible_period_controls": []}
                 except Exception:
                     continue
         visible_controls = await self._visible_period_controls(page)
@@ -148,8 +191,17 @@ class ItalianPizzaPortalAdapter:
         await self._open_period_menu_if_needed(page)
         if await self._click_best_period_candidate(page, candidates):
             await page.wait_for_timeout(1500)
-            return
+            return {
+                "selected": True,
+                "matched_period": candidates[0],
+                "visible_period_controls": visible_controls[:10],
+            }
         logger.info("Blanks period selector not found for period=%s candidates=%s", period_hint, candidates)
+        return {
+            "selected": False,
+            "matched_period": None,
+            "visible_period_controls": visible_controls[:10],
+        }
 
     def _normalize_report(self, point_name: str, data: str) -> tuple[str, bool]:
         raw = (data or "").strip()
@@ -214,20 +266,28 @@ class ItalianPizzaPortalAdapter:
                         point_name,
                         issue,
                         period_hint,
-                        diagnostics={"stage": stage, "url": current_url},
+                        diagnostics=self._build_diagnostics(stage, current_url),
                     )
                 stage = "point_selection"
-                point_candidates = [point_name, point_name.split(",")[0], point_name.split(",")[-1].strip()]
-                for candidate in point_candidates:
-                    locator = page.locator(f"text={candidate}")
-                    if await locator.count() > 0:
-                        try:
-                            await locator.first.click(timeout=3000)
-                            await page.wait_for_timeout(1500)
-                            current_url = page.url
-                            break
-                        except Exception:
-                            continue
+                point_result = await self._select_point(page, point_name)
+                current_url = page.url
+                point_selected = point_result["selected"]
+                if not point_selected:
+                    body_text = await page.locator("body").inner_text()
+                    point_selected = self._point_appears_selected(body_text, point_name)
+                if not point_selected:
+                    return self._build_failed_result(
+                        point_name,
+                        "Не удалось выбрать нужную точку на портале.",
+                        period_hint,
+                        diagnostics=self._build_diagnostics(
+                            stage,
+                            current_url,
+                            point_selected=False,
+                            matched_point=point_result["matched_point"],
+                            point_candidates=point_result["point_candidates"],
+                        ),
+                    )
                 stage = "report_navigation"
                 for candidate in ["Отчеты", "Отчёты", "Отчет по перегрузкам", "Отчёт по перегрузкам", "Перегрузки", "Бланк загрузки"]:
                     locator = page.locator(f"text={candidate}")
@@ -239,7 +299,7 @@ class ItalianPizzaPortalAdapter:
                         except Exception:
                             continue
                 stage = "period_selection"
-                await self._select_period(page, period_hint)
+                period_result = await self._select_period(page, period_hint)
                 stage = "report_read"
                 body = (await page.locator("body").inner_text())[:8000]
                 issue = self._detect_terminal_issue(body)
@@ -248,7 +308,15 @@ class ItalianPizzaPortalAdapter:
                         point_name,
                         issue,
                         period_hint,
-                        diagnostics={"stage": stage, "url": page.url},
+                        diagnostics=self._build_diagnostics(
+                            stage,
+                            page.url,
+                            point_selected=point_selected,
+                            matched_point=point_result["matched_point"],
+                            period_selected=period_result["selected"],
+                            matched_period=period_result["matched_period"],
+                            visible_period_controls=period_result["visible_period_controls"],
+                        ),
                     )
                 if period_hint:
                     body = f"Период: {period_hint}\n{body}"
@@ -261,7 +329,15 @@ class ItalianPizzaPortalAdapter:
                     "alert_hash": alert_hash,
                     "report_text": report_text,
                     "period_hint": period_hint or "текущий бланк",
-                    "diagnostics": {"stage": stage, "url": page.url},
+                    "diagnostics": self._build_diagnostics(
+                        stage,
+                        page.url,
+                        point_selected=point_selected,
+                        matched_point=point_result["matched_point"],
+                        period_selected=period_result["selected"],
+                        matched_period=period_result["matched_period"],
+                        visible_period_controls=period_result["visible_period_controls"],
+                    ),
                 }
             except Exception as exc:
                 logger.error(
@@ -276,7 +352,7 @@ class ItalianPizzaPortalAdapter:
                     point_name,
                     f"Техническая ошибка при проверке бланков: {exc}",
                     period_hint,
-                    diagnostics={"stage": stage, "url": current_url},
+                    diagnostics=self._build_diagnostics(stage, current_url),
                 )
             finally:
                 await context.close()

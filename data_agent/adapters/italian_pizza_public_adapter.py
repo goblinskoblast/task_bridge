@@ -15,6 +15,20 @@ _CATEGORY_STOPWORDS = {
 
 
 class ItalianPizzaPublicAdapter:
+    def _build_diagnostics(self, stage: str, url: str, **extra) -> dict:
+        diagnostics = {"stage": stage, "url": url}
+        for key, value in extra.items():
+            if value is None:
+                continue
+            diagnostics[key] = value
+        return diagnostics
+
+    def _page_excerpt(self, text: str, limit: int = 280) -> str:
+        normalized = re.sub(r"\s+", " ", (text or "").strip())
+        if len(normalized) <= limit:
+            return normalized
+        return normalized[: limit - 3].rstrip() + "..."
+
     def _detect_public_page_issue(self, text: str) -> str | None:
         lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
         if not lowered:
@@ -343,13 +357,31 @@ class ItalianPizzaPublicAdapter:
                 await self._dismiss_common_overlays(page)
                 issue = self._detect_public_page_issue(await page.locator("body").inner_text())
                 if issue:
-                    return self._build_failed_result(point.display_name, issue, diagnostics={"stage": stage, "url": current_url})
+                    return self._build_failed_result(
+                        point.display_name,
+                        issue,
+                        diagnostics=self._build_diagnostics(stage, current_url),
+                    )
                 stage = "address_modal"
                 await self._open_address_modal(page, point)
                 stage = "delivery_mode"
                 await self._set_delivery_mode(page)
                 stage = "address_fill"
-                await self._fill_address(page, point)
+                address_filled = await self._fill_address(page, point)
+                if not address_filled:
+                    body = (await page.locator("body").inner_text())[:2000]
+                    return self._build_failed_result(
+                        point.display_name,
+                        "Не удалось выбрать адрес на публичном сайте.",
+                        diagnostics=self._build_diagnostics(
+                            stage,
+                            page.url,
+                            address_filled=False,
+                            selected=False,
+                            products_found=0,
+                            page_excerpt=self._page_excerpt(body),
+                        ),
+                    )
                 stage = "confirm_point"
                 selected = await self._confirm_selected_point(page, point)
                 logger.info("Stoplist point selected=%s point=%s", selected, point.display_name)
@@ -373,7 +405,31 @@ class ItalianPizzaPublicAdapter:
                     body = (await page.locator("body").inner_text())[:2000]
                     issue = self._detect_public_page_issue(body)
                     if issue:
-                        return self._build_failed_result(point.display_name, issue, diagnostics={"stage": stage, "url": page.url})
+                        return self._build_failed_result(
+                            point.display_name,
+                            issue,
+                            diagnostics=self._build_diagnostics(
+                                stage,
+                                page.url,
+                                address_filled=address_filled,
+                                selected=selected,
+                                products_found=0,
+                                page_excerpt=self._page_excerpt(body),
+                            ),
+                        )
+                    if not selected:
+                        return self._build_failed_result(
+                            point.display_name,
+                            "Не удалось подтвердить выбор точки на публичном сайте.",
+                            diagnostics=self._build_diagnostics(
+                                stage,
+                                page.url,
+                                address_filled=address_filled,
+                                selected=False,
+                                products_found=0,
+                                page_excerpt=self._page_excerpt(body),
+                            ),
+                        )
                     report_text = (
                         f"Точка: {point.display_name}\n"
                         "Статус: не удалось выделить недоступные позиции детерминированно.\n"
@@ -386,7 +442,13 @@ class ItalianPizzaPublicAdapter:
                     "selected": selected,
                     "report_text": report_text,
                     "alert_hash": None,
-                    "diagnostics": {"stage": stage, "url": page.url},
+                    "diagnostics": self._build_diagnostics(
+                        stage,
+                        page.url,
+                        address_filled=address_filled,
+                        selected=selected,
+                        products_found=len(cleaned),
+                    ),
                 }
             except Exception as exc:
                 logger.error(
@@ -400,7 +462,7 @@ class ItalianPizzaPublicAdapter:
                 return self._build_failed_result(
                     point.display_name,
                     f"Техническая ошибка при проверке стоп-листа: {exc}",
-                    diagnostics={"stage": stage, "url": current_url},
+                    diagnostics=self._build_diagnostics(stage, current_url),
                 )
             finally:
                 await context.close()

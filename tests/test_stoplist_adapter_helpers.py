@@ -26,12 +26,13 @@ class StoplistAdapterHelpersTest(unittest.TestCase):
         result = self.adapter._build_failed_result(
             "Екатеринбург, Сулимова 31А",
             "Публичный сайт временно недоступен.",
-            diagnostics={"stage": "goto"},
+            diagnostics={"stage": "goto", "selected": False, "products_found": 0},
         )
         self.assertEqual(result["status"], "failed")
         self.assertFalse(result["selected"])
         self.assertIn("временно недоступен", result["report_text"])
         self.assertEqual(result["diagnostics"]["stage"], "goto")
+        self.assertEqual(result["diagnostics"]["products_found"], 0)
 
 
 if __name__ == "__main__":
