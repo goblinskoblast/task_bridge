@@ -16,10 +16,16 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         self.assertEqual(issue, "Портал вернул отказ в доступе.")
 
     def test_build_failed_result_marks_status_failed(self):
-        result = self.adapter._build_failed_result("Тестовая точка", "Портал вернул отказ в доступе.", "текущий бланк")
+        result = self.adapter._build_failed_result(
+            "Тестовая точка",
+            "Портал вернул отказ в доступе.",
+            "текущий бланк",
+            diagnostics={"stage": "login_submit"},
+        )
         self.assertEqual(result["status"], "failed")
         self.assertFalse(result["has_red_flags"])
         self.assertIn("Портал вернул отказ", result["report_text"])
+        self.assertEqual(result["diagnostics"]["stage"], "login_submit")
 
 
 if __name__ == "__main__":

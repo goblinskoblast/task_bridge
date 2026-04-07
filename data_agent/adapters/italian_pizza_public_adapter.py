@@ -27,7 +27,7 @@ class ItalianPizzaPublicAdapter:
             return "Публичный сайт временно недоступен."
         return None
 
-    def _build_failed_result(self, point_name: str, issue_text: str) -> dict:
+    def _build_failed_result(self, point_name: str, issue_text: str, diagnostics: dict | None = None) -> dict:
         report_text = f"Точка: {point_name}\nСтатус: {issue_text}"
         return {
             "status": "failed",
@@ -36,6 +36,7 @@ class ItalianPizzaPublicAdapter:
             "report_text": report_text,
             "message": issue_text,
             "alert_hash": None,
+            "diagnostics": diagnostics or {},
         }
 
     def _looks_like_order_action(self, text: str) -> bool:
@@ -319,12 +320,15 @@ class ItalianPizzaPublicAdapter:
                 "status": "failed",
                 "point_name": point_name,
                 "report_text": f"Не удалось определить публичную точку для стоп-листа: {point_name}",
+                "diagnostics": {"stage": "resolve_point"},
             }
         try:
             from playwright.async_api import async_playwright
         except ImportError as exc:
             raise RuntimeError("Playwright is not installed") from exc
 
+        stage = "launch"
+        current_url = point.public_url.rstrip("/") + "/"
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=True)
             context = await browser.new_context(locale="ru-RU", timezone_id="Europe/Moscow")
@@ -332,19 +336,27 @@ class ItalianPizzaPublicAdapter:
             try:
                 target_url = point.public_url.rstrip("/") + "/"
                 logger.info("Stoplist public browser run point=%s url=%s", point.display_name, target_url)
+                stage = "goto"
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
+                current_url = page.url
                 await page.wait_for_timeout(2000)
                 await self._dismiss_common_overlays(page)
                 issue = self._detect_public_page_issue(await page.locator("body").inner_text())
                 if issue:
-                    return self._build_failed_result(point.display_name, issue)
+                    return self._build_failed_result(point.display_name, issue, diagnostics={"stage": stage, "url": current_url})
+                stage = "address_modal"
                 await self._open_address_modal(page, point)
+                stage = "delivery_mode"
                 await self._set_delivery_mode(page)
+                stage = "address_fill"
                 await self._fill_address(page, point)
+                stage = "confirm_point"
                 selected = await self._confirm_selected_point(page, point)
                 logger.info("Stoplist point selected=%s point=%s", selected, point.display_name)
+                stage = "scroll"
                 await self._scroll_all(page)
                 await self._dismiss_common_overlays(page)
+                stage = "collect_products"
                 product_candidates = await self._collect_disabled_products(page)
                 logger.info("Stoplist disabled button candidates point=%s items=%s", point.display_name, product_candidates[:60])
                 cleaned: list[str] = []
@@ -361,7 +373,7 @@ class ItalianPizzaPublicAdapter:
                     body = (await page.locator("body").inner_text())[:2000]
                     issue = self._detect_public_page_issue(body)
                     if issue:
-                        return self._build_failed_result(point.display_name, issue)
+                        return self._build_failed_result(point.display_name, issue, diagnostics={"stage": stage, "url": page.url})
                     report_text = (
                         f"Точка: {point.display_name}\n"
                         "Статус: не удалось выделить недоступные позиции детерминированно.\n"
@@ -374,7 +386,22 @@ class ItalianPizzaPublicAdapter:
                     "selected": selected,
                     "report_text": report_text,
                     "alert_hash": None,
+                    "diagnostics": {"stage": stage, "url": page.url},
                 }
+            except Exception as exc:
+                logger.error(
+                    "Stoplist adapter failed point=%s stage=%s url=%s error=%s",
+                    point.display_name,
+                    stage,
+                    current_url,
+                    exc,
+                    exc_info=True,
+                )
+                return self._build_failed_result(
+                    point.display_name,
+                    f"Техническая ошибка при проверке стоп-листа: {exc}",
+                    diagnostics={"stage": stage, "url": current_url},
+                )
             finally:
                 await context.close()
                 await browser.close()

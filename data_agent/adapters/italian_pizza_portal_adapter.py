@@ -22,7 +22,13 @@ class ItalianPizzaPortalAdapter:
             return "Портал вернул отказ в доступе."
         return None
 
-    def _build_failed_result(self, point_name: str, issue_text: str, period_hint: str) -> dict:
+    def _build_failed_result(
+        self,
+        point_name: str,
+        issue_text: str,
+        period_hint: str,
+        diagnostics: dict | None = None,
+    ) -> dict:
         report_text = f"Точка: {point_name}\nСтатус: {issue_text}"
         return {
             "status": "failed",
@@ -32,6 +38,7 @@ class ItalianPizzaPortalAdapter:
             "report_text": report_text,
             "period_hint": period_hint or "текущий бланк",
             "message": issue_text,
+            "diagnostics": diagnostics or {},
         }
 
     def _period_candidates(self, lowered: str) -> list[str]:
@@ -173,29 +180,43 @@ class ItalianPizzaPortalAdapter:
             from playwright.async_api import async_playwright
         except ImportError as exc:
             raise RuntimeError("Playwright is not installed") from exc
+        stage = "launch"
+        current_url = url
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=True)
             context = await browser.new_context(locale="ru-RU", timezone_id="Europe/Moscow")
             page = await context.new_page()
             try:
+                stage = "goto"
                 await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                current_url = page.url
                 await page.wait_for_timeout(1200)
+                stage = "login_username"
                 for selector in ["input[name='username']", "input[name='login']", "input[type='email']"]:
                     if await page.locator(selector).count() > 0:
                         await page.fill(selector, username)
                         break
+                stage = "login_password"
                 for selector in ["input[type='password']", "input[name='password']"]:
                     if await page.locator(selector).count() > 0:
                         await page.fill(selector, password)
                         break
+                stage = "login_submit"
                 for selector in ["button[type='submit']", "button:has-text('Войти')", "button:has-text('Login')"]:
                     if await page.locator(selector).count() > 0:
                         await page.locator(selector).first.click()
                         break
                 await page.wait_for_timeout(1800)
+                current_url = page.url
                 issue = self._detect_terminal_issue(await page.locator("body").inner_text())
                 if issue:
-                    return self._build_failed_result(point_name, issue, period_hint)
+                    return self._build_failed_result(
+                        point_name,
+                        issue,
+                        period_hint,
+                        diagnostics={"stage": stage, "url": current_url},
+                    )
+                stage = "point_selection"
                 point_candidates = [point_name, point_name.split(",")[0], point_name.split(",")[-1].strip()]
                 for candidate in point_candidates:
                     locator = page.locator(f"text={candidate}")
@@ -203,22 +224,32 @@ class ItalianPizzaPortalAdapter:
                         try:
                             await locator.first.click(timeout=3000)
                             await page.wait_for_timeout(1500)
+                            current_url = page.url
                             break
                         except Exception:
                             continue
+                stage = "report_navigation"
                 for candidate in ["Отчеты", "Отчёты", "Отчет по перегрузкам", "Отчёт по перегрузкам", "Перегрузки", "Бланк загрузки"]:
                     locator = page.locator(f"text={candidate}")
                     if await locator.count() > 0:
                         try:
                             await locator.first.click(timeout=3000)
                             await page.wait_for_timeout(1500)
+                            current_url = page.url
                         except Exception:
                             continue
+                stage = "period_selection"
                 await self._select_period(page, period_hint)
+                stage = "report_read"
                 body = (await page.locator("body").inner_text())[:8000]
                 issue = self._detect_terminal_issue(body)
                 if issue:
-                    return self._build_failed_result(point_name, issue, period_hint)
+                    return self._build_failed_result(
+                        point_name,
+                        issue,
+                        period_hint,
+                        diagnostics={"stage": stage, "url": page.url},
+                    )
                 if period_hint:
                     body = f"Период: {period_hint}\n{body}"
                 report_text, has_red_flags = self._normalize_report(point_name, body)
@@ -230,7 +261,23 @@ class ItalianPizzaPortalAdapter:
                     "alert_hash": alert_hash,
                     "report_text": report_text,
                     "period_hint": period_hint or "текущий бланк",
+                    "diagnostics": {"stage": stage, "url": page.url},
                 }
+            except Exception as exc:
+                logger.error(
+                    "Blanks adapter failed point=%s stage=%s url=%s error=%s",
+                    point_name,
+                    stage,
+                    current_url,
+                    exc,
+                    exc_info=True,
+                )
+                return self._build_failed_result(
+                    point_name,
+                    f"Техническая ошибка при проверке бланков: {exc}",
+                    period_hint,
+                    diagnostics={"stage": stage, "url": current_url},
+                )
             finally:
                 await context.close()
                 await browser.close()

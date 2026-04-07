@@ -34,6 +34,17 @@ class BrowserAgentHelpersTest(unittest.TestCase):
         self.assertIn("col1\tcol2", parsed)
         self.assertIn("A\tB", parsed)
 
+    def test_build_runtime_diagnostic(self):
+        text = self.agent._build_runtime_diagnostic(
+            stage="login",
+            url="https://example.com/login",
+            detail="invalid credentials",
+            last_action="click | selector=button[type='submit']",
+        )
+        self.assertIn("stage=login", text)
+        self.assertIn("invalid credentials", text)
+        self.assertIn("last_action=", text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -57,6 +57,32 @@ class BrowserAgent:
     def __init__(self) -> None:
         self._last_download: Optional[str] = None
 
+    def _describe_action(self, action: dict | None) -> str:
+        if not action:
+            return "none"
+        action_name = str(action.get("action") or "unknown")
+        selector = str(action.get("selector") or "").strip()
+        reason = str(action.get("reason") or "").strip()
+        parts = [action_name]
+        if selector:
+            parts.append(f"selector={selector}")
+        if reason:
+            parts.append(f"reason={reason[:120]}")
+        return " | ".join(parts)
+
+    def _build_runtime_diagnostic(
+        self,
+        *,
+        stage: str,
+        url: str,
+        detail: str,
+        last_action: str = "",
+    ) -> str:
+        message = f"BROWSER_AGENT_DIAGNOSTIC stage={stage} url={url or '-'} detail={detail}"
+        if last_action:
+            message += f" last_action={last_action}"
+        return message[:1200]
+
     async def extract_data(
         self,
         url: str,
@@ -93,21 +119,37 @@ class BrowserAgent:
                     accept_downloads=True,
                 )
                 page = await context.new_page()
+                stage = "page_created"
 
                 try:
                     if progress_callback:
                         await progress_callback("Подключаюсь к внешней системе...")
 
+                    stage = "goto"
                     await page.goto(url, wait_until="domcontentloaded", timeout=self.TIMEOUT_PAGE)
                     await self._safe_wait(page)
                     logger.info("BrowserAgent page loaded url=%s", page.url)
 
+                    stage = "login"
                     login_result = await self._login(page, username, password, progress_callback)
                     logger.info("BrowserAgent login_result=%s", login_result)
                     if not login_result.get("success"):
-                        return login_result.get("error", "Не удалось выполнить вход в систему.")
+                        return self._build_runtime_diagnostic(
+                            stage=stage,
+                            url=page.url,
+                            detail=login_result.get("error", "Не удалось выполнить вход в систему."),
+                        )
 
+                    stage = "navigate_extract"
                     return await self._navigate_and_extract(page, user_task, progress_callback)
+                except Exception as exc:
+                    diagnostic = self._build_runtime_diagnostic(
+                        stage=stage,
+                        url=getattr(page, "url", url),
+                        detail=str(exc),
+                    )
+                    logger.error("BrowserAgent runtime failure %s", diagnostic, exc_info=True)
+                    raise RuntimeError(diagnostic) from exc
                 finally:
                     await context.close()
                     await browser.close()
@@ -182,6 +224,7 @@ class BrowserAgent:
         progress_callback: Optional[ProgressCallback] = None,
     ) -> str:
         screenshot_hashes: list[str] = []
+        last_action_summary = ""
         self._last_download = None
         page.on("download", lambda download: asyncio.create_task(self._save_download(download)))
 
@@ -219,13 +262,19 @@ class BrowserAgent:
                 await progress_callback(f"Шаг {step}/{self.MAX_STEPS}...")
 
             action = await self._decide_next_action(page, screenshot_b64, user_task, step)
+            last_action_summary = self._describe_action(action)
             logger.info("BrowserAgent action step=%s action=%s", step + 1, action)
             result = await self._execute_action(page, action)
 
             if result is not None:
                 return result
 
-        return "Не удалось собрать данные за отведённое число шагов Browser Agent."
+        return self._build_runtime_diagnostic(
+            stage="max_steps",
+            url=page.url,
+            detail=f"Не удалось собрать данные за {self.MAX_STEPS} шагов",
+            last_action=last_action_summary,
+        )
 
     async def _decide_next_action(self, page: Any, screenshot_b64: str, user_task: str, step: int) -> dict:
         visible_text = await page.locator("body").inner_text()
@@ -372,6 +421,8 @@ class BrowserAgent:
                     pass
             if clicked:
                 await self._safe_wait(page)
+            else:
+                logger.warning("BrowserAgent click action had no effect action=%s url=%s", action, page.url)
             return None
 
         if action_name == "fill":
@@ -394,6 +445,8 @@ class BrowserAgent:
                     pass
             if filled:
                 await self._safe_wait(page)
+            else:
+                logger.warning("BrowserAgent fill action had no effect action=%s url=%s", action, page.url)
             return None
 
         return None
