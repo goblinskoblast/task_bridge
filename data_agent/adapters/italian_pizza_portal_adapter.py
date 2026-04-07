@@ -1182,6 +1182,18 @@ class ItalianPizzaPortalAdapter:
     ].join(" ");
     return /jss261|red|danger|error|critical|alarm|negative|alert|overload|limit|warning/i.test(blob);
   };
+  const isVisuallyInteresting = (node) => {
+    const style = getComputedStyle(node);
+    const rawStyle = String(node.getAttribute?.("style") || "");
+    const className = String(node.className || "");
+    const bg = style.backgroundColor || "";
+    const color = style.color || "";
+    const border = style.borderTopColor || "";
+    const hasNonDefaultBackground = bg && !/255, 255, 255|rgba\\(0, 0, 0, 0\\)|transparent/i.test(bg);
+    const hasColoredText = hasRedDominance(parseRgb(color));
+    const hasColoredBorder = hasRedDominance(parseRgb(border));
+    return hasNonDefaultBackground || hasColoredText || hasColoredBorder || !!rawStyle || /jss|Mui|css-/i.test(className);
+  };
   const inspectCell = (cell, rowLabel, value) => {
     const queue = [cell, ...Array.from(cell.querySelectorAll("*")).slice(0, 40)];
     for (const node of queue) {
@@ -1254,6 +1266,22 @@ class ItalianPizzaPortalAdapter:
         tds.slice(1).forEach((td, idx) => {
           const column = columns[idx] || `Колонка ${idx + 1}`;
           const value = clean(td.innerText);
+          if (styledCellSamples.length < 20 && isVisuallyInteresting(td)) {
+            styledCellSamples.push({
+              slot_id: slotId,
+              service,
+              time_range: timeRange,
+              column,
+              row_label: rowLabel,
+              value,
+              tag: String(td.tagName || "").toLowerCase(),
+              class_name: String(td.className || ""),
+              data_cy: String(td.getAttribute?.("data-cy") || ""),
+              background_color: getComputedStyle(td).backgroundColor || "",
+              text_color: getComputedStyle(td).color || "",
+              border_color: getComputedStyle(td).borderTopColor || "",
+            });
+          }
           const cellMatch = inspectCell(td, rowLabel, value);
           if (!cellMatch.matched) {
             return;
@@ -1881,6 +1909,15 @@ class ItalianPizzaPortalAdapter:
                         ),
                     )
                 scan_result = await self._scan_blank_report(page, point_name, period_hint)
+                logger.info(
+                    "Blanks scan summary point=%s period=%s red_signals=%s slot_count=%s table_count=%s samples=%s",
+                    point_name,
+                    period_hint,
+                    scan_result.get("red_signal_count"),
+                    scan_result.get("slot_count"),
+                    scan_result.get("table_count"),
+                    (scan_result.get("styled_cell_samples") or [])[:5],
+                )
                 if scan_result.get("status") == "needs_period":
                     message = scan_result.get("message") or "Нужно уточнить период отчета по бланкам."
                     return {
@@ -1907,6 +1944,10 @@ class ItalianPizzaPortalAdapter:
                             route_label=report_context["route_label"],
                             inspected_hours=scan_result.get("inspected_hours"),
                             inspected_slots=scan_result.get("inspected_slots"),
+                            slot_count=scan_result.get("slot_count"),
+                            table_count=scan_result.get("table_count"),
+                            red_signal_count=scan_result.get("red_signal_count"),
+                            styled_cell_samples=scan_result.get("styled_cell_samples"),
                         ),
                     }
 
@@ -1938,7 +1979,9 @@ class ItalianPizzaPortalAdapter:
                         inspected_hours=scan_result.get("inspected_hours"),
                         inspected_slots=scan_result.get("inspected_slots"),
                         slot_count=scan_result.get("slot_count"),
+                        table_count=scan_result.get("table_count"),
                         red_signal_count=scan_result.get("red_signal_count"),
+                        styled_cell_samples=scan_result.get("styled_cell_samples"),
                     ),
                 }
             except Exception as exc:
