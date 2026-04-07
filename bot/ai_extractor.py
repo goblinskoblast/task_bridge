@@ -44,6 +44,8 @@ Core rules:
 - Build a short clean title. Remove greetings, direct addresses, filler, and repeated deadline wording when possible.
 - Preserve meeting metadata in description when present: address, meeting place, floor/room, call link, dial-in details.
 - description should keep the useful actionable details in natural language.
+- Always return title and description in Russian.
+- If the source text is in another language, translate the actionable content into Russian while preserving names, brands, links, email addresses, file names, and quoted identifiers.
 - assignee_usernames must be an array without @.
 - If a person is mentioned by name but no Telegram username is known, return the plain name in assignee_usernames.
 - Convert relative deadlines into absolute format YYYY-MM-DD HH:MM:SS when possible, otherwise null.
@@ -129,6 +131,9 @@ RUS_MONTHS = {
     "декабрь": 12,
     "декабря": 12,
 }
+
+CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
+LATIN_RE = re.compile(r"[A-Za-z]")
 
 IMPERATIVE_MARKERS = [
     "тебе нужно",
@@ -941,6 +946,70 @@ def _normalize_task_result(result: Optional[Dict[str, Any]], fallback_text: str 
     return result
 
 
+def _task_needs_russian_localization(task: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(task, dict):
+        return False
+
+    combined = "\n".join(
+        part.strip()
+        for part in [str(task.get("title") or ""), str(task.get("description") or "")]
+        if part and str(part).strip()
+    )
+    if not combined:
+        return False
+
+    latin_count = len(LATIN_RE.findall(combined))
+    has_cyrillic = bool(CYRILLIC_RE.search(combined))
+    return latin_count >= 8 and not has_cyrillic
+
+
+async def _localize_task_to_russian_if_needed(result: Optional[Dict[str, Any]], *, source: str) -> Optional[Dict[str, Any]]:
+    if source != "email" or not result or not result.get("has_task"):
+        return result
+
+    task = result.get("task") or {}
+    if not _task_needs_russian_localization(task):
+        return result
+
+    provider = get_ai_provider()
+    try:
+        translated = await provider.analyze_message(
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Переведи title и description задачи на русский язык. "
+                        "Сохрани смысл, имена, бренды, ссылки, email-адреса, названия файлов и идентификаторы. "
+                        "Верни только JSON формата "
+                        '{"title":"...","description":"..."}'
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"title: {task.get('title', '')}\n"
+                        f"description: {task.get('description', '')}"
+                    ),
+                },
+            ],
+            temperature=0.1,
+            max_tokens=400,
+            response_format={"type": "json_object"},
+        )
+    except Exception as exc:
+        logger.warning("Email task localization fallback used: %s", exc)
+        return result
+
+    translated_title = str(translated.get("title") or "").strip()
+    translated_description = str(translated.get("description") or "").strip()
+    if translated_title:
+        task["title"] = translated_title
+    if translated_description:
+        task["description"] = translated_description
+    result["task"] = task
+    return result
+
+
 async def _analyze_with_unified_prompt(
     source: str,
     current_text: str,
@@ -1030,6 +1099,7 @@ async def analyze_email_with_ai(
             body_text=email_payload["body"],
             attachments_text=email_payload["attachments_text"],
         )
+        normalized = await _localize_task_to_russian_if_needed(normalized, source="email")
         if normalized and normalized.get("has_task"):
             combined = "\n".join(
                 [
@@ -1057,7 +1127,8 @@ async def analyze_email_with_ai(
     )
     if fallback:
         logger.info("Email fallback extractor found task: %s", fallback)
-        return _normalize_task_result(fallback, fallback_text=raw_text)
+        normalized_fallback = _normalize_task_result(fallback, fallback_text=raw_text)
+        return await _localize_task_to_russian_if_needed(normalized_fallback, source="email")
 
     return {"has_task": False, "task": None}
 
