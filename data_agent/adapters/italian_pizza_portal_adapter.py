@@ -84,6 +84,34 @@ class ItalianPizzaPortalAdapter:
                 score += 2 if not any(ch.isdigit() for ch in token) else 4
         return score
 
+    def _point_specificity_score(self, text: str, point_name: str) -> int:
+        lowered = self._normalize_text(text)
+        address = point_name.split(",")[-1].strip()
+        address_tokens = [
+            token
+            for token in re.split(r"[\s,./-]+", self._normalize_text(address))
+            if len(token) >= 2
+        ]
+        hits = 0
+        for token in address_tokens:
+            if token in lowered:
+                hits += 1
+
+        specificity = hits * 3
+        if re.search(r"\(\d+\)", lowered):
+            specificity += 2
+        if len(lowered) >= 24:
+            specificity += 1
+        return specificity
+
+    def _point_menu_looks_open(self, visible_controls: list[str]) -> bool:
+        point_like_controls = [
+            text
+            for text in visible_controls
+            if re.search(r"\(\d+\)", text or "")
+        ]
+        return len(point_like_controls) >= 2
+
     def _is_point_menu_control(self, text: str) -> bool:
         lowered = self._normalize_text(text)
         return any(marker in lowered for marker in ["выбрать точку продаж", "точка продаж", "выберите точку"])
@@ -373,10 +401,41 @@ class ItalianPizzaPortalAdapter:
         return None
 
     async def _click_point_variant_if_visible(self, page, point_name: str) -> str | None:
-        matched = await self._click_visible_text_candidate(page, self._point_variants(point_name))
-        if matched:
-            logger.info("Blanks point selected via dom text=%s", matched)
-            return matched
+        controls = [
+            item
+            for item in await self._iter_point_controls(page, point_name)
+            if item[2] > 0
+        ]
+        if controls:
+            locator = page.locator(self._POINT_CONTROL_SELECTOR)
+            best_idx, best_text, best_score = sorted(
+                controls,
+                key=lambda item: (
+                    -item[2],
+                    -self._point_specificity_score(item[1], point_name),
+                    -len(item[1]),
+                    item[0],
+                ),
+            )[0]
+            try:
+                await locator.nth(best_idx).scroll_into_view_if_needed()
+                await locator.nth(best_idx).click(timeout=2500, force=True)
+                await page.wait_for_timeout(1000)
+                logger.info(
+                    "Blanks point selected via scored control idx=%s text=%s score=%s specificity=%s",
+                    best_idx,
+                    best_text,
+                    best_score,
+                    self._point_specificity_score(best_text, point_name),
+                )
+                return best_text
+            except Exception as exc:
+                logger.info(
+                    "Blanks scored point click failed idx=%s text=%s error=%s",
+                    best_idx,
+                    best_text,
+                    exc,
+                )
 
         for candidate in self._point_variants(point_name):
             for exact in (True, False):
@@ -403,6 +462,31 @@ class ItalianPizzaPortalAdapter:
                             exc,
                         )
         return None
+
+    async def _ensure_point_menu_collapsed(self, page, point_name: str) -> tuple[bool, list[str]]:
+        visible_controls = await self._visible_point_controls(page, point_name)
+        if not self._point_menu_looks_open(visible_controls):
+            return True, visible_controls
+
+        for action_name in ("escape", "outside_click", "opener_click"):
+            try:
+                if action_name == "escape":
+                    await page.keyboard.press("Escape")
+                elif action_name == "outside_click":
+                    await page.mouse.click(20, 20)
+                else:
+                    await self._click_visible_text_candidate(page, ["Выбрать точку продаж", "Точка продаж"])
+                await page.wait_for_timeout(900)
+            except Exception:
+                pass
+
+            visible_controls = await self._visible_point_controls(page, point_name)
+            if not self._point_menu_looks_open(visible_controls):
+                logger.info("Blanks point menu collapsed via action=%s", action_name)
+                return True, visible_controls
+
+        logger.info("Blanks point menu still open controls=%s", visible_controls[:10])
+        return False, visible_controls
 
     async def _search_point_if_possible(self, page, point_name: str) -> str | None:
         queries = []
@@ -556,6 +640,9 @@ class ItalianPizzaPortalAdapter:
             matched_point, visible_point_controls = await self._click_best_point_candidate(page, point_name)
         else:
             visible_point_controls = await self._visible_point_controls(page, point_name)
+        point_menu_collapsed = False
+        if matched_point is not None:
+            point_menu_collapsed, visible_point_controls = await self._ensure_point_menu_collapsed(page, point_name)
         return {
             "selected": matched_point is not None,
             "matched_point": matched_point,
@@ -563,6 +650,7 @@ class ItalianPizzaPortalAdapter:
             "visible_point_controls": visible_point_controls,
             "opener_text": opener_text,
             "search_query": search_query,
+            "point_menu_collapsed": point_menu_collapsed,
         }
 
     def _detect_terminal_issue(self, text: str) -> str | None:
@@ -727,6 +815,66 @@ class ItalianPizzaPortalAdapter:
             if text not in seen:
                 seen.append(text)
         return seen[:40]
+
+    async def _visible_report_controls(self, page, limit: int = 20) -> list[str]:
+        controls = await self._visible_point_control_meta(page, limit=limit)
+        return [item["text"] for item in controls if item.get("text")]
+
+    async def _open_report_context_if_needed(self, page, point_name: str) -> dict:
+        body = (await page.locator("body").inner_text())[:8000]
+        visible_period_controls = await self._visible_period_controls(page)
+        visible_report_controls = await self._visible_report_controls(page)
+        if self._contains_report_context(body) or visible_period_controls:
+            return {
+                "body": body,
+                "visible_period_controls": visible_period_controls,
+                "visible_report_controls": visible_report_controls,
+                "route_label": None,
+            }
+
+        route_labels = [
+            "Бланк загрузки",
+            "Бланки загрузки",
+            "Отчет по перегрузкам",
+            "Отчёт по перегрузкам",
+            "Перегрузки",
+            "Новые заказы",
+            "Заказы",
+            "Стоп-Лист",
+            "Отчеты",
+            "Отчёты",
+        ]
+        for label in route_labels:
+            clicked_text = await self._click_visible_text_candidate(page, [label])
+            if not clicked_text:
+                continue
+            await page.wait_for_timeout(1000)
+            await self._ensure_point_menu_collapsed(page, point_name)
+            body = (await page.locator("body").inner_text())[:8000]
+            visible_period_controls = await self._visible_period_controls(page)
+            visible_report_controls = await self._visible_report_controls(page)
+            logger.info(
+                "Blanks report route probe label=%s clicked=%s periods=%s controls=%s excerpt=%s",
+                label,
+                clicked_text,
+                visible_period_controls[:8],
+                visible_report_controls[:8],
+                self._normalize_text(body)[:180],
+            )
+            if self._contains_report_context(body) or visible_period_controls:
+                return {
+                    "body": body,
+                    "visible_period_controls": visible_period_controls,
+                    "visible_report_controls": visible_report_controls,
+                    "route_label": label,
+                }
+
+        return {
+            "body": body,
+            "visible_period_controls": visible_period_controls,
+            "visible_report_controls": visible_report_controls,
+            "route_label": None,
+        }
 
     async def _click_best_period_candidate(self, page, candidates: list[str]) -> bool:
         wanted = [candidate.lower() for candidate in candidates if candidate]
@@ -947,19 +1095,22 @@ class ItalianPizzaPortalAdapter:
                 stage = "point_selection"
                 point_result = await self._select_point(page, point_name)
                 current_url = page.url
-                point_selected = point_result["selected"]
+                point_selected = point_result["selected"] and point_result.get("point_menu_collapsed", False)
                 if not point_selected:
                     body_text = await page.locator("body").inner_text()
-                    point_selected = self._point_appears_selected(body_text, point_name)
+                    point_selected = self._point_appears_selected(body_text, point_name) and not self._point_menu_looks_open(
+                        point_result["visible_point_controls"]
+                    )
                 if not point_selected:
                     return self._build_failed_result(
                         point_name,
-                        "Не удалось выбрать нужную точку на портале.",
+                        "Не удалось подтвердить выбор нужной точки на портале.",
                         period_hint,
                         diagnostics=self._build_diagnostics(
                             stage,
                             current_url,
                             point_selected=False,
+                            point_menu_collapsed=point_result.get("point_menu_collapsed", False),
                             matched_point=point_result["matched_point"],
                             point_candidates=point_result["point_candidates"],
                             visible_point_controls=point_result["visible_point_controls"],
@@ -969,15 +1120,8 @@ class ItalianPizzaPortalAdapter:
                         ),
                     )
                 stage = "report_navigation"
-                for candidate in ["Отчеты", "Отчёты", "Отчет по перегрузкам", "Отчёт по перегрузкам", "Перегрузки", "Бланк загрузки"]:
-                    locator = page.locator(f"text={candidate}")
-                    if await locator.count() > 0:
-                        try:
-                            await locator.first.click(timeout=3000)
-                            await page.wait_for_timeout(900)
-                            current_url = page.url
-                        except Exception:
-                            continue
+                report_context = await self._open_report_context_if_needed(page, point_name)
+                current_url = page.url
                 stage = "period_selection"
                 period_result = await self._select_period(page, period_hint)
                 if period_hint and not period_result["selected"]:
@@ -995,6 +1139,7 @@ class ItalianPizzaPortalAdapter:
                                 stage,
                                 page.url,
                                 point_selected=point_selected,
+                                point_menu_collapsed=point_result.get("point_menu_collapsed", False),
                                 matched_point=point_result["matched_point"],
                                 visible_point_controls=point_result["visible_point_controls"],
                                 point_menu_opener=point_result["opener_text"],
@@ -1002,6 +1147,8 @@ class ItalianPizzaPortalAdapter:
                                 period_selected=False,
                                 matched_period=period_result["matched_period"],
                                 visible_period_controls=period_result["visible_period_controls"],
+                                visible_report_controls=report_context["visible_report_controls"],
+                                route_label=report_context["route_label"],
                             ),
                         }
                     return self._build_failed_result(
@@ -1012,6 +1159,7 @@ class ItalianPizzaPortalAdapter:
                             stage,
                             page.url,
                             point_selected=point_selected,
+                            point_menu_collapsed=point_result.get("point_menu_collapsed", False),
                             matched_point=point_result["matched_point"],
                             visible_point_controls=point_result["visible_point_controls"],
                             point_menu_opener=point_result["opener_text"],
@@ -1019,6 +1167,8 @@ class ItalianPizzaPortalAdapter:
                             period_selected=False,
                             matched_period=period_result["matched_period"],
                             visible_period_controls=period_result["visible_period_controls"],
+                            visible_report_controls=report_context["visible_report_controls"],
+                            route_label=report_context["route_label"],
                         ),
                     )
                 stage = "report_read"
@@ -1033,6 +1183,7 @@ class ItalianPizzaPortalAdapter:
                             stage,
                             page.url,
                             point_selected=point_selected,
+                            point_menu_collapsed=point_result.get("point_menu_collapsed", False),
                             matched_point=point_result["matched_point"],
                             visible_point_controls=point_result["visible_point_controls"],
                             point_menu_opener=point_result["opener_text"],
@@ -1040,6 +1191,9 @@ class ItalianPizzaPortalAdapter:
                             period_selected=period_result["selected"],
                             matched_period=period_result["matched_period"],
                             visible_period_controls=period_result["visible_period_controls"],
+                            visible_report_controls=report_context["visible_report_controls"],
+                            route_label=report_context["route_label"],
+                            page_excerpt=self._normalize_text(body)[:400],
                         ),
                     )
                 if self._looks_like_login_page(body):
@@ -1051,6 +1205,7 @@ class ItalianPizzaPortalAdapter:
                             stage,
                             page.url,
                             point_selected=point_selected,
+                            point_menu_collapsed=point_result.get("point_menu_collapsed", False),
                             matched_point=point_result["matched_point"],
                             visible_point_controls=point_result["visible_point_controls"],
                             point_menu_opener=point_result["opener_text"],
@@ -1058,6 +1213,9 @@ class ItalianPizzaPortalAdapter:
                             period_selected=period_result["selected"],
                             matched_period=period_result["matched_period"],
                             visible_period_controls=period_result["visible_period_controls"],
+                            visible_report_controls=report_context["visible_report_controls"],
+                            route_label=report_context["route_label"],
+                            page_excerpt=self._normalize_text(body)[:400],
                         ),
                     )
                 if not self._contains_report_context(body):
@@ -1069,6 +1227,7 @@ class ItalianPizzaPortalAdapter:
                             stage,
                             page.url,
                             point_selected=point_selected,
+                            point_menu_collapsed=point_result.get("point_menu_collapsed", False),
                             matched_point=point_result["matched_point"],
                             visible_point_controls=point_result["visible_point_controls"],
                             point_menu_opener=point_result["opener_text"],
@@ -1076,6 +1235,9 @@ class ItalianPizzaPortalAdapter:
                             period_selected=period_result["selected"],
                             matched_period=period_result["matched_period"],
                             visible_period_controls=period_result["visible_period_controls"],
+                            visible_report_controls=report_context["visible_report_controls"],
+                            route_label=report_context["route_label"],
+                            page_excerpt=self._normalize_text(body)[:400],
                         ),
                     )
                 if period_hint:
@@ -1093,6 +1255,7 @@ class ItalianPizzaPortalAdapter:
                         stage,
                         page.url,
                         point_selected=point_selected,
+                        point_menu_collapsed=point_result.get("point_menu_collapsed", False),
                         matched_point=point_result["matched_point"],
                         visible_point_controls=point_result["visible_point_controls"],
                         point_menu_opener=point_result["opener_text"],
@@ -1100,6 +1263,8 @@ class ItalianPizzaPortalAdapter:
                         period_selected=period_result["selected"],
                         matched_period=period_result["matched_period"],
                         visible_period_controls=period_result["visible_period_controls"],
+                        visible_report_controls=report_context["visible_report_controls"],
+                        route_label=report_context["route_label"],
                     ),
                 }
             except Exception as exc:

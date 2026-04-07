@@ -28,6 +28,23 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         weak = self.adapter._point_match_score("Екатеринбург Малышева 5", "Верхний Уфалей, Ленина 147")
         self.assertGreater(strong, weak)
 
+    def test_point_specificity_prefers_full_row_with_address(self):
+        detailed = self.adapter._point_specificity_score("Артемовский (1) Гагарина, 2А", "Артёмовский, Гагарина 2а")
+        short = self.adapter._point_specificity_score("Артемовский (1)", "Артёмовский, Гагарина 2а")
+        self.assertGreater(detailed, short)
+
+    def test_point_menu_looks_open_for_multiple_point_rows(self):
+        self.assertTrue(
+            self.adapter._point_menu_looks_open(
+                [
+                    "Артемовский (1) Гагарина, 2А",
+                    "Асбест (1) Ленина, 5",
+                    "Верхний Уфалей (1) Ленина, 147",
+                ]
+            )
+        )
+        self.assertFalse(self.adapter._point_menu_looks_open(["Артемовский (1) Гагарина, 2А"]))
+
     def test_normalize_report_filters_navigation_noise(self):
         report_text, has_red_flags = self.adapter._normalize_report(
             "Тестовая точка",
