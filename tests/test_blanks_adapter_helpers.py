@@ -58,6 +58,16 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         self.assertEqual(result["diagnostics"]["stage"], "login_submit")
         self.assertFalse(result["diagnostics"]["point_selected"])
 
+    def test_period_candidates_support_six_hours(self):
+        candidates = self.adapter._period_candidates("за последние 6 часов")
+        self.assertIn("6 часов", candidates)
+
+    def test_build_period_help_message_uses_visible_controls(self):
+        message = self.adapter._build_period_help_message("за последние 6 часов", ["3 часа", "12 часов", "Сутки"])
+        self.assertIn("6 часов", message)
+        self.assertIn("3 часа", message)
+        self.assertIn("12 часов", message)
+
 
 if __name__ == "__main__":
     unittest.main()

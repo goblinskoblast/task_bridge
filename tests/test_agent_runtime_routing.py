@@ -23,7 +23,7 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
 
         self.assertEqual(decision.scenario, "blanks_report")
         self.assertEqual(decision.slots.get("point_name"), "Екатеринбург, ул. Сулимова, 31А")
-        self.assertEqual(decision.slots.get("period_hint"), "предыдущие 3 часа")
+        self.assertEqual(decision.slots.get("period_hint"), "за последние 3 часа")
 
     def test_merge_decisions_does_not_carry_point_into_unrelated_scenario(self):
         session = AgentSessionSnapshot(
@@ -78,6 +78,13 @@ class AgentRuntimeAsyncRoutingTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(decision.scenario, "stoplist_report")
         mocked_llm.assert_not_awaited()
+
+
+class AgentRuntimePeriodHintTest(unittest.TestCase):
+    def test_extract_period_hint_supports_six_hours(self):
+        runtime = DataAgentRuntime()
+        period = runtime._extract_period_hint("проверь бланки за последние 6 часов")
+        self.assertEqual(period, "за последние 6 часов")
 
 
 if __name__ == "__main__":

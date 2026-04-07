@@ -258,17 +258,39 @@ class DataAgentRuntime:
 
     def _extract_period_hint(self, message: str) -> Optional[str]:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
-        if "12 часов" in lowered or "предыдущие 12" in lowered:
-            return "предыдущие 12 часов"
-        if "3 часа" in lowered or "три час" in lowered or "предыдущие 3" in lowered:
-            return "предыдущие 3 часа"
-        if "сутки" in lowered or "24 часа" in lowered:
-            return "последние сутки"
-        if "сегодня" in lowered:
-            return "сегодня"
         if "текущий бланк" in lowered:
             return "текущий бланк"
+        if "сегодня" in lowered:
+            return "сегодня"
+        if "сутки" in lowered or "24 часа" in lowered:
+            return "последние сутки"
+
+        hours_match = re.search(r"(?:за|последние|предыдущие)?\s*(\d+)\s*час", lowered)
+        if hours_match:
+            hours = int(hours_match.group(1))
+            if hours == 24:
+                return "последние сутки"
+            if hours > 0:
+                return f"за последние {hours} {self._hours_word(hours)}"
+
+        if "три часа" in lowered:
+            return "за последние 3 часа"
+        if "шесть часов" in lowered:
+            return "за последние 6 часов"
+        if "двенадцать часов" in lowered:
+            return "за последние 12 часов"
+        if "пятнадцать часов" in lowered:
+            return "за последние 15 часов"
         return None
+
+    def _hours_word(self, hours: int) -> str:
+        remainder_10 = hours % 10
+        remainder_100 = hours % 100
+        if remainder_10 == 1 and remainder_100 != 11:
+            return "час"
+        if remainder_10 in {2, 3, 4} and remainder_100 not in {12, 13, 14}:
+            return "часа"
+        return "часов"
 
     def _extract_monitor_interval(self, message: str) -> Optional[int]:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()

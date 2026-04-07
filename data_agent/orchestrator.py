@@ -180,6 +180,8 @@ class DataAgentOrchestrator:
         if review_result:
             if review_result.get("status") == "ok":
                 parts.append(review_result.get("report_text", "Отчёт по отзывам собран."))
+            elif review_result.get("status") in {"needs_point", "needs_period", "awaiting_user_input"}:
+                parts.append(review_result.get("message", "Нужно уточнить параметры для отчёта по отзывам."))
             else:
                 parts.append(
                     "Отчёт по отзывам сейчас недоступен. "
@@ -190,6 +192,8 @@ class DataAgentOrchestrator:
         if stoplist_result:
             if stoplist_result.get("status") == "ok":
                 parts.append(stoplist_result.get("report_text", "Отчёт по стоп-листу собран."))
+            elif stoplist_result.get("status") in {"needs_point", "needs_period", "awaiting_user_input"}:
+                parts.append(stoplist_result.get("message", "Нужно уточнить параметры для стоп-листа."))
             else:
                 parts.append(
                     "Стоп-лист сейчас не удалось собрать. "
@@ -200,6 +204,8 @@ class DataAgentOrchestrator:
         if blanks_result:
             if blanks_result.get("status") == "ok":
                 parts.append(blanks_result.get("report_text", "Проверка бланков выполнена."))
+            elif blanks_result.get("status") in {"needs_point", "needs_period", "awaiting_user_input"}:
+                parts.append(blanks_result.get("message", "Нужно уточнить параметры для отчёта по бланкам."))
             else:
                 parts.append(
                     "Проверку бланков сейчас не удалось выполнить. "

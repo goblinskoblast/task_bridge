@@ -650,15 +650,54 @@ class ItalianPizzaPortalAdapter:
         }
 
     def _period_candidates(self, lowered: str) -> list[str]:
+        normalized = self._normalize_text(lowered)
+        if "текущий бланк" in normalized:
+            return ["текущий бланк"]
+        if "сегодня" in normalized:
+            return ["Сегодня"]
+        if "сутки" in normalized or "24 часа" in normalized:
+            return ["Сутки", "24 часа", "За сутки", "Последние сутки", "24"]
+        if "15 часов" in normalized:
+            return ["15 часов", "15ч", "За 15 часов", "Последние 15 часов", "15"]
+        if "12 часов" in normalized:
+            return ["12 часов", "12ч", "За 12 часов", "Последние 12 часов", "12"]
+        if "6 часов" in normalized:
+            return ["6 часов", "6ч", "За 6 часов", "Последние 6 часов", "6"]
         if "12 часов" in lowered:
             return ["12 часов", "12ч", "За 12 часов", "Последние 12 часов", "12"]
         if "3 часа" in lowered:
             return ["3 часа", "3ч", "За 3 часа", "Последние 3 часа", "3"]
         if "сутки" in lowered or "24 часа" in lowered:
             return ["Сутки", "24 часа", "За сутки", "Последние сутки", "24"]
-        if "сегодня" in lowered:
-            return ["Сегодня"]
+        hours_match = re.search(r"(\d+)\s*час", normalized)
+        if hours_match:
+            hours = int(hours_match.group(1))
+            if hours > 0:
+                return [
+                    f"{hours} часов",
+                    f"{hours} часа",
+                    f"{hours} час",
+                    f"{hours}ч",
+                    f"За {hours} часов",
+                    f"Последние {hours} часов",
+                    str(hours),
+                ]
         return []
+
+    def _build_period_help_message(self, period_hint: str, visible_controls: list[str]) -> str:
+        supported: list[str] = []
+        for item in visible_controls:
+            normalized = re.sub(r"\s+", " ", (item or "").strip())
+            if not normalized:
+                continue
+            if normalized not in supported:
+                supported.append(normalized)
+        if not supported:
+            supported = ["текущий бланк", "3 часа", "12 часов", "15 часов", "сутки"]
+        return (
+            f"Период «{period_hint}» сейчас не удалось применить на портале. "
+            f"Попробуйте один из доступных вариантов: {', '.join(supported[:8])}."
+        )
 
     async def _iter_period_controls(self, page, max_items: int = 200) -> list[tuple[int, str]]:
         locator = page.locator("button, [role='button'], [role='tab'], label, span, div, li, option")
@@ -676,7 +715,7 @@ class ItalianPizzaPortalAdapter:
                 continue
             normalized = re.sub(r"\s+", " ", text)
             lowered = normalized.lower()
-            if not ("час" in lowered or "сут" in lowered or "сегод" in lowered or lowered in {"12", "3", "24", "15"}):
+            if not ("час" in lowered or "сут" in lowered or "сегод" in lowered or lowered in {"12", "6", "3", "24", "15"}):
                 continue
             results.append((idx, normalized))
         return results
@@ -722,7 +761,7 @@ class ItalianPizzaPortalAdapter:
             return False
 
     async def _open_period_menu_if_needed(self, page) -> None:
-        openers = ["15 часов", "12 часов", "3 часа", "Сутки", "Период", "За период"]
+        openers = ["15 часов", "12 часов", "6 часов", "3 часа", "Сутки", "Период", "За период"]
         for candidate in openers:
             locator = page.locator(f"text={candidate}")
             if await locator.count() > 0:
@@ -738,9 +777,25 @@ class ItalianPizzaPortalAdapter:
         if not period_hint:
             return {"selected": True, "matched_period": None, "visible_period_controls": []}
         lowered = period_hint.lower()
+        if "текущий бланк" in self._normalize_text(lowered):
+            return {
+                "selected": True,
+                "matched_period": "текущий бланк",
+                "visible_period_controls": [],
+                "status": "current_blank",
+            }
         candidates = self._period_candidates(lowered)
         if not candidates:
-            return {"selected": False, "matched_period": None, "visible_period_controls": []}
+            visible_controls = await self._visible_period_controls(page)
+            await self._open_period_menu_if_needed(page)
+            visible_controls = await self._visible_period_controls(page)
+            return {
+                "selected": False,
+                "matched_period": None,
+                "visible_period_controls": visible_controls[:10],
+                "status": "needs_period",
+                "message": self._build_period_help_message(period_hint, visible_controls),
+            }
         for candidate in candidates:
             locator = page.locator(f"text={candidate}")
             if await locator.count() > 0:
@@ -754,6 +809,7 @@ class ItalianPizzaPortalAdapter:
         visible_controls = await self._visible_period_controls(page)
         logger.info("Blanks visible period controls=%s", visible_controls)
         await self._open_period_menu_if_needed(page)
+        visible_controls = await self._visible_period_controls(page)
         if await self._click_best_period_candidate(page, candidates):
             await page.wait_for_timeout(900)
             return {
@@ -762,6 +818,21 @@ class ItalianPizzaPortalAdapter:
                 "visible_period_controls": visible_controls[:10],
             }
         logger.info("Blanks period selector not found for period=%s candidates=%s", period_hint, candidates)
+        supported_controls = [item.lower() for item in visible_controls]
+        supported = any(
+            candidate.lower() in item or item in candidate.lower()
+            for candidate in candidates
+            for item in supported_controls
+            if item
+        )
+        if not supported:
+            return {
+                "selected": False,
+                "matched_period": None,
+                "visible_period_controls": visible_controls[:10],
+                "status": "needs_period",
+                "message": self._build_period_help_message(period_hint, visible_controls),
+            }
         return {
             "selected": False,
             "matched_period": None,
@@ -910,6 +981,29 @@ class ItalianPizzaPortalAdapter:
                 stage = "period_selection"
                 period_result = await self._select_period(page, period_hint)
                 if period_hint and not period_result["selected"]:
+                    if period_result.get("status") == "needs_period":
+                        message = period_result.get("message") or "Нужно уточнить период отчета по бланкам."
+                        return {
+                            "status": "needs_period",
+                            "point_name": point_name,
+                            "has_red_flags": False,
+                            "alert_hash": None,
+                            "report_text": f"Точка: {point_name}\nСтатус: {message}",
+                            "period_hint": period_hint or "текущий бланк",
+                            "message": message,
+                            "diagnostics": self._build_diagnostics(
+                                stage,
+                                page.url,
+                                point_selected=point_selected,
+                                matched_point=point_result["matched_point"],
+                                visible_point_controls=point_result["visible_point_controls"],
+                                point_menu_opener=point_result["opener_text"],
+                                point_search_query=point_result["search_query"],
+                                period_selected=False,
+                                matched_period=period_result["matched_period"],
+                                visible_period_controls=period_result["visible_period_controls"],
+                            ),
+                        }
                     return self._build_failed_result(
                         point_name,
                         "Не удалось выбрать нужный период на портале.",
