@@ -205,6 +205,56 @@ class ItalianPizzaPortalAdapter:
                 seen.append(text)
         return seen[:20]
 
+    async def _visible_point_control_meta(self, page, limit: int = 12) -> list[dict]:
+        items = await page.evaluate(
+            """
+            (selector) => {
+              const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();
+              const isVisible = (node) => {
+                if (!(node instanceof Element)) return false;
+                const style = window.getComputedStyle(node);
+                if (!style || style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+                  return false;
+                }
+                const rect = node.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+              };
+              return Array.from(document.querySelectorAll(selector))
+                .filter((node) => isVisible(node))
+                .map((node) => ({
+                  text: normalize(node.innerText || node.textContent || ""),
+                  tag: (node.tagName || "").toLowerCase(),
+                  role: normalize(node.getAttribute("role") || ""),
+                  href: normalize(node.getAttribute("href") || ""),
+                  className: normalize(typeof node.className === "string" ? node.className : ""),
+                }))
+                .filter((item) => item.text && item.text.length <= 160);
+            }
+            """,
+            self._POINT_CONTROL_SELECTOR,
+        )
+        seen: list[dict] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            text = re.sub(r"\s+", " ", str(item.get("text") or "").strip())
+            if not text:
+                continue
+            if any(existing["text"] == text for existing in seen):
+                continue
+            seen.append(
+                {
+                    "text": text,
+                    "tag": str(item.get("tag") or "").strip(),
+                    "role": str(item.get("role") or "").strip(),
+                    "href": str(item.get("href") or "").strip(),
+                    "className": str(item.get("className") or "").strip()[:120],
+                }
+            )
+            if len(seen) >= limit:
+                break
+        return seen
+
     async def _open_point_menu_if_needed(self, page) -> str | None:
         openers = [
             "Выбрать точку продаж",
@@ -218,7 +268,8 @@ class ItalianPizzaPortalAdapter:
         ]
         clicked_text = await self._click_visible_text_candidate(page, openers)
         if clicked_text:
-            logger.info("Blanks point opener clicked via dom text=%s", clicked_text)
+            control_meta = await self._visible_point_control_meta(page)
+            logger.info("Blanks point opener clicked via dom text=%s url=%s controls=%s", clicked_text, page.url, control_meta[:8])
             return clicked_text
         for candidate in openers:
             selectors = [
@@ -694,9 +745,11 @@ class ItalianPizzaPortalAdapter:
                         diagnostics=self._build_diagnostics(stage, current_url, page_excerpt=self._normalize_text(post_login_text)[:400]),
                     )
                 portal_controls, portal_text = await self._wait_for_portal_ready(page, point_name)
+                portal_meta = await self._visible_point_control_meta(page)
                 logger.info(
-                    "Blanks portal ready controls=%s excerpt=%s",
+                    "Blanks portal ready controls=%s meta=%s excerpt=%s",
                     portal_controls[:8],
+                    portal_meta[:8],
                     self._normalize_text(portal_text)[:160],
                 )
                 stage = "point_selection"
