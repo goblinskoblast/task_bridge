@@ -6,6 +6,7 @@ from typing import Any, Dict, Tuple
 FAILURE_STATUSES = {
     "failed",
     "error",
+    "not_configured",
     "system_not_connected",
     "no_systems_connected",
     "system_not_found",

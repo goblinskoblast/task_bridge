@@ -26,6 +26,17 @@ class DataAgentDebuggingTest(unittest.TestCase):
         )
         self.assertEqual(status, "completed")
 
+    def test_derive_response_status_marks_not_configured_as_failed(self):
+        status = derive_response_status(
+            {
+                "review_tool": {
+                    "status": "not_configured",
+                    "message": "Не задан REVIEWS_SHEET_URL",
+                }
+            }
+        )
+        self.assertEqual(status, "failed")
+
     def test_build_debug_artifacts_includes_stage_and_url(self):
         payload, summary = build_debug_artifacts(
             trace_id="trace-123",
