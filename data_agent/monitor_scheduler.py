@@ -48,12 +48,12 @@ def _build_monitor_failure_hash(config: DataAgentMonitorConfig, result: dict) ->
 
 
 def _build_monitor_failure_message(config: DataAgentMonitorConfig, summary: str) -> str:
-    return (
-        "Мониторинг завершился с ошибкой\n\n"
-        f"Тип: {config.monitor_type}\n"
-        f"Точка: {config.point_name}\n\n"
-        f"{summary}"
-    )[:3500]
+    templates = {
+        "stoplist": "Не удалось получить отчет по стоп-листу. Попробуйте позже.",
+        "blanks": "Не удалось получить отчет по бланкам. Попробуйте позже.",
+        "reviews": "Не удалось получить отчет по отзывам. Попробуйте позже.",
+    }
+    return templates.get(config.monitor_type, "Не удалось получить отчет. Попробуйте позже.")
 
 
 async def _record_monitor_failure(bot: Bot, db, config: DataAgentMonitorConfig, result: dict, tool_name: str) -> None:

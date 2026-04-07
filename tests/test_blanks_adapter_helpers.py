@@ -15,6 +15,31 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         issue = self.adapter._detect_terminal_issue("403 forbidden")
         self.assertEqual(issue, "Портал вернул отказ в доступе.")
 
+    def test_looks_like_login_page(self):
+        self.assertTrue(self.adapter._looks_like_login_page("Логин\nПароль\nВойти"))
+        self.assertFalse(self.adapter._looks_like_login_page("Отчет по перегрузкам\nКрасных бланков нет"))
+
+    def test_contains_report_context(self):
+        self.assertTrue(self.adapter._contains_report_context("Отчет по перегрузкам\nЕсть отклонения по лимиту"))
+        self.assertFalse(self.adapter._contains_report_context("Главная\nНастройки\nПрофиль"))
+
+    def test_normalize_report_filters_navigation_noise(self):
+        report_text, has_red_flags = self.adapter._normalize_report(
+            "Тестовая точка",
+            "\n".join(
+                [
+                    "Главная",
+                    "Настройки",
+                    "Отчет по перегрузкам",
+                    "Красный бланк по строке 12",
+                    "Лимит превышен",
+                ]
+            ),
+        )
+        self.assertTrue(has_red_flags)
+        self.assertNotIn("Главная", report_text)
+        self.assertIn("Красный бланк", report_text)
+
     def test_build_failed_result_marks_status_failed(self):
         result = self.adapter._build_failed_result(
             "Тестовая точка",

@@ -1,6 +1,7 @@
 import unittest
 
 from data_agent.adapters.italian_pizza_public_adapter import ItalianPizzaPublicAdapter
+from data_agent.italian_pizza import resolve_italian_pizza_point
 
 
 class StoplistAdapterHelpersTest(unittest.TestCase):
@@ -47,6 +48,30 @@ class StoplistAdapterHelpersTest(unittest.TestCase):
         self.assertIn("временно недоступен", result["report_text"])
         self.assertEqual(result["diagnostics"]["stage"], "goto")
         self.assertEqual(result["diagnostics"]["products_found"], 0)
+
+    def test_confirm_point_from_public_html_uses_city_address_and_slug(self):
+        point = resolve_italian_pizza_point("Верхний Уфалей, Ленина 147")
+        html = """
+        <html>
+          <head>
+            <title>Доставка пиццы Верхний Уфалей</title>
+            <meta itemprop="streetAddress" content="г. Верхний Уфалей ул. Ленина, д. 147" />
+          </head>
+        </html>
+        """
+        self.assertTrue(self.adapter._confirm_point_from_public_html(html, point, "https://ufaley.italianpizza.ru/"))
+        self.assertFalse(self.adapter._confirm_point_from_public_html(html, point, "https://ekb.italianpizza.ru/"))
+
+    def test_extract_stoplist_products_from_html(self):
+        html = """
+        {"status":"free","name":"Маргарита"}
+        {"status":"stop_list","id":"1","name":"Римские каникулы"}
+        {"status":"stop_list","id":"2","name":"Авторский чай: Мохито 300 мл"}
+        """
+        self.assertEqual(
+            self.adapter._extract_stoplist_products_from_html(html),
+            ["Римские каникулы", "Авторский чай: Мохито 300 мл"],
+        )
 
 
 if __name__ == "__main__":

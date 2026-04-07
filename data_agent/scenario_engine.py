@@ -44,10 +44,12 @@ class ReviewsReportScenario(BaseScenario):
 
     async def execute(self, *, user_id: int, user_message: str, slots: dict, systems: List[ConnectedSystem]) -> ScenarioExecution:
         point_name = slots.get("point_name")
-        if point_name:
+        if point_name and _should_use_public_reviews_browser(user_message):
             tool_result = await _run_public_reviews_browser(user_message, targets=[point_name])
         else:
-            tool_result = await review_report_service.build_report(user_message)
+            tool_result = await review_report_service.build_report(user_message, point_name=point_name)
+            if point_name and tool_result.get("status") == "not_configured":
+                tool_result = await _run_public_reviews_browser(user_message, targets=[point_name])
         return ScenarioExecution(selected_tools=list(self.selected_tools), tool_results={"review_tool": tool_result})
 
 
@@ -183,6 +185,11 @@ def _find_italian_pizza_system(db, user_id: int) -> Optional[DataAgentSystem]:
         .order_by(DataAgentSystem.last_connected_at.desc().nullslast(), DataAgentSystem.created_at.desc())
         .first()
     )
+
+
+def _should_use_public_reviews_browser(user_message: str) -> bool:
+    lowered = user_message.lower()
+    return any(marker in lowered for marker in ["2гис", "2gis", "яндекс", "yandex", "карты", "картах", "maps"])
 
 
 async def _run_public_reviews_browser(user_message: str, targets: List[str]) -> dict:

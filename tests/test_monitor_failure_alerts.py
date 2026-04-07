@@ -29,14 +29,12 @@ class MonitorFailureAlertsTest(unittest.TestCase):
         second = _build_monitor_failure_hash(self.config, result)
         self.assertEqual(first, second)
 
-    def test_build_monitor_failure_message_contains_type_and_point(self):
+    def test_build_monitor_failure_message_is_neutral(self):
         message = _build_monitor_failure_message(
             self.config,
             "Trace: monitor-12\nСценарий: blanks_monitor\nСтатус: failed",
         )
-        self.assertIn("Мониторинг завершился с ошибкой", message)
-        self.assertIn("Тип: blanks", message)
-        self.assertIn("Точка: Екатеринбург, Малышева 5", message)
+        self.assertEqual(message, "Не удалось получить отчет по бланкам. Попробуйте позже.")
 
 
 if __name__ == "__main__":

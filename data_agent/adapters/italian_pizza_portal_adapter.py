@@ -18,6 +18,10 @@ class ItalianPizzaPortalAdapter:
             diagnostics[key] = value
         return diagnostics
 
+    def _normalize_text(self, text: str) -> str:
+        normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
+        return normalized.replace("ё", "е")
+
     def _point_variants(self, point_name: str) -> list[str]:
         variants: list[str] = []
         for raw in [point_name, point_name.split(",")[0], point_name.split(",")[-1].strip()]:
@@ -64,6 +68,16 @@ class ItalianPizzaPortalAdapter:
         if any(token in lowered for token in ["нет доступа", "access denied", "403", "forbidden", "permission denied"]):
             return "Портал вернул отказ в доступе."
         return None
+
+    def _looks_like_login_page(self, text: str) -> bool:
+        lowered = self._normalize_text(text)
+        login_markers = ["логин", "пароль", "войти", "login", "password", "remember me"]
+        return sum(1 for marker in login_markers if marker in lowered) >= 2
+
+    def _contains_report_context(self, text: str) -> bool:
+        lowered = self._normalize_text(text)
+        report_markers = ["бланк", "перегруз", "отклон", "лимит", "норматив", "красн", "отчет", "отчёт"]
+        return any(marker in lowered for marker in report_markers)
 
     def _build_failed_result(
         self,
@@ -211,7 +225,23 @@ class ItalianPizzaPortalAdapter:
         filtered: list[str] = []
         for line in lines:
             lowered = line.lower()
-            if any(marker in lowered for marker in ["cookie", "войти", "login", "пароль", "скачать приложение"]):
+            if any(
+                marker in lowered
+                for marker in [
+                    "cookie",
+                    "войти",
+                    "login",
+                    "пароль",
+                    "логин",
+                    "скачать приложение",
+                    "главная",
+                    "настройки",
+                    "поддержка",
+                    "профиль",
+                    "выйти",
+                    "выберите точку",
+                ]
+            ):
                 continue
             filtered.append(line)
         signal_lines: list[str] = []
@@ -260,11 +290,19 @@ class ItalianPizzaPortalAdapter:
                         break
                 await page.wait_for_timeout(900)
                 current_url = page.url
-                issue = self._detect_terminal_issue(await page.locator("body").inner_text())
+                post_login_text = await page.locator("body").inner_text()
+                issue = self._detect_terminal_issue(post_login_text)
                 if issue:
                     return self._build_failed_result(
                         point_name,
                         issue,
+                        period_hint,
+                        diagnostics=self._build_diagnostics(stage, current_url),
+                    )
+                if self._looks_like_login_page(post_login_text):
+                    return self._build_failed_result(
+                        point_name,
+                        "Не удалось войти в портал: форма авторизации осталась открыта.",
                         period_hint,
                         diagnostics=self._build_diagnostics(stage, current_url),
                     )
@@ -300,6 +338,21 @@ class ItalianPizzaPortalAdapter:
                             continue
                 stage = "period_selection"
                 period_result = await self._select_period(page, period_hint)
+                if period_hint and not period_result["selected"]:
+                    return self._build_failed_result(
+                        point_name,
+                        "Не удалось выбрать нужный период на портале.",
+                        period_hint,
+                        diagnostics=self._build_diagnostics(
+                            stage,
+                            page.url,
+                            point_selected=point_selected,
+                            matched_point=point_result["matched_point"],
+                            period_selected=False,
+                            matched_period=period_result["matched_period"],
+                            visible_period_controls=period_result["visible_period_controls"],
+                        ),
+                    )
                 stage = "report_read"
                 body = (await page.locator("body").inner_text())[:8000]
                 issue = self._detect_terminal_issue(body)
@@ -307,6 +360,36 @@ class ItalianPizzaPortalAdapter:
                     return self._build_failed_result(
                         point_name,
                         issue,
+                        period_hint,
+                        diagnostics=self._build_diagnostics(
+                            stage,
+                            page.url,
+                            point_selected=point_selected,
+                            matched_point=point_result["matched_point"],
+                            period_selected=period_result["selected"],
+                            matched_period=period_result["matched_period"],
+                            visible_period_controls=period_result["visible_period_controls"],
+                        ),
+                    )
+                if self._looks_like_login_page(body):
+                    return self._build_failed_result(
+                        point_name,
+                        "Не удалось открыть отчет по бланкам: портал вернул на страницу входа.",
+                        period_hint,
+                        diagnostics=self._build_diagnostics(
+                            stage,
+                            page.url,
+                            point_selected=point_selected,
+                            matched_point=point_result["matched_point"],
+                            period_selected=period_result["selected"],
+                            matched_period=period_result["matched_period"],
+                            visible_period_controls=period_result["visible_period_controls"],
+                        ),
+                    )
+                if not self._contains_report_context(body):
+                    return self._build_failed_result(
+                        point_name,
+                        "Не удалось подтвердить открытие отчета по бланкам на портале.",
                         period_hint,
                         diagnostics=self._build_diagnostics(
                             stage,

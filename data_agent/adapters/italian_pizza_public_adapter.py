@@ -1,7 +1,10 @@
 ﻿from __future__ import annotations
 
+import json
 import logging
 import re
+
+import aiohttp
 
 from ..italian_pizza import resolve_italian_pizza_point
 
@@ -27,6 +30,30 @@ _DISABLED_CLASS_MARKERS = {
 
 
 class ItalianPizzaPublicAdapter:
+    def _normalize_text(self, text: str) -> str:
+        normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
+        return normalized.replace("ё", "е")
+
+    async def _fetch_public_html(self, url: str) -> str:
+        timeout = aiohttp.ClientTimeout(total=30)
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36"
+            ),
+            "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+        }
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            async with session.get(url) as response:
+                response.raise_for_status()
+                return await response.text()
+
+    def _decode_json_string(self, value: str) -> str:
+        try:
+            return json.loads(f'"{value}"')
+        except Exception:
+            return value
+
     def _build_diagnostics(self, stage: str, url: str, **extra) -> dict:
         diagnostics = {"stage": stage, "url": url}
         for key, value in extra.items():
@@ -34,6 +61,42 @@ class ItalianPizzaPublicAdapter:
                 continue
             diagnostics[key] = value
         return diagnostics
+
+    def _confirm_point_from_public_html(self, html: str, point, current_url: str) -> bool:
+        normalized_html = self._normalize_text(html)
+        normalized_city = self._normalize_text(point.city)
+        normalized_address = self._normalize_text(point.address)
+        street_tokens = [
+            token
+            for token in re.split(r"[\s,./-]+", normalized_address)
+            if token and len(token) >= 2
+        ]
+        address_number_tokens = [token for token in street_tokens if any(ch.isdigit() for ch in token)]
+        address_present = normalized_address in normalized_html or all(
+            token in normalized_html for token in address_number_tokens[:2]
+        )
+        city_present = normalized_city in normalized_html
+        url_matches = point.public_slug.lower() in (current_url or "").lower()
+        confirmed = url_matches and city_present and address_present
+        logger.info(
+            "Stoplist public html confirm point=%s confirmed=%s url_matches=%s city_present=%s address_present=%s",
+            point.display_name,
+            confirmed,
+            url_matches,
+            city_present,
+            address_present,
+        )
+        return confirmed
+
+    def _extract_stoplist_products_from_html(self, html: str) -> list[str]:
+        matches = re.finditer(r'"status":"stop_list".*?"name":"([^"]+)"', html, flags=re.DOTALL)
+        results: list[str] = []
+        for match in matches:
+            raw_name = self._decode_json_string(match.group(1)).replace("\\/", "/")
+            candidate = self._clean_product_name(raw_name)
+            if candidate and candidate not in results:
+                results.append(candidate)
+        return results
 
     def _page_excerpt(self, text: str, limit: int = 280) -> str:
         normalized = re.sub(r"\s+", " ", (text or "").strip())
@@ -47,9 +110,9 @@ class ItalianPizzaPublicAdapter:
             return None
         if any(token in lowered for token in ["captcha", "капча", "я не робот", "i am not a robot"]):
             return "Публичный сайт запросил captcha."
-        if any(token in lowered for token in ["нет доступа", "access denied", "403", "forbidden"]):
+        if any(token in lowered for token in ["нет доступа", "access denied", "403 forbidden", "forbidden", "ошибка 403", "код 403"]):
             return "Публичный сайт вернул отказ в доступе."
-        if any(token in lowered for token in ["технические работы", "временно недоступен", "service unavailable", "502", "503", "504"]):
+        if any(token in lowered for token in ["технические работы", "временно недоступен", "service unavailable", "ошибка 502", "ошибка 503", "ошибка 504", "код 502", "код 503", "код 504"]):
             return "Публичный сайт временно недоступен."
         return None
 
@@ -389,19 +452,67 @@ class ItalianPizzaPublicAdapter:
                 "report_text": f"Не удалось определить публичную точку для стоп-листа: {point_name}",
                 "diagnostics": {"stage": "resolve_point"},
             }
+        target_url = point.public_url.rstrip("/") + "/"
+        stage = "fetch_html"
+        try:
+            logger.info("Stoplist public html fetch point=%s url=%s", point.display_name, target_url)
+            html = await self._fetch_public_html(target_url)
+            issue = self._detect_public_page_issue(html)
+            if issue:
+                return self._build_failed_result(
+                    point.display_name,
+                    issue,
+                    diagnostics=self._build_diagnostics(stage, target_url),
+                )
+
+            stage = "point_confirm"
+            if self._confirm_point_from_public_html(html, point, target_url):
+                stage = "collect_products"
+                cleaned = self._extract_stoplist_products_from_html(html)
+                logger.info(
+                    "Stoplist public html extracted point=%s products_found=%s",
+                    point.display_name,
+                    len(cleaned),
+                )
+                if cleaned:
+                    report_text = "Точка: {}\nСтоп-лист:\n{}".format(
+                        point.display_name,
+                        "\n".join(f"- {item}" for item in cleaned[:60]),
+                    )
+                else:
+                    report_text = f"Точка: {point.display_name}\nСтоп-лист: недоступных позиций не найдено."
+                return {
+                    "status": "ok",
+                    "point_name": point.display_name,
+                    "selected": True,
+                    "report_text": report_text,
+                    "alert_hash": None,
+                    "diagnostics": self._build_diagnostics(
+                        stage,
+                        target_url,
+                        address_filled=True,
+                        selected=True,
+                        products_found=len(cleaned),
+                        source="public_html",
+                    ),
+                }
+            logger.info("Stoplist public html did not confirm point=%s, fallback to browser flow", point.display_name)
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            logger.warning("Stoplist public html fetch failed point=%s error=%s", point.display_name, exc)
+        except Exception as exc:
+            logger.warning("Stoplist public html parse failed point=%s error=%s", point.display_name, exc, exc_info=True)
         try:
             from playwright.async_api import async_playwright
         except ImportError as exc:
             raise RuntimeError("Playwright is not installed") from exc
 
         stage = "launch"
-        current_url = point.public_url.rstrip("/") + "/"
+        current_url = target_url
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=True)
             context = await browser.new_context(locale="ru-RU", timezone_id="Europe/Moscow")
             page = await context.new_page()
             try:
-                target_url = point.public_url.rstrip("/") + "/"
                 logger.info("Stoplist public browser run point=%s url=%s", point.display_name, target_url)
                 stage = "goto"
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=25000)

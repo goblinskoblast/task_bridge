@@ -14,6 +14,7 @@ from bot.report_delivery import (
     is_report_delivery_candidate,
     trim_telegram_text,
 )
+from config import DEVELOPER_TELEGRAM_ID
 from db.database import get_db_session
 from db.models import Chat, DataAgentProfile, Message as MessageModel, User
 
@@ -31,8 +32,7 @@ AGENT_WELCOME = (
     "• проверить стоп-лист и бланки по точке\n"
     "• посмотреть письма и календарь\n"
     "• зайти в подключённую веб-систему и собрать данные\n\n"
-    "Напишите обычным сообщением, что нужно сделать.\n"
-    "Если агент ошибётся, можно посмотреть последнюю диагностику командой /agentdebug."
+    "Напишите обычным сообщением, что нужно сделать."
 )
 
 AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
@@ -44,12 +44,15 @@ AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
             InlineKeyboardButton(text="Стоп-лист", callback_data="agent_hint_stoplist"),
             InlineKeyboardButton(text="Бланки", callback_data="agent_hint_blanks"),
         ],
-        [
-            InlineKeyboardButton(text="Мониторы", callback_data="agent_hint_monitors"),
-            InlineKeyboardButton(text="Диагностика", callback_data="agent_show_debug"),
-        ],
+        [InlineKeyboardButton(text="Мониторы", callback_data="agent_hint_monitors")],
     ]
 )
+
+_REPORT_FAILURE_MESSAGES = {
+    "stoplist_report": "Не удалось получить отчет по стоп-листу. Попробуйте позже.",
+    "blanks_report": "Не удалось получить отчет по бланкам. Попробуйте позже.",
+    "reviews_report": "Не удалось получить отчет по отзывам. Попробуйте позже.",
+}
 
 
 class ConnectSystemState(StatesGroup):
@@ -153,6 +156,19 @@ def _get_requester_name(message: Message) -> str:
     return message.from_user.first_name or "Пользователь"
 
 
+def _is_developer_telegram_id(telegram_user_id: int | None) -> bool:
+    return bool(DEVELOPER_TELEGRAM_ID and telegram_user_id == DEVELOPER_TELEGRAM_ID)
+
+
+def _build_user_safe_agent_answer(result: dict) -> str:
+    scenario = (result.get("scenario") or "").strip()
+    status = (result.get("status") or "").strip()
+    if status == "failed" and scenario in _REPORT_FAILURE_MESSAGES:
+        return _REPORT_FAILURE_MESSAGES[scenario]
+    answer = (result.get("answer") or "").strip()
+    return answer or "Не удалось получить ответ от агента."
+
+
 async def _deliver_report_to_selected_chat(message: Message, user_message: str, answer: str) -> str | None:
     db = get_db_session()
     try:
@@ -216,19 +232,6 @@ def _looks_like_long_agent_request(text: str) -> bool:
     )
 
 
-def _build_agent_processing_notice(text: str) -> str:
-    if _looks_like_long_agent_request(text):
-        return (
-            "Принял запрос. Агент уже начал обработку и собирает данные по точке.\n"
-            "Это может занять до 1-2 минут.\n"
-            "Ничего дополнительно отправлять не нужно — как только результат будет готов, я пришлю его сюда."
-        )
-    return (
-        "Принял запрос. Агент уже начал обработку.\n"
-        "Как только ответ будет готов, я сразу отправлю его сюда."
-    )
-
-
 def _schedule_background_agent_request(message: Message, text: str) -> None:
     task = asyncio.create_task(_send_agent_request(message, text))
     _BACKGROUND_AGENT_TASKS.add(task)
@@ -285,7 +288,6 @@ async def _send_quick_report_request(message: Message, command_text: str | None,
 
 async def _dispatch_agent_request(message: Message, text: str) -> None:
     if _looks_like_long_agent_request(text):
-        await message.answer(_build_agent_processing_notice(text))
         _schedule_background_agent_request(message, text)
         return
 
@@ -324,23 +326,13 @@ async def _send_agent_request(message: Message, text: str) -> None:
         await message.answer("Агент сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз.")
         return
 
-    answer = result.get("answer", "Не удалось получить ответ от агента.")
+    answer = _build_user_safe_agent_answer(result)
     await message.answer(answer)
 
     if is_report_delivery_candidate(result):
         delivered_to = await _deliver_report_to_selected_chat(message, text, answer)
         if delivered_to:
             await message.answer(f"Этот отчёт также отправил в чат: {delivered_to}")
-
-    if result.get("status") == "failed":
-        debug_summary = (result.get("debug_summary") or "").strip()
-        if debug_summary:
-            await message.answer(
-                trim_telegram_text(
-                    f"Диагностика последнего запроса:\n{debug_summary}\n\n"
-                    "Если нужно, можно повторно посмотреть это через /agentdebug"
-                )
-            )
 
 
 async def _open_agent_entry(message: Message, state: FSMContext) -> None:
@@ -470,6 +462,9 @@ async def callback_agent_hint_monitors(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "agent_show_debug")
 async def callback_agent_show_debug(callback: CallbackQuery) -> None:
+    if not _is_developer_telegram_id(callback.from_user.id):
+        await callback.answer("Команда недоступна.", show_alert=False)
+        return
     await callback.answer()
     if callback.message:
         await _send_agent_debug_message(callback.message, callback.from_user.id)
@@ -630,6 +625,9 @@ async def cmd_unmonitor(message: Message) -> None:
 
 @router.message(Command("agentdebug"))
 async def cmd_agentdebug(message: Message) -> None:
+    if not _is_developer_telegram_id(message.from_user.id):
+        await message.answer("Команда недоступна.")
+        return
     await _send_agent_debug_message(message, message.from_user.id)
 
 

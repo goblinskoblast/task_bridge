@@ -13,6 +13,7 @@ import aiohttp
 from dateutil import parser as date_parser
 
 from config import REVIEWS_SHEET_URL
+from .italian_pizza import resolve_italian_pizza_point
 
 
 KEYWORD_CATEGORIES = {
@@ -33,7 +34,7 @@ class ReviewWindow:
 
 
 class ReviewReportService:
-    async def build_report(self, user_message: str) -> dict[str, Any]:
+    async def build_report(self, user_message: str, point_name: str | None = None) -> dict[str, Any]:
         if not REVIEWS_SHEET_URL:
             return {
                 "status": "not_configured",
@@ -45,7 +46,10 @@ class ReviewReportService:
         rows = await self._fetch_csv_rows(csv_url)
         window = self._resolve_window(user_message)
         filtered_rows = self._filter_rows(rows, window)
-        return self._build_summary(filtered_rows, window, csv_url)
+        matched_branches: list[str] = []
+        if point_name:
+            filtered_rows, matched_branches = self._filter_rows_by_point(filtered_rows, point_name)
+        return self._build_summary(filtered_rows, window, csv_url, point_name=point_name, matched_branches=matched_branches)
 
     async def build_report_for_window_label(self, window_label: str) -> dict[str, Any]:
         synthetic_request = f"отзывы {window_label}".strip()
@@ -164,6 +168,48 @@ class ReviewReportService:
                 filtered.append(dict(row))
         return filtered
 
+    def _normalize_label(self, value: str) -> str:
+        normalized = (value or "").lower().replace("ё", "е")
+        normalized = normalized.replace("ул.", " ").replace("улица", " ").replace("д.", " ")
+        normalized = re.sub(r"[^a-zа-я0-9]+", " ", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _point_aliases(self, point_name: str) -> list[str]:
+        aliases: list[str] = []
+        variants = [point_name]
+        resolved_point = resolve_italian_pizza_point(point_name)
+        if resolved_point:
+            variants.extend(
+                [
+                    resolved_point.display_name,
+                    resolved_point.address,
+                    resolved_point.city,
+                    f"{resolved_point.city} {resolved_point.address}",
+                ]
+            )
+
+        for raw in variants:
+            normalized = self._normalize_label(raw)
+            if normalized and normalized not in aliases:
+                aliases.append(normalized)
+        return aliases
+
+    def _filter_rows_by_point(self, rows: list[dict[str, str]], point_name: str) -> tuple[list[dict[str, str]], list[str]]:
+        aliases = self._point_aliases(point_name)
+        filtered: list[dict[str, str]] = []
+        matched_branches: list[str] = []
+        for row in rows:
+            branch = self._extract_branch(row) or ""
+            normalized_branch = self._normalize_label(branch)
+            if not normalized_branch:
+                continue
+            if any(alias in normalized_branch or normalized_branch in alias for alias in aliases):
+                filtered.append(dict(row))
+                clean_branch = branch.strip()
+                if clean_branch and clean_branch not in matched_branches:
+                    matched_branches.append(clean_branch)
+        return filtered, matched_branches
+
     def _extract_row_datetime(self, row: dict[str, str]) -> datetime | None:
         for key, value in row.items():
             if not value:
@@ -176,7 +222,15 @@ class ReviewReportService:
                     continue
         return None
 
-    def _build_summary(self, rows: list[dict[str, str]], window: ReviewWindow, source_url: str) -> dict[str, Any]:
+    def _build_summary(
+        self,
+        rows: list[dict[str, str]],
+        window: ReviewWindow,
+        source_url: str,
+        *,
+        point_name: str | None = None,
+        matched_branches: list[str] | None = None,
+    ) -> dict[str, Any]:
         category_counts: Counter[str] = Counter()
         sentiment_counts: Counter[str] = Counter()
         issue_counts: Counter[str] = Counter()
@@ -215,10 +269,14 @@ class ReviewReportService:
             "top_issues": issue_counts.most_common(5),
             "top_praises": praise_counts.most_common(5),
             "top_branches": branch_counts.most_common(5),
+            "matched_branches": matched_branches or [],
+            "requested_point": point_name,
             "ratings": dict(by_rating),
             "report_text": self._render_report(
                 rows_count=len(rows),
                 window_label=window.label,
+                point_name=point_name,
+                matched_branches=matched_branches or [],
                 category_counts=category_counts,
                 sentiment_counts=sentiment_counts,
                 issue_counts=issue_counts,
@@ -303,6 +361,8 @@ class ReviewReportService:
         self,
         rows_count: int,
         window_label: str,
+        point_name: str | None,
+        matched_branches: list[str],
         category_counts: Counter[str],
         sentiment_counts: Counter[str],
         issue_counts: Counter[str],
@@ -310,8 +370,13 @@ class ReviewReportService:
         branch_counts: Counter[str],
     ) -> str:
         lines = [f"Отчёт по отзывам {window_label}", f"Всего отзывов: {rows_count}"]
+        if point_name:
+            lines.insert(1, f"Точка: {point_name}")
         if rows_count == 0:
-            lines.append("За выбранный период отзывов не найдено.")
+            if point_name:
+                lines.append("По выбранной точке за этот период отзывов не найдено.")
+            else:
+                lines.append("За выбранный период отзывов не найдено.")
             return "\n".join(lines)
 
         lines.append(
@@ -328,6 +393,8 @@ class ReviewReportService:
             f"прочее {category_counts.get('other', 0)}"
         )
 
+        if matched_branches:
+            lines.append(f"Совпавшие точки в источнике: {', '.join(matched_branches[:3])}")
         if branch_counts:
             top_branches = ", ".join(f"{name} ({count})" for name, count in branch_counts.most_common(3))
             lines.append(f"Точки с наибольшим числом отзывов: {top_branches}")
