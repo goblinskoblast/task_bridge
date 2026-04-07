@@ -198,42 +198,94 @@ def _should_use_public_reviews_browser(user_message: str) -> bool:
     return any(marker in lowered for marker in ["2гис", "2gis", "яндекс", "yandex", "карты", "картах", "maps"])
 
 
+def _resolve_public_reviews_providers(user_message: str) -> list[str]:
+    lowered = user_message.lower()
+    mentions_2gis = any(marker in lowered for marker in ["2гис", "2gis"])
+    mentions_yandex = any(marker in lowered for marker in ["яндекс", "yandex"])
+
+    if any(marker in lowered for marker in ["только 2гис", "only 2gis", "лишь 2гис"]):
+        return ["2gis"]
+    if any(marker in lowered for marker in ["только яндекс", "only yandex", "лишь яндекс"]):
+        return ["yandex_maps"]
+
+    if mentions_2gis and mentions_yandex:
+        return ["yandex_maps", "2gis"]
+    if mentions_2gis:
+        return ["2gis", "yandex_maps"]
+    if mentions_yandex:
+        return ["yandex_maps", "2gis"]
+    return ["yandex_maps", "2gis"]
+
+
+def _provider_label(provider: str) -> str:
+    return "2GIS" if provider == "2gis" else "Яндекс Карты"
+
+
 async def _run_public_reviews_browser(user_message: str, targets: List[str]) -> dict:
     logger.info("Public reviews resolution message=%s targets=%s", user_message[:300], targets)
-    lowered = user_message.lower()
-    provider = "2gis" if ("2гис" in lowered or "2gis" in lowered) else "yandex_maps"
+    providers = _resolve_public_reviews_providers(user_message)
     results: List[dict] = []
     for target in targets[:5]:
-        if target.startswith("http://") or target.startswith("https://"):
-            target_url = target
-            target_label = target
-        else:
-            target_url = f"https://2gis.ru/search/{quote(target)}" if provider == "2gis" else f"https://yandex.ru/maps/?text={quote(target)}"
-            target_label = target
-        task_text = (
-            "Собери краткий отчет по отзывам для этой точки. Найди свежие отзывы, общую тональность, основные жалобы, основные похвалы и если возможно укажи среднюю оценку. Ответ верни кратко и по делу.\n\n"
-            f"Точка: {target_label}\nИсходный запрос пользователя: {user_message}"
-        )
-        try:
-            logger.info("Public reviews browser run target=%s url=%s provider=%s", target_label, target_url, provider)
-            data = await browser_agent.extract_data(
-                url=target_url,
-                username=None,
-                encrypted_password=None,
-                user_task=task_text,
-                progress_callback=None,
+        for provider in providers:
+            if target.startswith("http://") or target.startswith("https://"):
+                target_url = target
+                target_label = target
+            else:
+                target_url = f"https://2gis.ru/search/{quote(target)}" if provider == "2gis" else f"https://yandex.ru/maps/?text={quote(target)}"
+                target_label = target
+            task_text = (
+                "Собери краткий отчет по отзывам для этой точки. "
+                "Найди свежие отзывы, общую тональность, основные жалобы, основные похвалы "
+                "и если возможно укажи среднюю оценку. Ответ верни кратко и по делу.\n\n"
+                f"Источник: {_provider_label(provider)}\n"
+                f"Точка: {target_label}\n"
+                f"Исходный запрос пользователя: {user_message}"
             )
-            results.append({"target": target_label, "url": target_url, "status": "ok", "data": data})
-        except Exception as exc:
-            logger.warning("Public reviews browser failed target=%s error=%s", target_label, exc)
-            results.append({"target": target_label, "url": target_url, "status": "error", "error": str(exc)})
+            try:
+                logger.info("Public reviews browser run target=%s url=%s provider=%s", target_label, target_url, provider)
+                data = await browser_agent.extract_data(
+                    url=target_url,
+                    username=None,
+                    encrypted_password=None,
+                    user_task=task_text,
+                    progress_callback=None,
+                )
+                results.append(
+                    {
+                        "target": target_label,
+                        "provider": provider,
+                        "url": target_url,
+                        "status": "ok",
+                        "data": data,
+                    }
+                )
+            except Exception as exc:
+                logger.warning("Public reviews browser failed target=%s provider=%s error=%s", target_label, provider, exc)
+                results.append(
+                    {
+                        "target": target_label,
+                        "provider": provider,
+                        "url": target_url,
+                        "status": "error",
+                        "error": str(exc),
+                    }
+                )
     ok_results = [item for item in results if item["status"] == "ok"]
     if not ok_results:
         return {"status": "failed", "message": "Не удалось собрать отзывы по переданным точкам.", "targets": results}
     report_lines = ["Отчет по отзывам по точкам:"]
-    for item in ok_results:
-        report_lines.append(f"\nТочка: {item['target']}\n{item['data']}")
-    return {"status": "ok", "source": provider, "targets": results, "report_text": "\n".join(report_lines).strip()}
+    for target_label in list(dict.fromkeys(item["target"] for item in ok_results)):
+        report_lines.append(f"\nТочка: {target_label}")
+        for item in [candidate for candidate in ok_results if candidate["target"] == target_label]:
+            provider_label = _provider_label(item["provider"])
+            report_lines.append(f"{provider_label}:\n{item['data']}")
+    return {
+        "status": "ok",
+        "source": "public_maps_multi",
+        "providers": providers,
+        "targets": results,
+        "report_text": "\n".join(report_lines).strip(),
+    }
 
 
 scenario_engine = DataAgentScenarioEngine()

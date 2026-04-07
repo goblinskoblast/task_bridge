@@ -7,10 +7,22 @@ os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 
 from data_agent.review_report import ReviewReportService
-from data_agent.scenario_engine import ReviewsReportScenario
+from data_agent.scenario_engine import (
+    ReviewsReportScenario,
+    _resolve_public_reviews_providers,
+    _run_public_reviews_browser,
+)
 
 
 class ReviewReportPointFilteringTest(unittest.IsolatedAsyncioTestCase):
+    async def test_public_reviews_providers_default_to_both_sources(self):
+        providers = _resolve_public_reviews_providers("собери отзывы по Верхний Уфалей, Ленина 147")
+        self.assertEqual(providers, ["yandex_maps", "2gis"])
+
+    async def test_public_reviews_providers_keep_explicit_source_first(self):
+        providers = _resolve_public_reviews_providers("собери отзывы по Верхний Уфалей, Ленина 147 на 2гис")
+        self.assertEqual(providers, ["2gis", "yandex_maps"])
+
     async def test_filter_rows_by_point_matches_aliases(self):
         service = ReviewReportService()
         rows = [
@@ -83,6 +95,28 @@ class ReviewReportPointFilteringTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(execution.tool_results["review_tool"], browser_result)
         mocked_build_report.assert_not_awaited()
         mocked_browser.assert_awaited_once()
+
+    async def test_public_reviews_browser_collects_yandex_and_2gis(self):
+        with patch(
+            "data_agent.scenario_engine.browser_agent.extract_data",
+            AsyncMock(side_effect=["yandex report", "2gis report"]),
+        ) as mocked_extract:
+            result = await _run_public_reviews_browser(
+                "собери отзывы по Верхний Уфалей, Ленина 147",
+                targets=["Верхний Уфалей, Ленина 147"],
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["providers"], ["yandex_maps", "2gis"])
+        self.assertEqual(mocked_extract.await_count, 2)
+        first_url = mocked_extract.await_args_list[0].kwargs["url"]
+        second_url = mocked_extract.await_args_list[1].kwargs["url"]
+        self.assertIn("yandex.ru/maps", first_url)
+        self.assertIn("2gis.ru/search", second_url)
+        self.assertIn("Яндекс Карты", result["report_text"])
+        self.assertIn("2GIS", result["report_text"])
+        self.assertIn("yandex report", result["report_text"])
+        self.assertIn("2gis report", result["report_text"])
 
     async def test_reviews_scenario_requests_point_when_sheet_missing(self):
         scenario = ReviewsReportScenario()
