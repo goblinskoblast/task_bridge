@@ -188,7 +188,16 @@ class DataAgentService:
                 return DataAgentDebugResponse(found=False)
 
             session = db.query(DataAgentSession).filter(DataAgentSession.user_id == user.id).first()
-            if session and session.last_trace_id:
+            fallback_log = (
+                db.query(DataAgentRequestLog)
+                .filter(DataAgentRequestLog.user_id == user.id)
+                .order_by(DataAgentRequestLog.created_at.desc())
+                .first()
+            )
+
+            if session and session.last_trace_id and (
+                not fallback_log or fallback_log.trace_id == session.last_trace_id
+            ):
                 return DataAgentDebugResponse(
                     found=True,
                     trace_id=session.last_trace_id,
@@ -201,12 +210,6 @@ class DataAgentService:
                     details=session.last_debug_payload or {},
                 )
 
-            fallback_log = (
-                db.query(DataAgentRequestLog)
-                .filter(DataAgentRequestLog.user_id == user.id)
-                .order_by(DataAgentRequestLog.created_at.desc())
-                .first()
-            )
             if not fallback_log:
                 return DataAgentDebugResponse(found=False)
 
