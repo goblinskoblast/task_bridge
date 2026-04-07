@@ -187,6 +187,10 @@ class DataAgentService:
         interval_minutes: int,
     ) -> str | None:
         monitor_type = scenario_to_monitor_type(scenario)
+        if scenario == "reviews_report" and interval_minutes:
+            monitor_type = "reviews"
+            point_name = point_name or "все точки"
+
         if not monitor_type or not point_name or not interval_minutes:
             return None
 

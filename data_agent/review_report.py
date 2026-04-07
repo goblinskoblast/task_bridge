@@ -47,6 +47,10 @@ class ReviewReportService:
         filtered_rows = self._filter_rows(rows, window)
         return self._build_summary(filtered_rows, window, csv_url)
 
+    async def build_report_for_window_label(self, window_label: str) -> dict[str, Any]:
+        synthetic_request = f"отзывы {window_label}".strip()
+        return await self.build_report(synthetic_request)
+
     def _normalize_google_sheet_url(self, source_url: str) -> str:
         if "/export?" in source_url and "format=csv" in source_url:
             return source_url

@@ -4,11 +4,13 @@ from typing import Optional
 
 
 MONITOR_SCENARIO_TO_TYPE = {
+    "reviews_report": "reviews",
     "blanks_report": "blanks",
     "stoplist_report": "stoplist",
 }
 
 MONITOR_TYPE_LABELS = {
+    "reviews": "отзывы",
     "blanks": "бланки",
     "stoplist": "стоп-лист",
 }

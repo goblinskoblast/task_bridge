@@ -12,6 +12,7 @@ from db.database import get_db_session
 from db.models import DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentProfile, DataAgentSystem, User
 
 from .blanks_tool import blanks_tool
+from .review_report import review_report_service
 from .stoplist_tool import stoplist_tool
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,70 @@ async def _run_stoplist_monitor(bot: Bot, config: DataAgentMonitorConfig) -> Non
         db.close()
 
 
+async def _run_reviews_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
+    db = get_db_session()
+    try:
+        interval = config.check_interval_minutes or 60
+        if interval <= 180:
+            window_label = "за последние 3 часов"
+        elif interval <= 1440:
+            window_label = "за последние 24 часов"
+        else:
+            window_label = "за последние 7 дней"
+
+        result = await review_report_service.build_report_for_window_label(window_label)
+
+        config.last_checked_at = datetime.utcnow()
+        config.last_status = result.get("status") or "ok"
+        config.last_result_json = result
+
+        report_text = str(result.get("report_text") or "").strip()
+        report_hash = result.get("alert_hash") or None
+        if report_text and report_hash is None:
+            import hashlib
+
+            report_hash = hashlib.sha256(report_text.encode("utf-8", errors="ignore")).hexdigest()
+
+        if report_hash and report_hash != config.last_alert_hash:
+            event = DataAgentMonitorEvent(
+                user_id=config.user_id,
+                config_id=config.id,
+                system_name=config.system_name,
+                monitor_type=config.monitor_type,
+                point_name=config.point_name,
+                severity="info",
+                title="Обновился отчёт по отзывам",
+                body=report_text,
+                event_hash=report_hash,
+                sent_to_telegram=False,
+            )
+            db.add(event)
+            db.commit()
+            db.refresh(event)
+
+            user = db.query(User).filter(User.id == config.user_id).first()
+            delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user)
+            if delivery_chat_id:
+                await bot.send_message(
+                    chat_id=delivery_chat_id,
+                    text=(
+                        "Обновился отчёт по отзывам\n\n"
+                        f"{report_text[:3500]}"
+                    ),
+                    parse_mode="HTML",
+                )
+                event.sent_to_telegram = True
+                config.last_alert_hash = report_hash
+                db.commit()
+        else:
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.error("Reviews monitor failed for config %s: %s", config.id, exc, exc_info=True)
+    finally:
+        db.close()
+
+
 async def _run_monitors(bot: Bot) -> None:
     db = get_db_session()
     try:
@@ -185,6 +250,8 @@ async def _run_monitors(bot: Bot) -> None:
                 await _run_blanks_monitor(bot, item)
             elif item.monitor_type == "stoplist":
                 await _run_stoplist_monitor(bot, item)
+            elif item.monitor_type == "reviews":
+                await _run_reviews_monitor(bot, item)
     finally:
         db.close()
 

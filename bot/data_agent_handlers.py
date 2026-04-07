@@ -341,6 +341,7 @@ async def callback_agent_hint_monitors(callback: CallbackQuery) -> None:
             "Для мониторинга можно написать, например:\n"
             "/monitorblanks Екатеринбург, Малышева 5 каждый час\n"
             "/monitorstoplist Екатеринбург, Малышева 5 каждые 3 часа\n\n"
+            "/monitorreviews каждый час\n"
             "Посмотреть активные мониторинги: /monitors\n"
             "Отключить: /unmonitor 12"
         )
@@ -441,6 +442,11 @@ async def cmd_monitorblanks(message: Message, state: FSMContext) -> None:
 @router.message(Command("monitorstoplist"))
 async def cmd_monitorstoplist(message: Message, state: FSMContext) -> None:
     await _send_quick_report_request(message, message.text, "Мониторь стоп-лист")
+
+
+@router.message(Command("monitorreviews"))
+async def cmd_monitorreviews(message: Message, state: FSMContext) -> None:
+    await _send_quick_report_request(message, message.text, "Мониторь отзывы")
 
 
 @router.message(Command("monitors"))

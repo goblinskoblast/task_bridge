@@ -11,7 +11,7 @@ class MonitoringHelpersTest(unittest.TestCase):
     def test_scenario_to_monitor_type(self):
         self.assertEqual(scenario_to_monitor_type("blanks_report"), "blanks")
         self.assertEqual(scenario_to_monitor_type("stoplist_report"), "stoplist")
-        self.assertIsNone(scenario_to_monitor_type("reviews_report"))
+        self.assertEqual(scenario_to_monitor_type("reviews_report"), "reviews")
 
     def test_format_monitor_interval(self):
         self.assertEqual(format_monitor_interval(60), "каждый час")
