@@ -1,5 +1,7 @@
 ﻿import logging
 
+import asyncio
+
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -18,6 +20,7 @@ from db.models import Chat, DataAgentProfile, Message as MessageModel, User
 logger = logging.getLogger(__name__)
 
 router = Router()
+_BACKGROUND_AGENT_TASKS: set[asyncio.Task] = set()
 
 AGENT_BUTTON_TEXT = "🤖 Агент"
 REPORT_CHAT_CALLBACK_PREFIX = "agent_report_chat_select:"
@@ -213,6 +216,34 @@ def _looks_like_long_agent_request(text: str) -> bool:
     )
 
 
+def _build_agent_processing_notice(text: str) -> str:
+    if _looks_like_long_agent_request(text):
+        return (
+            "Принял запрос. Агент уже начал обработку и собирает данные по точке.\n"
+            "Это может занять до 1-2 минут.\n"
+            "Ничего дополнительно отправлять не нужно — как только результат будет готов, я пришлю его сюда."
+        )
+    return (
+        "Принял запрос. Агент уже начал обработку.\n"
+        "Как только ответ будет готов, я сразу отправлю его сюда."
+    )
+
+
+def _schedule_background_agent_request(message: Message, text: str) -> None:
+    task = asyncio.create_task(_send_agent_request(message, text))
+    _BACKGROUND_AGENT_TASKS.add(task)
+
+    def _cleanup(done_task: asyncio.Task) -> None:
+        _BACKGROUND_AGENT_TASKS.discard(done_task)
+        if done_task.cancelled():
+            return
+        exc = done_task.exception()
+        if exc:
+            logger.error("Background agent task failed: %s", exc, exc_info=True)
+
+    task.add_done_callback(_cleanup)
+
+
 def _format_agent_debug_message(result: dict) -> str:
     summary = (result.get("summary") or "").strip()
     if summary:
@@ -249,12 +280,19 @@ async def _send_agent_debug_message(message: Message, telegram_user_id: int) -> 
 async def _send_quick_report_request(message: Message, command_text: str | None, prefix: str) -> None:
     args = _get_command_args(command_text)
     payload = f"{prefix}. {args}".strip() if args else prefix
-    await _send_agent_request(message, payload)
+    await _dispatch_agent_request(message, payload)
+
+
+async def _dispatch_agent_request(message: Message, text: str) -> None:
+    if _looks_like_long_agent_request(text):
+        await message.answer(_build_agent_processing_notice(text))
+        _schedule_background_agent_request(message, text)
+        return
+
+    await _send_agent_request(message, text)
 
 
 async def _send_agent_request(message: Message, text: str) -> None:
-    if _looks_like_long_agent_request(text):
-        await message.answer("Запрос принял. Сбор данных по точке может занять до 1-2 минут, особенно для стоп-листа и бланков.")
     try:
         result = await data_agent_client.chat(
             {
@@ -359,7 +397,7 @@ async def cmd_agent(message: Message, state: FSMContext) -> None:
     if len(args) == 1:
         await _open_agent_entry(message, state)
         return
-    await _send_agent_request(message, args[1].strip())
+    await _dispatch_agent_request(message, args[1].strip())
 
 
 @router.message(F.text == AGENT_BUTTON_TEXT)
@@ -805,4 +843,4 @@ async def handle_private_agent_message(message: Message, state: FSMContext) -> N
         await _open_agent_entry(message, state)
         return
 
-    await _send_agent_request(message, (message.text or "").strip())
+    await _dispatch_agent_request(message, (message.text or "").strip())

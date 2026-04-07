@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, BotCommandScopeDefault, Update
+from aiogram.types import BotCommand, BotCommandScopeDefault
 from fastapi import HTTPException, Request
 import uvicorn
 
@@ -102,8 +102,9 @@ def configure_webhook_mode() -> None:
             raise HTTPException(status_code=503, detail="Webhook runtime is not ready")
 
         payload = await request.json()
-        update = Update.model_validate(payload, context={"bot": bot})
-        await dp.feed_update(bot, update)
+        response = await dp.feed_webhook_update(bot, payload, _timeout=5)
+        if response is not None and hasattr(response, "model_dump"):
+            return response.model_dump(exclude_none=True, by_alias=True)
         return {"ok": True}
 
 
