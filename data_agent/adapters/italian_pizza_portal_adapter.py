@@ -115,7 +115,7 @@ class ItalianPizzaPortalAdapter:
         ]
         return len(point_like_controls) >= 2
 
-    def _body_mentions_requested_point(self, text: str, point_name: str) -> bool:
+    def _line_mentions_requested_point(self, text: str, point_name: str) -> bool:
         normalized = self._normalize_text(text)
         if not normalized:
             return False
@@ -130,11 +130,38 @@ class ItalianPizzaPortalAdapter:
             for token in re.split(r"[\s,./-]+", address)
             if len(token) >= 2
         ]
-        token_hits = sum(1 for token in address_tokens if token in normalized)
+        normalized_tokens = {
+            token
+            for token in re.split(r"[\s,./-]+", normalized)
+            if len(token) >= 2
+        }
+        token_hits = sum(1 for token in address_tokens if token in normalized_tokens)
         if token_hits >= min(2, len(address_tokens)):
             return True
 
         return bool(city and city in normalized and token_hits >= 1)
+
+    def _body_mentions_requested_point(self, text: str, point_name: str) -> bool:
+        lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+        return any(self._line_mentions_requested_point(line, point_name) for line in lines)
+
+    def _extract_point_specific_body(self, text: str, point_name: str) -> tuple[str, bool]:
+        lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+        if not lines:
+            return "", False
+
+        report_markers = ("бланк", "перегруз", "отклон", "лимит", "норматив", "красн", "отчет", "отчёт")
+        kept_lines: list[str] = []
+        matched_rows = False
+        for line in lines:
+            if self._line_mentions_requested_point(line, point_name):
+                kept_lines.append(line)
+                matched_rows = True
+                continue
+            lowered = self._normalize_text(line)
+            if any(marker in lowered for marker in report_markers):
+                kept_lines.append(line)
+        return "\n".join(kept_lines), matched_rows
 
     def _is_point_menu_control(self, text: str) -> bool:
         lowered = self._normalize_text(text)
@@ -1276,7 +1303,8 @@ class ItalianPizzaPortalAdapter:
                             page_excerpt=self._normalize_text(body)[:400],
                         ),
                     )
-                if not self._body_mentions_requested_point(body, point_name):
+                point_specific_body, matched_point_rows = self._extract_point_specific_body(body, point_name)
+                if not matched_point_rows:
                     return self._build_failed_result(
                         point_name,
                         "Не удалось подтвердить, что отчет относится к выбранной точке.",
@@ -1298,6 +1326,7 @@ class ItalianPizzaPortalAdapter:
                             page_excerpt=self._normalize_text(body)[:400],
                         ),
                     )
+                body = point_specific_body or body
                 if period_hint:
                     body = f"Период: {period_hint}\n{body}"
                 report_text, has_red_flags = self._normalize_report(point_name, body)
