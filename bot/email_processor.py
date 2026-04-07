@@ -144,6 +144,7 @@ def extract_task_from_email(email_data: Dict[str, Any], attachments: Optional[li
                 body_text=body_text,
                 from_address=email_data.get("from_address", ""),
                 attachments_text=attachments_text,
+                email_headers=email_data.get("headers"),
             )
         )
 

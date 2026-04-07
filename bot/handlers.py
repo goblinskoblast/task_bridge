@@ -1,5 +1,6 @@
 import logging
-from typing import List, Optional
+import re
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 from aiogram import Bot, Router, F
 from aiogram.types import (
@@ -119,6 +120,24 @@ async def get_or_create_user(bot: Bot, telegram_id: int, username: str = None,
         db.add(user)
         db.commit()
         db.refresh(user)
+        return user
+
+    updated = False
+    if username and user.username != username:
+        user.username = username
+        updated = True
+    if first_name and user.first_name != first_name:
+        user.first_name = first_name
+        updated = True
+    if last_name and user.last_name != last_name:
+        user.last_name = last_name
+        updated = True
+    if user.is_bot != is_bot:
+        user.is_bot = is_bot
+        updated = True
+    if updated:
+        db.commit()
+        db.refresh(user)
 
     return user
 
@@ -194,6 +213,73 @@ async def get_or_create_chat(chat_id: int, chat_type: str, title: str = None,
             logger.info(f"Updated chat info: {chat_id}")
 
     return chat
+
+
+def _extract_reply_assignee_hint(message: Message) -> Optional[Dict[str, Any]]:
+    reply_message = getattr(message, "reply_to_message", None)
+    reply_user = getattr(reply_message, "from_user", None)
+    message_user = getattr(message, "from_user", None)
+
+    if not reply_user or reply_user.is_bot:
+        return None
+    if message_user and reply_user.id == message_user.id:
+        return None
+
+    return {
+        "token": reply_user.username or f"tgid:{reply_user.id}",
+        "telegram_id": reply_user.id,
+        "username": reply_user.username,
+        "first_name": reply_user.first_name,
+        "last_name": getattr(reply_user, "last_name", None),
+        "is_bot": reply_user.is_bot,
+    }
+
+
+def _resolve_assignee_usernames(
+    task_data: Optional[Dict[str, Any]],
+    reply_assignee_hint: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    task_data = task_data or {}
+    assignee_usernames = task_data.get("assignee_usernames", []) or []
+    if not assignee_usernames and task_data.get("assignee_username"):
+        assignee_usernames = [task_data.get("assignee_username")]
+
+    normalized: List[str] = []
+    for raw_token in assignee_usernames:
+        token = str(raw_token or "").strip().lstrip("@")
+        if token and token not in normalized:
+            normalized.append(token)
+
+    if not normalized and reply_assignee_hint:
+        normalized.append(reply_assignee_hint["token"])
+
+    return normalized
+
+
+def _format_assignee_label(db: Session, assignee_token: str) -> str:
+    token = str(assignee_token or "").strip()
+    if not token:
+        return "Исполнитель"
+
+    if token.startswith("tgid:"):
+        try:
+            telegram_id = int(token.split(":", 1)[1])
+        except (IndexError, ValueError):
+            return "Пользователь Telegram"
+
+        user = db.query(User).filter(User.telegram_id == telegram_id).first()
+        if user:
+            return format_user_mention(user)
+        return "Пользователь Telegram"
+
+    user = db.query(User).filter(User.username == token).first()
+    if user:
+        return format_user_mention(user)
+
+    if re.search(r"[А-Яа-яЁё ]", token):
+        return token
+
+    return f"@{token}"
 
 
 @router.message(Command("start"))
@@ -630,6 +716,17 @@ async def handle_group_message(message: Message):
             is_bot=message.from_user.is_bot,
             db=db,
         )
+        reply_assignee_hint = _extract_reply_assignee_hint(message)
+        if reply_assignee_hint:
+            await get_or_create_user(
+                bot=message.bot,
+                telegram_id=reply_assignee_hint["telegram_id"],
+                username=reply_assignee_hint["username"],
+                first_name=reply_assignee_hint["first_name"],
+                last_name=reply_assignee_hint["last_name"],
+                is_bot=reply_assignee_hint["is_bot"],
+                db=db,
+            )
 
         message_obj = MessageModel(
             message_id=message.message_id,
@@ -674,9 +771,9 @@ async def handle_group_message(message: Message):
         task_data = ai_result.get("task", {})
         logger.info("Task data from AI: %s", task_data)
 
-        assignee_usernames = task_data.get("assignee_usernames", []) or []
-        if not assignee_usernames and task_data.get("assignee_username"):
-            assignee_usernames = [task_data.get("assignee_username")]
+        assignee_usernames = _resolve_assignee_usernames(task_data, reply_assignee_hint=reply_assignee_hint)
+        if reply_assignee_hint and assignee_usernames == [reply_assignee_hint["token"]]:
+            logger.info("Auto-assigned task from reply target: %s", reply_assignee_hint["token"])
 
         pending_task = PendingTask(
             message_id=message_obj.id,

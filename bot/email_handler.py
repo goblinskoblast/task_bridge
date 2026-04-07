@@ -50,6 +50,20 @@ NON_PRIMARY_FOLDERS = {
     "[gmail]/all mail",
 }
 
+EMAIL_SIGNAL_HEADERS = (
+    "From",
+    "Reply-To",
+    "Sender",
+    "List-Unsubscribe",
+    "List-Id",
+    "Precedence",
+    "Auto-Submitted",
+    "X-Auto-Response-Suppress",
+    "X-Spam-Flag",
+    "X-Spam-Status",
+    "Feedback-ID",
+)
+
 
 def _resolve_primary_folder(folder_name: Optional[str]) -> str:
     raw = (folder_name or "").strip()
@@ -269,6 +283,25 @@ def decode_mime_header(header_value: str) -> str:
     return "".join(result)
 
 
+def extract_email_signal_headers(msg: email.message.Message, flags: Optional[List[Any]] = None) -> Dict[str, Any]:
+    headers: Dict[str, Any] = {}
+    for header_name in EMAIL_SIGNAL_HEADERS:
+        raw_value = msg.get(header_name)
+        if raw_value:
+            headers[header_name] = decode_mime_header(raw_value)
+
+    normalized_flags: List[str] = []
+    for flag in flags or []:
+        if isinstance(flag, bytes):
+            normalized_flags.append(flag.decode("utf-8", errors="ignore"))
+        else:
+            normalized_flags.append(str(flag))
+    if normalized_flags:
+        headers["IMAP-Flags"] = normalized_flags
+
+    return headers
+
+
 def extract_email_body(msg: email.message.Message) -> tuple[Optional[str], Optional[str]]:
     """
     Извлекает текст и HTML из email-сообщения
@@ -413,6 +446,7 @@ def fetch_new_emails(email_account: EmailAccount) -> List[Dict[str, Any]]:
             try:
                 raw_email = data[b'RFC822']
                 msg = email.message_from_bytes(raw_email)
+                flags = list(data.get(b'FLAGS', ()))
 
                 subject = decode_mime_header(msg.get('Subject', ''))
                 from_header = msg.get('From', '')
@@ -427,6 +461,7 @@ def fetch_new_emails(email_account: EmailAccount) -> List[Dict[str, Any]]:
                     continue
 
                 text_body, html_body = extract_email_body(msg)
+                signal_headers = extract_email_signal_headers(msg, flags)
 
                 has_attachments = False
                 for part in msg.walk():
@@ -451,6 +486,8 @@ def fetch_new_emails(email_account: EmailAccount) -> List[Dict[str, Any]]:
                     'date': email_date,
                     'body_text': text_body,
                     'body_html': html_body,
+                    'from_header': decode_mime_header(from_header),
+                    'headers': signal_headers,
                     'has_attachments': has_attachments,
                     'raw_message': msg,
                 })

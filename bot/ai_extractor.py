@@ -271,6 +271,21 @@ EMAIL_SERVICE_SENDERS = [
     "sales",
 ]
 
+EMAIL_BULK_HEADER_NAMES = [
+    "List-Unsubscribe",
+    "List-Id",
+    "Precedence",
+    "Auto-Submitted",
+    "X-Auto-Response-Suppress",
+    "X-Spam-Flag",
+    "X-Spam-Status",
+    "Feedback-ID",
+    "IMAP-Flags",
+    "From",
+]
+
+EMAIL_BULK_PRECEDENCE_VALUES = {"bulk", "list", "junk", "auto_reply", "auto-reply"}
+
 CALENDAR_NOTIFICATION_SENDERS = [
     "calendar.yandex",
     "calendar.google",
@@ -350,6 +365,7 @@ def _build_extraction_prompt(
     subject: str = "",
     body_text: str = "",
     attachments_text: str = "",
+    email_headers: Optional[Dict[str, Any]] = None,
 ) -> str:
     lines: List[str] = [f"SOURCE: {source}"]
 
@@ -381,6 +397,18 @@ def _build_extraction_prompt(
                 sender = item.get("sender") or "unknown"
                 sent_at = item.get("date") or ""
                 lines.append(f"[{sent_at}] {sender}: {body}".strip())
+        header_lines = []
+        for key in EMAIL_BULK_HEADER_NAMES:
+            value = (email_headers or {}).get(key)
+            if not value:
+                continue
+            rendered = ", ".join(str(item) for item in value) if isinstance(value, (list, tuple, set)) else str(value)
+            rendered = rendered.strip()
+            if rendered:
+                header_lines.append(f"{key}: {rendered}")
+        if header_lines:
+            lines.extend(["", "EMAIL DELIVERY SIGNALS:"])
+            lines.extend(header_lines)
         if attachments_text:
             lines.extend(["", "ATTACHMENT TEXT:", attachments_text.strip()])
 
@@ -706,9 +734,59 @@ def _is_noise(text: str) -> bool:
     return any(marker in lowered for marker in NOISE_MARKERS)
 
 
-def _looks_like_notification_email(subject: str, body_text: str, from_address: str = "") -> bool:
+def _normalize_email_headers(email_headers: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    normalized: Dict[str, str] = {}
+    for key, value in (email_headers or {}).items():
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple, set)):
+            rendered = " ".join(str(item) for item in value if item)
+        else:
+            rendered = str(value)
+        cleaned = rendered.strip()
+        if cleaned:
+            normalized[str(key)] = cleaned
+    return normalized
+
+
+def _has_bulk_or_spam_email_headers(email_headers: Optional[Dict[str, Any]]) -> bool:
+    headers = _normalize_email_headers(email_headers)
+    if not headers:
+        return False
+
+    lowered_headers = {key.lower(): value.lower() for key, value in headers.items()}
+    precedence = lowered_headers.get("precedence", "")
+    auto_submitted = lowered_headers.get("auto-submitted", "")
+    spam_flag = lowered_headers.get("x-spam-flag", "")
+    spam_status = lowered_headers.get("x-spam-status", "")
+    imap_flags = lowered_headers.get("imap-flags", "")
+
+    if "list-unsubscribe" in lowered_headers or "list-id" in lowered_headers or "feedback-id" in lowered_headers:
+        return True
+    if any(value in precedence for value in EMAIL_BULK_PRECEDENCE_VALUES):
+        return True
+    if auto_submitted and auto_submitted != "no":
+        return True
+    if lowered_headers.get("x-auto-response-suppress"):
+        return True
+    if spam_flag in {"yes", "true"} or "yes" in spam_status or "spam" in spam_status:
+        return True
+    if any(marker in imap_flags for marker in ["junk", "spam", "\\junk"]):
+        return True
+    return False
+
+
+def _looks_like_notification_email(
+    subject: str,
+    body_text: str,
+    from_address: str = "",
+    email_headers: Optional[Dict[str, Any]] = None,
+) -> bool:
     combined = f"{subject}\n{body_text}".lower()
     sender = (from_address or "").lower()
+    headers = _normalize_email_headers(email_headers)
+    sender_header = headers.get("From", "").lower()
+    sender_blob = "\n".join(part for part in [sender, sender_header] if part)
     promo_markers = [
         "отписаться",
         "unsubscribe",
@@ -727,12 +805,16 @@ def _looks_like_notification_email(subject: str, body_text: str, from_address: s
         "вы получили это письмо, потому что",
     ]
     has_strong_signal = _contains_strong_task_signal(combined) or _contains_meeting_signal(combined)
+    has_bulk_headers = _has_bulk_or_spam_email_headers(headers)
 
-    if any(marker in sender for marker in CALENDAR_NOTIFICATION_SENDERS):
+    if any(marker in sender_blob for marker in CALENDAR_NOTIFICATION_SENDERS):
         if any(marker in combined for marker in CALENDAR_NOTIFICATION_MARKERS):
             return True
 
     if _is_noise(combined):
+        return True
+
+    if has_bulk_headers and not has_strong_signal:
         return True
 
     if any(marker in combined for marker in promo_markers) and not has_strong_signal:
@@ -742,7 +824,7 @@ def _looks_like_notification_email(subject: str, body_text: str, from_address: s
         if not has_strong_signal:
             return True
 
-    if any(marker in sender for marker in EMAIL_SERVICE_SENDERS):
+    if any(marker in sender_blob for marker in EMAIL_SERVICE_SENDERS):
         if not has_strong_signal:
             return True
 
@@ -818,6 +900,7 @@ def _build_fallback_task(
     subject: str = "",
     body_text: str = "",
     attachments_text: str = "",
+    email_headers: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     current_text = (current_text or "").strip()
     subject = (subject or "").strip()
@@ -836,7 +919,7 @@ def _build_fallback_task(
     if not combined_text or _is_noise(combined_text):
         return None
 
-    if source == "email" and _looks_like_notification_email(subject, body_text):
+    if source == "email" and _looks_like_notification_email(subject, body_text, email_headers=email_headers):
         return None
 
     if source == "telegram":
@@ -1017,6 +1100,7 @@ async def _analyze_with_unified_prompt(
     subject: str = "",
     body_text: str = "",
     attachments_text: str = "",
+    email_headers: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     if not (current_text or body_text or subject):
         return None
@@ -1030,6 +1114,7 @@ async def _analyze_with_unified_prompt(
         subject=subject,
         body_text=body_text,
         attachments_text=attachments_text,
+        email_headers=email_headers,
     )
 
     provider = get_ai_provider()
@@ -1072,6 +1157,7 @@ async def analyze_email_with_ai(
     body_text: str = "",
     from_address: str = "",
     attachments_text: str = "",
+    email_headers: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     if subject or body_text or attachments_text:
         email_payload = {
@@ -1088,7 +1174,12 @@ async def analyze_email_with_ai(
         email_payload = _parse_email_payload(text)
         raw_text = text
 
-    if _looks_like_notification_email(email_payload["subject"], email_payload["body"], from_address):
+    if _looks_like_notification_email(
+        email_payload["subject"],
+        email_payload["body"],
+        from_address,
+        email_headers=email_headers,
+    ):
         return {"has_task": False, "task": None}
 
     try:
@@ -1098,6 +1189,7 @@ async def analyze_email_with_ai(
             subject=email_payload["subject"],
             body_text=email_payload["body"],
             attachments_text=email_payload["attachments_text"],
+            email_headers=email_headers,
         )
         normalized = await _localize_task_to_russian_if_needed(normalized, source="email")
         if normalized and normalized.get("has_task"):
@@ -1110,7 +1202,12 @@ async def analyze_email_with_ai(
                     normalized["task"].get("description", ""),
                 ]
             )
-            if _looks_like_notification_email(email_payload["subject"], combined, from_address) and not (
+            if _looks_like_notification_email(
+                email_payload["subject"],
+                combined,
+                from_address,
+                email_headers=email_headers,
+            ) and not (
                 _contains_strong_task_signal(combined) or _contains_meeting_signal(combined)
             ):
                 return {"has_task": False, "task": None}
@@ -1124,6 +1221,7 @@ async def analyze_email_with_ai(
         subject=email_payload["subject"],
         body_text=email_payload["body"],
         attachments_text=email_payload["attachments_text"],
+        email_headers=email_headers,
     )
     if fallback:
         logger.info("Email fallback extractor found task: %s", fallback)
