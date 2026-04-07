@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 
 from data_agent.adapters.italian_pizza_portal_adapter import ItalianPizzaPortalAdapter
 
@@ -188,6 +189,54 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         self.assertIsNone(
             self.adapter._blank_hour_value("\u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u0431\u043b\u0430\u043d\u043a")
         )
+
+    def test_rolling_blank_hours_extracts_requested_window(self):
+        self.assertEqual(
+            self.adapter._rolling_blank_hours("\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 12 \u0447\u0430\u0441\u043e\u0432"),
+            12,
+        )
+        self.assertEqual(
+            self.adapter._rolling_blank_hours("\u0441\u0443\u0442\u043a\u0438"),
+            24,
+        )
+        self.assertIsNone(
+            self.adapter._rolling_blank_hours("\u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u0431\u043b\u0430\u043d\u043a")
+        )
+
+    def test_blank_hour_scan_values_cover_last_three_hours(self):
+        values = self.adapter._blank_hour_scan_values(
+            "\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 3 \u0447\u0430\u0441\u0430",
+            reference_time=datetime(2026, 4, 7, 22, 30),
+        )
+        self.assertEqual(values, ["18", "21"])
+
+    def test_blank_hour_scan_values_cover_last_twelve_hours(self):
+        values = self.adapter._blank_hour_scan_values(
+            "\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 12 \u0447\u0430\u0441\u043e\u0432",
+            reference_time=datetime(2026, 4, 7, 22, 30),
+        )
+        self.assertEqual(values, ["9", "12", "15", "18", "21"])
+
+    def test_build_blank_report_from_signals_summarizes_red_zones(self):
+        report_text, has_red_flags = self.adapter._build_blank_report_from_signals(
+            point_name="Test point",
+            period_hint="\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 12 \u0447\u0430\u0441\u043e\u0432",
+            signals=[
+                {
+                    "service": "\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430",
+                    "time_range": "16:45 - 17:00",
+                    "column": "\u0417\u0430\u043a\u0443\u0441\u043a\u0438",
+                    "rows": [
+                        {"row_label": "\u041c\u0430\u043a\u0441", "value": "15"},
+                        {"row_label": "\u041f\u0440\u0438\u043d\u044f\u0442\u043e", "value": "0"},
+                    ],
+                }
+            ],
+        )
+        self.assertTrue(has_red_flags)
+        self.assertIn("16:45 - 17:00", report_text)
+        self.assertIn("\u0417\u0430\u043a\u0443\u0441\u043a\u0438", report_text)
+        self.assertIn("\u041f\u0440\u0438\u043d\u044f\u0442\u043e: 0", report_text)
 
     def test_build_period_help_message_uses_visible_controls(self):
         message = self.adapter._build_period_help_message(

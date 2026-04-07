@@ -3,10 +3,13 @@
 import hashlib
 import logging
 import re
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from email_integration.encryption import decrypt_password
 
 logger = logging.getLogger(__name__)
+MSK_TZ = ZoneInfo("Europe/Moscow")
 
 
 class ItalianPizzaPortalAdapter:
@@ -1005,7 +1008,7 @@ class ItalianPizzaPortalAdapter:
         )
 
     async def _visible_blank_hour_controls(self, page) -> list[str]:
-        locator = page.locator("button")
+        locator = page.locator("button[data-cy^='hour-'], button")
         count = min(await locator.count(), 40)
         seen: list[str] = []
         for idx in range(count):
@@ -1022,9 +1025,62 @@ class ItalianPizzaPortalAdapter:
                 seen.append(text)
         return seen[:12]
 
+    async def _active_blank_hour_value(self, page) -> str | None:
+        locator = page.locator("button[data-cy^='hour-'][disabled]")
+        if await locator.count() <= 0:
+            return None
+        try:
+            value = await locator.first.get_attribute("value")
+            if value:
+                return value.strip()
+            text = (await locator.first.inner_text()).strip()
+            return text or None
+        except Exception:
+            return None
+
+    async def _first_blank_slot(self, page) -> str | None:
+        locator = page.locator("[data-cy^='timesection-']")
+        if await locator.count() <= 0:
+            return None
+        try:
+            slot = await locator.first.get_attribute("data-cy")
+        except Exception:
+            return None
+        if not slot:
+            return None
+        return slot.replace("timesection-", "").strip() or None
+
+    async def _wait_for_blank_hour_applied(self, page, hour_value: str, timeout_ms: int = 7000) -> bool:
+        target_prefix = f"T{int(hour_value):02d}:00"
+        deadline = datetime.now().timestamp() + (timeout_ms / 1000)
+        while datetime.now().timestamp() < deadline:
+            active_value = await self._active_blank_hour_value(page)
+            first_slot = await self._first_blank_slot(page)
+            if active_value == hour_value and (not first_slot or target_prefix in first_slot):
+                return True
+            await page.wait_for_timeout(350)
+        return False
+
     async def _click_blank_hour_chip(self, page, hour_value: str) -> bool:
+        direct = page.locator(f"button[data-cy='hour-{hour_value}']")
+        if await direct.count() > 0:
+            button = direct.first
+            try:
+                if not await button.is_visible():
+                    return False
+                class_name = (await button.get_attribute("class") or "").lower()
+                if "disabled" in class_name or await button.is_disabled():
+                    logger.info("Blanks blank-hour chip already active value=%s selector=data-cy", hour_value)
+                    return True
+                await button.click(timeout=3500, force=True)
+                if await self._wait_for_blank_hour_applied(page, hour_value):
+                    logger.info("Blanks blank-hour chip clicked value=%s selector=data-cy", hour_value)
+                    return True
+            except Exception as exc:
+                logger.info("Blanks blank-hour chip click failed value=%s selector=data-cy error=%s", hour_value, exc)
+
         locator = page.locator("button")
-        count = min(await locator.count(), 40)
+        count = min(await locator.count(), 60)
         for idx in range(count):
             item = locator.nth(idx)
             try:
@@ -1043,12 +1099,268 @@ class ItalianPizzaPortalAdapter:
 
             try:
                 await item.click(timeout=2500, force=True)
-                await page.wait_for_timeout(1200)
-                logger.info("Blanks blank-hour chip clicked value=%s idx=%s", hour_value, idx)
-                return True
+                if await self._wait_for_blank_hour_applied(page, hour_value):
+                    logger.info("Blanks blank-hour chip clicked value=%s idx=%s", hour_value, idx)
+                    return True
             except Exception as exc:
                 logger.info("Blanks blank-hour chip click failed value=%s idx=%s error=%s", hour_value, idx, exc)
         return False
+
+    def _rolling_blank_hours(self, period_hint: str) -> int | None:
+        normalized = self._normalize_text(period_hint)
+        if not normalized or "текущий бланк" in normalized:
+            return None
+        if "сутки" in normalized or "24 часа" in normalized:
+            return 24
+        match = re.search(r"(\d+)\s*час", normalized)
+        if not match:
+            return None
+        try:
+            hours = int(match.group(1))
+        except ValueError:
+            return None
+        return hours if hours > 0 else None
+
+    def _blank_hour_scan_values(self, period_hint: str, reference_time: datetime | None = None) -> list[str]:
+        rolling_hours = self._rolling_blank_hours(period_hint)
+        if not rolling_hours:
+            return []
+
+        reference = reference_time or datetime.now(MSK_TZ)
+        day_start = reference.replace(hour=0, minute=0, second=0, microsecond=0)
+        range_start = reference - timedelta(hours=rolling_hours)
+        values: list[str] = []
+        for hour in range(0, 24, 3):
+            window_start = day_start + timedelta(hours=hour)
+            window_end = window_start + timedelta(hours=3)
+            if window_end <= range_start or window_start >= reference:
+                continue
+            values.append(str(hour))
+        if values:
+            return values
+        current_hour = max(0, min(21, (reference.hour // 3) * 3))
+        return [str(current_hour)]
+
+    async def _read_blank_red_signals(self, page) -> dict:
+        return await page.evaluate(
+            """
+() => {
+  const clean = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+  const parseRgb = (value) => {
+    const match = String(value || "").match(/rgba?\\((\\d+),\\s*(\\d+),\\s*(\\d+)/i);
+    return match ? match.slice(1, 4).map(Number) : null;
+  };
+  const isRedLike = (backgroundColor, className, rowLabel, value) => {
+    const rgb = parseRgb(backgroundColor);
+    if (rgb) {
+      const [r, g, b] = rgb;
+      if (r >= 180 && g <= 160 && b <= 160) {
+        return true;
+      }
+    }
+    const cls = String(className || "");
+    if (/jss261|red|danger|error|critical|alarm/i.test(cls)) {
+      return true;
+    }
+    const normalizedRow = clean(rowLabel).toLowerCase();
+    const normalizedValue = clean(value).replace(",", ".");
+    if (normalizedRow === "остаток") {
+      const numeric = Number(normalizedValue);
+      if (!Number.isNaN(numeric) && numeric <= 0) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const cards = Array.from(document.querySelectorAll("[data-cy^='timesection-']"));
+  const signals = [];
+  for (const card of cards) {
+    const slotId = clean((card.getAttribute("data-cy") || "").replace("timesection-", ""));
+    const tables = Array.from(card.querySelectorAll("table[data-cy^='delivery-']"));
+    let fallbackColumns = [];
+    for (const table of tables) {
+      const headRows = Array.from(table.querySelectorAll("thead tr"));
+      const headerParts = Array.from(headRows[0]?.querySelectorAll("h5") || []).map((node) => clean(node.innerText)).filter(Boolean);
+      const service = headerParts[0] || "";
+      const timeRange = headerParts[1] || "";
+      const parsedColumns = Array.from(headRows[1]?.querySelectorAll("th") || []).slice(1).map((node) => clean(node.innerText));
+      const hasNamedColumns = parsedColumns.some((item) => item);
+      const columns = hasNamedColumns ? parsedColumns : fallbackColumns;
+      if (hasNamedColumns) {
+        fallbackColumns = parsedColumns;
+      }
+      const grouped = new Map();
+
+      for (const tr of Array.from(table.querySelectorAll("tbody tr"))) {
+        const tds = Array.from(tr.querySelectorAll("td"));
+        if (!tds.length) continue;
+        const rowLabel = clean(tds[0].innerText);
+        tds.slice(1).forEach((td, idx) => {
+          const column = columns[idx] || `Колонка ${idx + 1}`;
+          const value = clean(td.innerText);
+          const backgroundColor = getComputedStyle(td).backgroundColor || "";
+          const className = String(td.className || "");
+          if (!isRedLike(backgroundColor, className, rowLabel, value)) {
+            return;
+          }
+
+          const key = `${service}|${timeRange}|${column}`;
+          if (!grouped.has(key)) {
+            grouped.set(key, {
+              slot_id: slotId,
+              service,
+              time_range: timeRange,
+              column,
+              rows: [],
+            });
+          }
+          grouped.get(key).rows.push({
+            row_label: rowLabel,
+            value,
+            background_color: backgroundColor,
+            class_name: className,
+          });
+        });
+      }
+
+      for (const entry of grouped.values()) {
+        signals.push(entry);
+      }
+    }
+  }
+
+  return {
+    slot_count: cards.length,
+    first_slot: clean((cards[0]?.getAttribute("data-cy") || "").replace("timesection-", "")),
+    signals,
+  };
+}
+"""
+        )
+
+    def _build_blank_report_from_signals(
+        self,
+        *,
+        point_name: str,
+        period_hint: str,
+        signals: list[dict],
+    ) -> tuple[str, bool]:
+        period_label = period_hint or "текущий бланк"
+        if not signals:
+            return (
+                f"Точка: {point_name}\n"
+                f"Статус: красных зон по бланкам не найдено\n"
+                f"Период: {period_label}",
+                False,
+            )
+
+        lines = [
+            f"Точка: {point_name}",
+            "Статус: найдены красные зоны по бланкам",
+            f"Период: {period_label}",
+            "Красные зоны:",
+        ]
+        for index, signal in enumerate(signals[:18], start=1):
+            rows = signal.get("rows") or []
+            row_parts: list[str] = []
+            for row in rows[:4]:
+                label = (row.get("row_label") or "").strip()
+                value = (row.get("value") or "").strip()
+                if label and value:
+                    row_parts.append(f"{label}: {value}")
+                elif value:
+                    row_parts.append(value)
+                elif label:
+                    row_parts.append(label)
+            details = "; ".join(row_parts)
+            summary = f"{index}. {signal.get('service') or 'Зона'} {signal.get('time_range') or '-'} -> {signal.get('column') or '-'}"
+            if details:
+                summary += f" ({details})"
+            lines.append(summary)
+        if len(signals) > 18:
+            lines.append(f"И еще {len(signals) - 18} красных зон.")
+        return "\n".join(lines), True
+
+    async def _scan_blank_report(self, page, point_name: str, period_hint: str) -> dict:
+        scan_hours = self._blank_hour_scan_values(period_hint)
+        inspected_hours: list[str] = []
+        inspected_slots: list[str] = []
+        aggregated_signals: list[dict] = []
+
+        if not scan_hours:
+            snapshot = await self._read_blank_red_signals(page)
+            if snapshot.get("first_slot"):
+                inspected_slots.append(snapshot["first_slot"])
+            report_text, has_red_flags = self._build_blank_report_from_signals(
+                point_name=point_name,
+                period_hint=period_hint,
+                signals=snapshot.get("signals") or [],
+            )
+            return {
+                "status": "ok",
+                "report_text": report_text,
+                "has_red_flags": has_red_flags,
+                "matched_period": "текущий бланк",
+                "visible_period_controls": await self._visible_blank_hour_controls(page),
+                "inspected_hours": inspected_hours,
+                "inspected_slots": inspected_slots,
+                "slot_count": snapshot.get("slot_count") or 0,
+                "red_signal_count": len(snapshot.get("signals") or []),
+            }
+
+        for hour_value in scan_hours:
+            if not await self._click_blank_hour_chip(page, hour_value):
+                return {
+                    "status": "needs_period",
+                    "message": self._build_period_help_message(period_hint, await self._visible_blank_hour_controls(page)),
+                    "matched_period": hour_value,
+                    "visible_period_controls": await self._visible_blank_hour_controls(page),
+                    "inspected_hours": inspected_hours,
+                    "inspected_slots": inspected_slots,
+                }
+            inspected_hours.append(hour_value)
+            snapshot = await self._read_blank_red_signals(page)
+            if snapshot.get("first_slot"):
+                inspected_slots.append(snapshot["first_slot"])
+            aggregated_signals.extend(snapshot.get("signals") or [])
+
+        unique_signals: list[dict] = []
+        seen_keys: set[str] = set()
+        for signal in aggregated_signals:
+            key = "|".join(
+                [
+                    signal.get("slot_id") or "",
+                    signal.get("service") or "",
+                    signal.get("time_range") or "",
+                    signal.get("column") or "",
+                    ";".join(
+                        f"{row.get('row_label') or ''}:{row.get('value') or ''}"
+                        for row in (signal.get("rows") or [])
+                    ),
+                ]
+            )
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            unique_signals.append(signal)
+
+        report_text, has_red_flags = self._build_blank_report_from_signals(
+            point_name=point_name,
+            period_hint=period_hint,
+            signals=unique_signals,
+        )
+        return {
+            "status": "ok",
+            "report_text": report_text,
+            "has_red_flags": has_red_flags,
+            "matched_period": ", ".join(scan_hours),
+            "visible_period_controls": await self._visible_blank_hour_controls(page),
+            "inspected_hours": inspected_hours,
+            "inspected_slots": inspected_slots,
+            "slot_count": len(inspected_slots) * 12 if inspected_slots else 0,
+            "red_signal_count": len(unique_signals),
+        }
 
     async def _iter_period_controls(self, page, max_items: int = 200) -> list[tuple[int, str]]:
         locator = page.locator("button, [role='button'], [role='tab'], label, span, div, li, option")
@@ -1414,56 +1726,7 @@ class ItalianPizzaPortalAdapter:
                 report_context = await self._open_report_context_if_needed(page, point_name)
                 current_url = page.url
                 stage = "period_selection"
-                period_result = await self._select_period(page, period_hint)
-                if period_hint and not period_result["selected"]:
-                    if period_result.get("status") == "needs_period":
-                        message = period_result.get("message") or "Нужно уточнить период отчета по бланкам."
-                        return {
-                            "status": "needs_period",
-                            "point_name": point_name,
-                            "has_red_flags": False,
-                            "alert_hash": None,
-                            "report_text": f"Точка: {point_name}\nСтатус: {message}",
-                            "period_hint": period_hint or "текущий бланк",
-                            "message": message,
-                            "diagnostics": self._build_diagnostics(
-                                stage,
-                                page.url,
-                                point_selected=point_selected,
-                                point_menu_collapsed=point_result.get("point_menu_collapsed", False),
-                                matched_point=point_result["matched_point"],
-                                visible_point_controls=point_result["visible_point_controls"],
-                                point_menu_opener=point_result["opener_text"],
-                                point_search_query=point_result["search_query"],
-                                period_selected=False,
-                                matched_period=period_result["matched_period"],
-                                visible_period_controls=period_result["visible_period_controls"],
-                                visible_report_controls=report_context["visible_report_controls"],
-                                route_label=report_context["route_label"],
-                            ),
-                        }
-                    return self._build_failed_result(
-                        point_name,
-                        "Не удалось выбрать нужный период на портале.",
-                        period_hint,
-                        diagnostics=self._build_diagnostics(
-                            stage,
-                            page.url,
-                            point_selected=point_selected,
-                            point_menu_collapsed=point_result.get("point_menu_collapsed", False),
-                            matched_point=point_result["matched_point"],
-                            visible_point_controls=point_result["visible_point_controls"],
-                            point_menu_opener=point_result["opener_text"],
-                            point_search_query=point_result["search_query"],
-                            period_selected=False,
-                            matched_period=period_result["matched_period"],
-                            visible_period_controls=period_result["visible_period_controls"],
-                            visible_report_controls=report_context["visible_report_controls"],
-                            route_label=report_context["route_label"],
-                        ),
-                    )
-                stage = "report_read"
-                body = (await page.locator("body").inner_text())[:8000]
+                body = (await page.locator("body").inner_text())[:12000]
                 issue = self._detect_terminal_issue(body)
                 if issue:
                     return self._build_failed_result(
@@ -1479,9 +1742,9 @@ class ItalianPizzaPortalAdapter:
                             visible_point_controls=point_result["visible_point_controls"],
                             point_menu_opener=point_result["opener_text"],
                             point_search_query=point_result["search_query"],
-                            period_selected=period_result["selected"],
-                            matched_period=period_result["matched_period"],
-                            visible_period_controls=period_result["visible_period_controls"],
+                            period_selected=False,
+                            matched_period=None,
+                            visible_period_controls=await self._visible_blank_hour_controls(page),
                             visible_report_controls=report_context["visible_report_controls"],
                             route_label=report_context["route_label"],
                             page_excerpt=self._normalize_text(body)[:400],
@@ -1501,9 +1764,9 @@ class ItalianPizzaPortalAdapter:
                             visible_point_controls=point_result["visible_point_controls"],
                             point_menu_opener=point_result["opener_text"],
                             point_search_query=point_result["search_query"],
-                            period_selected=period_result["selected"],
-                            matched_period=period_result["matched_period"],
-                            visible_period_controls=period_result["visible_period_controls"],
+                            period_selected=False,
+                            matched_period=None,
+                            visible_period_controls=await self._visible_blank_hour_controls(page),
                             visible_report_controls=report_context["visible_report_controls"],
                             route_label=report_context["route_label"],
                             page_excerpt=self._normalize_text(body)[:400],
@@ -1523,21 +1786,26 @@ class ItalianPizzaPortalAdapter:
                             visible_point_controls=point_result["visible_point_controls"],
                             point_menu_opener=point_result["opener_text"],
                             point_search_query=point_result["search_query"],
-                            period_selected=period_result["selected"],
-                            matched_period=period_result["matched_period"],
-                            visible_period_controls=period_result["visible_period_controls"],
+                            period_selected=False,
+                            matched_period=None,
+                            visible_period_controls=await self._visible_blank_hour_controls(page),
                             visible_report_controls=report_context["visible_report_controls"],
                             route_label=report_context["route_label"],
                             page_excerpt=self._normalize_text(body)[:400],
                         ),
                     )
-                point_specific_body, matched_point_rows = self._extract_point_specific_body(body, point_name)
-                if not matched_point_rows:
-                    return self._build_failed_result(
-                        point_name,
-                        "Не удалось подтвердить, что отчет относится к выбранной точке.",
-                        period_hint,
-                        diagnostics=self._build_diagnostics(
+                scan_result = await self._scan_blank_report(page, point_name, period_hint)
+                if scan_result.get("status") == "needs_period":
+                    message = scan_result.get("message") or "Нужно уточнить период отчета по бланкам."
+                    return {
+                        "status": "needs_period",
+                        "point_name": point_name,
+                        "has_red_flags": False,
+                        "alert_hash": None,
+                        "report_text": f"Точка: {point_name}\nСтатус: {message}",
+                        "period_hint": period_hint or "текущий бланк",
+                        "message": message,
+                        "diagnostics": self._build_diagnostics(
                             stage,
                             page.url,
                             point_selected=point_selected,
@@ -1546,18 +1814,19 @@ class ItalianPizzaPortalAdapter:
                             visible_point_controls=point_result["visible_point_controls"],
                             point_menu_opener=point_result["opener_text"],
                             point_search_query=point_result["search_query"],
-                            period_selected=period_result["selected"],
-                            matched_period=period_result["matched_period"],
-                            visible_period_controls=period_result["visible_period_controls"],
+                            period_selected=False,
+                            matched_period=scan_result.get("matched_period"),
+                            visible_period_controls=scan_result.get("visible_period_controls"),
                             visible_report_controls=report_context["visible_report_controls"],
                             route_label=report_context["route_label"],
-                            page_excerpt=self._normalize_text(body)[:400],
+                            inspected_hours=scan_result.get("inspected_hours"),
+                            inspected_slots=scan_result.get("inspected_slots"),
                         ),
-                    )
-                body = point_specific_body or body
-                if period_hint:
-                    body = f"Период: {period_hint}\n{body}"
-                report_text, has_red_flags = self._normalize_report(point_name, body)
+                    }
+
+                stage = "report_read"
+                report_text = scan_result["report_text"]
+                has_red_flags = scan_result["has_red_flags"]
                 alert_hash = hashlib.sha256(report_text.encode("utf-8", errors="ignore")).hexdigest()
                 return {
                     "status": "ok",
@@ -1575,11 +1844,15 @@ class ItalianPizzaPortalAdapter:
                         visible_point_controls=point_result["visible_point_controls"],
                         point_menu_opener=point_result["opener_text"],
                         point_search_query=point_result["search_query"],
-                        period_selected=period_result["selected"],
-                        matched_period=period_result["matched_period"],
-                        visible_period_controls=period_result["visible_period_controls"],
+                        period_selected=True,
+                        matched_period=scan_result.get("matched_period"),
+                        visible_period_controls=scan_result.get("visible_period_controls"),
                         visible_report_controls=report_context["visible_report_controls"],
                         route_label=report_context["route_label"],
+                        inspected_hours=scan_result.get("inspected_hours"),
+                        inspected_slots=scan_result.get("inspected_slots"),
+                        slot_count=scan_result.get("slot_count"),
+                        red_signal_count=scan_result.get("red_signal_count"),
                     ),
                 }
             except Exception as exc:
