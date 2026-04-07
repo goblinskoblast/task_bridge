@@ -45,6 +45,20 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         )
         self.assertFalse(self.adapter._point_menu_looks_open(["Артемовский (1) Гагарина, 2А"]))
 
+    def test_body_mentions_requested_point_by_address_tokens(self):
+        self.assertTrue(
+            self.adapter._body_mentions_requested_point(
+                "Точка продаж: Артемовский\nАдрес доставки: Гагарина, 2А",
+                "Артёмовский, Гагарина 2а",
+            )
+        )
+        self.assertFalse(
+            self.adapter._body_mentions_requested_point(
+                "Точка продаж: Екатеринбург\nАдрес доставки: Краснолесья, 12а",
+                "Артёмовский, Гагарина 2а",
+            )
+        )
+
     def test_normalize_report_filters_navigation_noise(self):
         report_text, has_red_flags = self.adapter._normalize_report(
             "Тестовая точка",

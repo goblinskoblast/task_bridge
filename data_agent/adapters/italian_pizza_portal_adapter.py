@@ -41,6 +41,9 @@ class ItalianPizzaPortalAdapter:
             city,
             address,
             f"{city} {address}",
+            f"{city}, {address}",
+            f"{city} (1) {address}",
+            f"{city} (1)",
             city.split()[-1] if city else "",
         ]
         for raw in seeds:
@@ -111,6 +114,27 @@ class ItalianPizzaPortalAdapter:
             if re.search(r"\(\d+\)", text or "")
         ]
         return len(point_like_controls) >= 2
+
+    def _body_mentions_requested_point(self, text: str, point_name: str) -> bool:
+        normalized = self._normalize_text(text)
+        if not normalized:
+            return False
+
+        city = self._normalize_text(point_name.split(",")[0].strip())
+        address = self._normalize_text(point_name.split(",")[-1].strip())
+        if address and address in normalized:
+            return True
+
+        address_tokens = [
+            token
+            for token in re.split(r"[\s,./-]+", address)
+            if len(token) >= 2
+        ]
+        token_hits = sum(1 for token in address_tokens if token in normalized)
+        if token_hits >= min(2, len(address_tokens)):
+            return True
+
+        return bool(city and city in normalized and token_hits >= 1)
 
     def _is_point_menu_control(self, text: str) -> bool:
         lowered = self._normalize_text(text)
@@ -645,6 +669,14 @@ class ItalianPizzaPortalAdapter:
         point_menu_collapsed = False
         if matched_point is not None:
             point_menu_collapsed, visible_point_controls = await self._ensure_point_menu_collapsed(page, point_name)
+            if not point_menu_collapsed:
+                address = point_name.split(",")[-1].strip()
+                city = point_name.split(",")[0].strip()
+                retry_labels = [f"{city} {address}", address, point_name]
+                retried_point = await self._click_visible_text_candidate(page, retry_labels)
+                if retried_point:
+                    matched_point = retried_point
+                    point_menu_collapsed, visible_point_controls = await self._ensure_point_menu_collapsed(page, point_name)
         return {
             "selected": matched_point is not None,
             "matched_point": matched_point,
@@ -1226,6 +1258,28 @@ class ItalianPizzaPortalAdapter:
                     return self._build_failed_result(
                         point_name,
                         "Не удалось подтвердить открытие отчета по бланкам на портале.",
+                        period_hint,
+                        diagnostics=self._build_diagnostics(
+                            stage,
+                            page.url,
+                            point_selected=point_selected,
+                            point_menu_collapsed=point_result.get("point_menu_collapsed", False),
+                            matched_point=point_result["matched_point"],
+                            visible_point_controls=point_result["visible_point_controls"],
+                            point_menu_opener=point_result["opener_text"],
+                            point_search_query=point_result["search_query"],
+                            period_selected=period_result["selected"],
+                            matched_period=period_result["matched_period"],
+                            visible_period_controls=period_result["visible_period_controls"],
+                            visible_report_controls=report_context["visible_report_controls"],
+                            route_label=report_context["route_label"],
+                            page_excerpt=self._normalize_text(body)[:400],
+                        ),
+                    )
+                if not self._body_mentions_requested_point(body, point_name):
+                    return self._build_failed_result(
+                        point_name,
+                        "Не удалось подтвердить, что отчет относится к выбранной точке.",
                         period_hint,
                         diagnostics=self._build_diagnostics(
                             stage,
