@@ -78,6 +78,30 @@ def verify_webapp_auth_token(
     return user_id
 
 
+def resolve_authenticated_webapp_user(
+    *,
+    init_data: str | None,
+    signed_token: str | None,
+    verify_telegram_init_data: Any,
+    verify_signed_token: Any,
+) -> tuple[str, Any]:
+    init_error: Exception | None = None
+
+    if init_data:
+        try:
+            return "telegram", verify_telegram_init_data(init_data)
+        except Exception as exc:  # pragma: no cover - behavior verified via return/raise contract
+            init_error = exc
+
+    if signed_token:
+        return "signed", verify_signed_token(signed_token)
+
+    if init_error:
+        raise init_error
+
+    raise ValueError("Authentication required")
+
+
 def build_signed_webapp_url(
     base_domain: str,
     *,

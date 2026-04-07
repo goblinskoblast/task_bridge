@@ -23,7 +23,11 @@ from urllib import parse as urlparse
 from urllib import request as urlrequest
 
 from config_helpers import derive_internal_api_token
-from webapp_auth import build_webapp_auth_token, verify_webapp_auth_token
+from webapp_auth import (
+    build_webapp_auth_token,
+    resolve_authenticated_webapp_user,
+    verify_webapp_auth_token,
+)
 
 app = FastAPI(title="TaskBridge API")
 
@@ -180,13 +184,27 @@ def _get_or_create_user_from_telegram_payload(db: Session, user_data: dict[str, 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     init_data = _extract_telegram_init_data(request)
-    if init_data:
-        telegram_user = _verify_telegram_init_data(init_data)
-        return _get_or_create_user_from_telegram_payload(db, telegram_user)
-
     signed_token = request.cookies.get(WEBAPP_AUTH_COOKIE_NAME) or request.query_params.get("tb_auth")
-    if signed_token:
-        user_id = _verify_webapp_auth_token(signed_token)
+
+    if init_data or signed_token:
+        try:
+            auth_source, auth_payload = resolve_authenticated_webapp_user(
+                init_data=init_data or None,
+                signed_token=signed_token or None,
+                verify_telegram_init_data=_verify_telegram_init_data,
+                verify_signed_token=_verify_webapp_auth_token,
+            )
+        except HTTPException as exc:
+            if init_data and signed_token:
+                logger.warning("Web auth fallback failed after Telegram init error: %s", exc.detail)
+            raise
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+        if auth_source == "telegram":
+            return _get_or_create_user_from_telegram_payload(db, auth_payload)
+
+        user_id = int(auth_payload)
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             raise HTTPException(status_code=401, detail="Authenticated user not found")
