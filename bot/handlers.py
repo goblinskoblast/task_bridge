@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from config import TASK_KEYWORDS, MINI_APP_URL, HOST, PORT, WEB_APP_DOMAIN
 from db.models import User, Message as MessageModel, Task, Category, PendingTask, TaskFile, Chat
 from db.database import get_db_session
-from bot.ai_extractor import analyze_message
+from bot.ai_extractor import analyze_message, telegram_message_requires_context
 
 logger = logging.getLogger(__name__)
 
@@ -26,16 +26,34 @@ def get_recent_chat_context(
     db: Session,
     chat_id: int,
     current_message_db_id: int,
-    limit: int = 8
+    current_message_date: Optional[datetime] = None,
+    current_user_id: Optional[int] = None,
+    limit: int = 3,
+    max_age_minutes: int = 15,
 ) -> List[dict]:
     """Return recent chat messages for context-aware task extraction."""
-    recent_messages = (
+    query = (
         db.query(MessageModel)
         .filter(
             MessageModel.chat_id == chat_id,
-            MessageModel.id != current_message_db_id,
-            MessageModel.text.isnot(None)
+            MessageModel.id < current_message_db_id,
+            MessageModel.text.isnot(None),
+            MessageModel.has_task.is_(False),
         )
+    )
+
+    if current_message_date is not None:
+        min_context_date = current_message_date - timedelta(minutes=max_age_minutes)
+        query = query.filter(
+            MessageModel.date <= current_message_date,
+            MessageModel.date >= min_context_date,
+        )
+
+    if current_user_id is not None:
+        query = query.filter(MessageModel.user_id == current_user_id)
+
+    recent_messages = (
+        query
         .order_by(MessageModel.date.desc(), MessageModel.id.desc())
         .limit(limit)
         .all()
@@ -865,9 +883,28 @@ async def handle_group_message(message: Message):
         db.commit()
         db.refresh(message_obj)
 
-        context_messages = get_recent_chat_context(db=db, chat_id=message.chat.id, current_message_db_id=message_obj.id)
-        logger.info("Analyzing message with %s context items: %s...", len(context_messages), message.text[:50])
-        ai_result = await analyze_message(message.text, use_ai=True, context_messages=context_messages)
+        context_messages: List[dict] = []
+        if telegram_message_requires_context(message.text):
+            context_messages = get_recent_chat_context(
+                db=db,
+                chat_id=message.chat.id,
+                current_message_db_id=message_obj.id,
+                current_message_date=message.date,
+                current_user_id=user.id,
+            )
+            logger.info(
+                "Analyzing message with %s bounded context items: %s...",
+                len(context_messages),
+                message.text[:50],
+            )
+        else:
+            logger.info("Analyzing self-contained message without context: %s...", message.text[:50])
+
+        ai_result = await analyze_message(
+            message.text,
+            use_ai=True,
+            context_messages=context_messages or None,
+        )
         if not ai_result or not ai_result.get("has_task"):
             logger.info("No task found in message")
             return
@@ -1074,5 +1111,4 @@ async def handle_other_message(message: Message):
             "Я работаю в групповых чатах. Добавьте меня в группу, чтобы я начал анализировать задачи.\n\n"
             "Используйте /help для получения справки."
         )
-
 

@@ -36,6 +36,9 @@ Core rules:
 - Treat meeting and call invitations as tasks too. If the communication asks someone to attend a meeting, join a call, be on a demo, or connect at a specific time, extract it as a task.
 - A task may be indirect. If the sender expects a concrete result, artifact, answer, file, update, approval, or action, it is a task candidate.
 - For Telegram, the current message must trigger the task. Older context may complete the details but should not create a task on its own.
+- Never merge multiple unrelated Telegram messages into one task.
+- For Telegram, ignore older context when the current message is already self-contained.
+- If a Telegram message is only an addendum like "и еще в PDF" or "к субботе" without its own action trigger, return has_task=false.
 - For Email, use subject, body, quoted thread, and attachment text together.
 - Separate simple notifications from real tasks. Ignore pure discussion, jokes, newsletters, ads, receipts, login/security alerts, delivery updates, and service notifications unless they contain a clear expected action from the recipient.
 - Build a short clean title. Remove greetings, direct addresses, filler, and repeated deadline wording when possible.
@@ -305,6 +308,28 @@ MEETING_MARKERS = [
     "webex",
     "demo",
 ]
+
+TELEGRAM_CONTEXT_PREFIX_MARKERS = [
+    "и ",
+    "и еще",
+    "и ещё",
+    "а ",
+    "тогда",
+    "тоже",
+    "также",
+    "ещё",
+    "еще",
+    "also",
+    "and ",
+    "plus",
+]
+
+TELEGRAM_CONTEXT_REFERENCE_PATTERN = re.compile(
+    r"\b(это|этот|эту|эти|этого|этому|такое|такой|там|туда|it|this|that|them|there)\b",
+    flags=re.IGNORECASE,
+)
+
+TELEGRAM_CONTEXT_MAX_TEXT_LENGTH = 160
 
 
 def get_current_datetime() -> str:
@@ -587,6 +612,33 @@ def _extract_mentions(text: str) -> List[str]:
     return [item.lstrip("@") for item in re.findall(r"@[A-Za-z0-9_]+", text or "")]
 
 
+def telegram_message_requires_context(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
+    if not normalized:
+        return False
+
+    if len(normalized) > TELEGRAM_CONTEXT_MAX_TEXT_LENGTH:
+        return False
+
+    if normalized.endswith(("...", "…")):
+        return True
+
+    if any(normalized.startswith(marker) for marker in TELEGRAM_CONTEXT_PREFIX_MARKERS):
+        return True
+
+    if TELEGRAM_CONTEXT_REFERENCE_PATTERN.search(normalized):
+        return True
+
+    if _contains_deadline_signal(normalized) and not (
+        _contains_imperative_signal(normalized)
+        or _contains_strong_task_signal(normalized)
+        or _contains_meeting_signal(normalized)
+    ):
+        return True
+
+    return False
+
+
 def _contains_imperative_signal(text: str) -> bool:
     lowered = (text or "").lower()
     if any(marker in lowered for marker in IMPERATIVE_MARKERS):
@@ -769,7 +821,12 @@ def _build_fallback_task(
 
     trigger_text = current_text if source == "telegram" else _select_best_email_trigger_text(subject, body_text)
     context_text = "\n".join((item.get("text") or "").strip() for item in (context_messages or []) if (item.get("text") or "").strip())
-    combined_text = "\n".join(part for part in [subject, body_text, context_text, attachments_text] if part).strip()
+    if source == "telegram":
+        analysis_text = "\n".join(part for part in [current_text, context_text] if part).strip()
+        combined_text = analysis_text
+    else:
+        analysis_text = "\n".join(part for part in [subject, body_text, context_text, attachments_text] if part).strip()
+        combined_text = analysis_text
 
     if not combined_text or _is_noise(combined_text):
         return None
@@ -777,10 +834,15 @@ def _build_fallback_task(
     if source == "email" and _looks_like_notification_email(subject, body_text):
         return None
 
-    if not _contains_imperative_signal(trigger_text):
-        if source == "email" and not (_contains_strong_task_signal(combined_text) or _contains_meeting_signal(combined_text)):
+    if source == "telegram":
+        if not (
+            _contains_imperative_signal(trigger_text)
+            or _contains_strong_task_signal(trigger_text)
+            or _contains_meeting_signal(trigger_text)
+        ):
             return None
-        if source == "telegram" and not _contains_meeting_signal(combined_text):
+    elif not _contains_imperative_signal(trigger_text):
+        if source == "email" and not (_contains_strong_task_signal(combined_text) or _contains_meeting_signal(combined_text)):
             return None
     elif source == "email" and not (_contains_strong_task_signal(trigger_text) or _contains_meeting_signal(combined_text)):
         return None
@@ -812,14 +874,12 @@ def _build_fallback_task(
             description_parts.append(attachments_text)
     else:
         description_parts.append(current_text)
-        if context_text:
-            description_parts.append(f"Контекст: {context_text}")
 
     if meeting_meta["details"]:
         description_parts.append(meeting_meta["details"])
 
     description = "\n\n".join(part.strip() for part in description_parts if part.strip()) or title
-    due_date = _extract_due_date(combined_text)
+    due_date = _extract_due_date(analysis_text)
     assignee_usernames = _extract_mentions(trigger_text)
 
     return {
@@ -829,7 +889,7 @@ def _build_fallback_task(
             "description": description,
             "assignee_usernames": assignee_usernames,
             "due_date": due_date.strftime("%Y-%m-%d %H:%M:%S") if due_date else None,
-            "priority": _infer_priority(combined_text),
+            "priority": _infer_priority(current_text if source == "telegram" else combined_text),
         },
     }
 
