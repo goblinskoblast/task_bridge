@@ -575,6 +575,8 @@ class ItalianPizzaPortalAdapter:
             return "Не удалось войти в портал: проверьте логин и пароль."
         if any(token in lowered for token in ["нет доступа", "access denied", "403", "forbidden", "permission denied"]):
             return "Портал вернул отказ в доступе."
+        if any(token in lowered for token in ["bad gateway", "502", "invalid response from the upstream server", "upstream", "gateway timeout"]):
+            return "Портал временно недоступен: upstream вернул ошибку 502/Bad Gateway."
         return None
 
     def _looks_like_login_page(self, text: str) -> bool:
@@ -863,6 +865,14 @@ class ItalianPizzaPortalAdapter:
                     portal_meta[:8],
                     self._normalize_text(portal_text)[:160],
                 )
+                portal_issue = self._detect_terminal_issue(portal_text)
+                if portal_issue:
+                    return self._build_failed_result(
+                        point_name,
+                        portal_issue,
+                        period_hint,
+                        diagnostics=self._build_diagnostics("portal_ready", page.url, page_excerpt=self._normalize_text(portal_text)[:400]),
+                    )
                 stage = "point_selection"
                 point_result = await self._select_point(page, point_name)
                 current_url = page.url
