@@ -86,6 +86,16 @@ class AgentRuntimePeriodHintTest(unittest.TestCase):
         period = runtime._extract_period_hint("проверь бланки за последние 6 часов")
         self.assertEqual(period, "за последние 6 часов")
 
+    def test_extract_period_hint_supports_last_day_for_reviews(self):
+        runtime = DataAgentRuntime()
+        period = runtime._extract_period_hint("собери отзывы по точке за сутки")
+        self.assertEqual(period, "последние сутки")
+
+    def test_extract_period_hint_supports_last_week_for_reviews(self):
+        runtime = DataAgentRuntime()
+        period = runtime._extract_period_hint("собери отзывы по точке за неделю")
+        self.assertEqual(period, "за последнюю неделю")
+
 
 if __name__ == "__main__":
     unittest.main()

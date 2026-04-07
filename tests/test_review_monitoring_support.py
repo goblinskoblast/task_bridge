@@ -12,7 +12,7 @@ class ReviewMonitoringSupportTest(unittest.TestCase):
     def test_build_report_for_window_label_uses_regular_parser(self):
         service = ReviewReportService()
         window = service._resolve_window("отзывы за последние 7 дней")
-        self.assertEqual(window.label, "за последние 7 дней")
+        self.assertEqual(window.label, "за последнюю неделю")
 
 
 if __name__ == "__main__":

@@ -260,10 +260,14 @@ class DataAgentRuntime:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
         if "текущий бланк" in lowered:
             return "текущий бланк"
+        if "вчера" in lowered:
+            return "вчера"
         if "сегодня" in lowered:
             return "сегодня"
-        if "сутки" in lowered or "24 часа" in lowered:
+        if any(marker in lowered for marker in ["сутки", "24 часа", "за день", "за последний день", "последний день"]):
             return "последние сутки"
+        if any(marker in lowered for marker in ["за неделю", "за последнюю неделю", "последняя неделя", "за 7 дней", "последние 7 дней", "еженедель"]):
+            return "за последнюю неделю"
 
         hours_match = re.search(r"(?:за|последние|предыдущие)?\s*(\d+)\s*час", lowered)
         if hours_match:

@@ -84,7 +84,7 @@ class ReviewReportService:
 
     def _resolve_window(self, user_message: str) -> ReviewWindow:
         now = datetime.now()
-        lowered = user_message.lower()
+        lowered = re.sub(r"\s+", " ", user_message.lower()).strip()
 
         if "вчера" in lowered:
             start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -102,12 +102,12 @@ class ReviewReportService:
         if "3 часа" in lowered or "последние 3" in lowered or "предыдущие 3" in lowered:
             return self._relative_hours_window(now, hours=3)
 
-        if "сутки" in lowered or "24 часа" in lowered or "последние 24" in lowered:
+        if self._is_last_day_request(lowered):
             return self._relative_hours_window(now, hours=24)
 
-        if "7 дней" in lowered or "последние 7 дней" in lowered:
+        if self._is_last_week_request(lowered):
             start = now - timedelta(days=7)
-            return ReviewWindow(start=start, end=now, label="за последние 7 дней")
+            return ReviewWindow(start=start, end=now, label="за последнюю неделю")
 
         if "month" in lowered or "месяц" in lowered:
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -117,7 +117,7 @@ class ReviewReportService:
                 end = start.replace(month=start.month + 1)
             return ReviewWindow(start=start, end=end, label="за текущий месяц")
 
-        if "week" in lowered or "недел" in lowered:
+        if self._is_current_week_request(lowered):
             start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
             end = start + timedelta(days=7)
             return ReviewWindow(start=start, end=end, label="за текущую неделю")
@@ -129,6 +129,44 @@ class ReviewReportService:
         start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         end = start + timedelta(days=7)
         return ReviewWindow(start=start, end=end, label="за текущую неделю")
+
+    def _is_last_day_request(self, lowered: str) -> bool:
+        return any(
+            marker in lowered
+            for marker in [
+                "сутки",
+                "24 часа",
+                "последние 24",
+                "за день",
+                "за последний день",
+                "последний день",
+            ]
+        )
+
+    def _is_last_week_request(self, lowered: str) -> bool:
+        return any(
+            marker in lowered
+            for marker in [
+                "за неделю",
+                "за последнюю неделю",
+                "последняя неделя",
+                "7 дней",
+                "последние 7 дней",
+                "за 7 дней",
+                "еженедель",
+            ]
+        )
+
+    def _is_current_week_request(self, lowered: str) -> bool:
+        return any(
+            marker in lowered
+            for marker in [
+                "текущая неделя",
+                "эта неделя",
+                "current week",
+                "this week",
+            ]
+        )
 
     def _relative_hours_window(self, now: datetime, *, hours: int) -> ReviewWindow:
         start = now - timedelta(hours=hours)

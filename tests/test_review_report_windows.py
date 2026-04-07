@@ -28,9 +28,29 @@ class ReviewReportWindowsTest(unittest.TestCase):
         self.assertEqual(window.label, "за последние 12 часов")
         self.assertEqual(window.end - window.start, timedelta(hours=12))
 
+    def test_resolve_last_day_window_for_day_wording(self):
+        window = self.service._resolve_window("отзывы по точке за день")
+        self.assertEqual(window.label, "за последние 24 часов")
+        self.assertEqual(window.end - window.start, timedelta(hours=24))
+
+    def test_resolve_last_day_window_for_day_phrase(self):
+        window = self.service._resolve_window("отзывы за последние сутки")
+        self.assertEqual(window.label, "за последние 24 часов")
+        self.assertEqual(window.end - window.start, timedelta(hours=24))
+
+    def test_resolve_last_week_window_for_week_wording(self):
+        window = self.service._resolve_window("отзывы за неделю")
+        self.assertEqual(window.label, "за последнюю неделю")
+        self.assertEqual(window.end - window.start, timedelta(days=7))
+
     def test_resolve_last_7_days_window(self):
         window = self.service._resolve_window("отзывы за последние 7 дней")
-        self.assertEqual(window.label, "за последние 7 дней")
+        self.assertEqual(window.label, "за последнюю неделю")
+        self.assertEqual(window.end - window.start, timedelta(days=7))
+
+    def test_resolve_current_week_window_still_supported(self):
+        window = self.service._resolve_window("отзывы за текущую неделю")
+        self.assertEqual(window.label, "за текущую неделю")
         self.assertEqual(window.end - window.start, timedelta(days=7))
 
 
