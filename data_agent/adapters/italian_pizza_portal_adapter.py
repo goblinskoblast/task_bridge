@@ -52,6 +52,36 @@ class ItalianPizzaPortalAdapter:
                 variants.append(normalized)
         return variants
 
+    def _point_group_variants(self, point_name: str) -> list[str]:
+        city = point_name.split(",")[0].strip()
+        variants: list[str] = []
+        for raw in (f"{city} (1)", city):
+            normalized = re.sub(r"\s+", " ", (raw or "").strip())
+            if normalized and normalized not in variants:
+                variants.append(normalized)
+        return variants
+
+    def _point_address_variants(self, point_name: str) -> list[str]:
+        address = point_name.split(",")[-1].strip()
+        variants: list[str] = []
+        seeds = [address]
+        parts = re.split(r"\s+", address)
+        if len(parts) >= 2 and any(ch.isdigit() for ch in parts[-1]):
+            street = " ".join(parts[:-1]).strip()
+            house = parts[-1].strip()
+            seeds.extend(
+                [
+                    f"{street}, {house}",
+                    f"{street},{house}",
+                    f"{street} {house}",
+                ]
+            )
+        for raw in seeds:
+            normalized = re.sub(r"\s+", " ", (raw or "").strip())
+            if normalized and normalized not in variants:
+                variants.append(normalized)
+        return variants
+
     def _point_tokens(self, point_name: str) -> list[str]:
         tokens: list[str] = []
         for variant in self._point_variants(point_name):
@@ -114,6 +144,23 @@ class ItalianPizzaPortalAdapter:
             if re.search(r"\(\d+\)", text or "")
         ]
         return len(point_like_controls) >= 2
+
+    def _point_header_matches_requested_point(self, text: str, point_name: str) -> bool:
+        lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+        top_lines = lines[:12]
+        return any(self._line_mentions_requested_point(line, point_name) for line in top_lines)
+
+    def _blank_hour_value(self, period_hint: str) -> str | None:
+        normalized = self._normalize_text(period_hint)
+        if not normalized or "текущий бланк" in normalized:
+            return None
+        hours_match = re.search(r"(\d+)\s*час", normalized)
+        if not hours_match:
+            return None
+        hours = int(hours_match.group(1))
+        if hours in {0, 3, 6, 9, 12, 15, 18, 21}:
+            return str(hours)
+        return None
 
     def _line_mentions_requested_point(self, text: str, point_name: str) -> bool:
         normalized = self._normalize_text(text)
@@ -322,6 +369,104 @@ class ItalianPizzaPortalAdapter:
 
         return await self._dispatch_visible_text_candidate_click(page, labels)
 
+    async def _iter_sidebar_point_buttons(self, page, max_items: int = 40) -> list[tuple[int, str, str]]:
+        locator = page.locator(".ESSidebarItem-button")
+        count = min(await locator.count(), max_items)
+        results: list[tuple[int, str, str]] = []
+        for idx in range(count):
+            item = locator.nth(idx)
+            try:
+                if not await item.is_visible():
+                    continue
+                text = (await item.inner_text()).strip()
+                tag = await item.evaluate("(node) => (node.tagName || '').toLowerCase()")
+            except Exception:
+                continue
+            if not text or len(text) > 120:
+                continue
+            results.append((idx, re.sub(r"\s+", " ", text), str(tag or "").strip().lower()))
+        return results
+
+    async def _click_sidebar_point_button(
+        self,
+        page,
+        labels: list[str],
+        *,
+        preferred_tags: set[str] | None = None,
+    ) -> str | None:
+        buttons = await self._iter_sidebar_point_buttons(page)
+        if not buttons:
+            return None
+
+        best_idx = None
+        best_text = ""
+        best_score = 0
+        for idx, text, tag in buttons:
+            score = self._label_match_score(text, labels)
+            if score <= 0:
+                continue
+            if preferred_tags and tag in preferred_tags:
+                score += 30
+            if tag == "a":
+                score += 8
+            elif tag == "div":
+                score += 4
+            if score > best_score:
+                best_idx = idx
+                best_text = text
+                best_score = score
+
+        if best_idx is None:
+            return None
+
+        locator = page.locator(".ESSidebarItem-button")
+        try:
+            await locator.nth(best_idx).scroll_into_view_if_needed()
+            await locator.nth(best_idx).click(timeout=2500, force=True)
+            await page.wait_for_timeout(900)
+            logger.info(
+                "Blanks sidebar point button clicked idx=%s text=%s score=%s preferred_tags=%s",
+                best_idx,
+                best_text,
+                best_score,
+                sorted(preferred_tags or []),
+            )
+            return best_text
+        except Exception as exc:
+            logger.info(
+                "Blanks sidebar point button click failed idx=%s text=%s error=%s",
+                best_idx,
+                best_text,
+                exc,
+            )
+            return None
+
+    async def _click_sidebar_point_path(self, page, point_name: str) -> str | None:
+        city_clicked = await self._click_sidebar_point_button(
+            page,
+            self._point_group_variants(point_name),
+            preferred_tags={"div"},
+        )
+        if not city_clicked:
+            return None
+
+        await page.wait_for_timeout(900)
+        address_clicked = await self._click_sidebar_point_button(
+            page,
+            self._point_address_variants(point_name),
+            preferred_tags={"a"},
+        )
+        if not address_clicked:
+            return None
+
+        await page.wait_for_timeout(1200)
+        logger.info(
+            "Blanks point selected via sidebar path city=%s address=%s",
+            city_clicked,
+            address_clicked,
+        )
+        return address_clicked
+
     async def _iter_point_controls(self, page, point_name: str, max_items: int = 220) -> list[tuple[int, str, int]]:
         locator = page.locator(self._POINT_CONTROL_SELECTOR)
         count = min(await locator.count(), max_items)
@@ -454,6 +599,18 @@ class ItalianPizzaPortalAdapter:
         return None
 
     async def _click_point_variant_if_visible(self, page, point_name: str) -> str | None:
+        matched_sidebar_path = await self._click_sidebar_point_path(page, point_name)
+        if matched_sidebar_path:
+            return matched_sidebar_path
+
+        matched_sidebar_address = await self._click_sidebar_point_button(
+            page,
+            self._point_address_variants(point_name),
+            preferred_tags={"a"},
+        )
+        if matched_sidebar_address:
+            return matched_sidebar_address
+
         controls = [
             item
             for item in await self._iter_point_controls(page, point_name)
@@ -847,6 +1004,52 @@ class ItalianPizzaPortalAdapter:
             f"Попробуйте один из доступных вариантов: {', '.join(supported[:8])}."
         )
 
+    async def _visible_blank_hour_controls(self, page) -> list[str]:
+        locator = page.locator("button")
+        count = min(await locator.count(), 40)
+        seen: list[str] = []
+        for idx in range(count):
+            item = locator.nth(idx)
+            try:
+                if not await item.is_visible():
+                    continue
+                text = (await item.inner_text()).strip()
+            except Exception:
+                continue
+            if not re.fullmatch(r"\d{1,2}", text or ""):
+                continue
+            if text not in seen:
+                seen.append(text)
+        return seen[:12]
+
+    async def _click_blank_hour_chip(self, page, hour_value: str) -> bool:
+        locator = page.locator("button")
+        count = min(await locator.count(), 40)
+        for idx in range(count):
+            item = locator.nth(idx)
+            try:
+                if not await item.is_visible():
+                    continue
+                text = (await item.inner_text()).strip()
+            except Exception:
+                continue
+            if text != hour_value:
+                continue
+
+            class_name = (await item.get_attribute("class") or "").lower()
+            if "disabled" in class_name:
+                logger.info("Blanks blank-hour chip already active value=%s idx=%s", hour_value, idx)
+                return True
+
+            try:
+                await item.click(timeout=2500, force=True)
+                await page.wait_for_timeout(1200)
+                logger.info("Blanks blank-hour chip clicked value=%s idx=%s", hour_value, idx)
+                return True
+            except Exception as exc:
+                logger.info("Blanks blank-hour chip click failed value=%s idx=%s error=%s", hour_value, idx, exc)
+        return False
+
     async def _iter_period_controls(self, page, max_items: int = 200) -> list[tuple[int, str]]:
         locator = page.locator("button, [role='button'], [role='tab'], label, span, div, li, option")
         count = min(await locator.count(), max_items)
@@ -988,13 +1191,34 @@ class ItalianPizzaPortalAdapter:
         if not period_hint:
             return {"selected": True, "matched_period": None, "visible_period_controls": []}
         lowered = period_hint.lower()
-        if "текущий бланк" in self._normalize_text(lowered):
+        normalized_hint = self._normalize_text(lowered)
+        if "текущий бланк" in normalized_hint:
             return {
                 "selected": True,
                 "matched_period": "текущий бланк",
                 "visible_period_controls": [],
                 "status": "current_blank",
             }
+        body_text = (await page.locator("body").inner_text())[:8000]
+        normalized_body = self._normalize_text(body_text)
+        if "бланк загрузки" in normalized_body:
+            visible_blank_hours = await self._visible_blank_hour_controls(page)
+            blank_hour_value = self._blank_hour_value(period_hint)
+            if blank_hour_value:
+                if await self._click_blank_hour_chip(page, blank_hour_value):
+                    return {
+                        "selected": True,
+                        "matched_period": blank_hour_value,
+                        "visible_period_controls": visible_blank_hours[:10],
+                        "status": "blank_hour_chip",
+                    }
+                return {
+                    "selected": False,
+                    "matched_period": None,
+                    "visible_period_controls": visible_blank_hours[:10],
+                    "status": "needs_period",
+                    "message": self._build_period_help_message(period_hint, visible_blank_hours),
+                }
         candidates = self._period_candidates(lowered)
         if not candidates:
             visible_controls = await self._visible_period_controls(page)
@@ -1158,10 +1382,14 @@ class ItalianPizzaPortalAdapter:
                 stage = "point_selection"
                 point_result = await self._select_point(page, point_name)
                 current_url = page.url
-                point_selected = point_result["selected"] and point_result.get("point_menu_collapsed", False)
+                body_text = await page.locator("body").inner_text()
+                point_selected = (
+                    point_result["selected"]
+                    and point_result.get("point_menu_collapsed", False)
+                    and self._point_header_matches_requested_point(body_text, point_name)
+                )
                 if not point_selected:
-                    body_text = await page.locator("body").inner_text()
-                    point_selected = self._point_appears_selected(body_text, point_name) and not self._point_menu_looks_open(
+                    point_selected = self._point_header_matches_requested_point(body_text, point_name) and not self._point_menu_looks_open(
                         point_result["visible_point_controls"]
                     )
                 if not point_selected:

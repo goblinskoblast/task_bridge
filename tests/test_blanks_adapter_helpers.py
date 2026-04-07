@@ -8,42 +8,88 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         self.adapter = ItalianPizzaPortalAdapter()
 
     def test_detect_terminal_issue_for_auth_failure(self):
-        issue = self.adapter._detect_terminal_issue("Ошибка: неверный пароль")
-        self.assertEqual(issue, "Не удалось войти в портал: проверьте логин и пароль.")
+        issue = self.adapter._detect_terminal_issue(
+            "\u041e\u0448\u0438\u0431\u043a\u0430: \u043d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u043f\u0430\u0440\u043e\u043b\u044c"
+        )
+        self.assertEqual(
+            issue,
+            "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0432\u043e\u0439\u0442\u0438 \u0432 \u043f\u043e\u0440\u0442\u0430\u043b: "
+            "\u043f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u043b\u043e\u0433\u0438\u043d \u0438 \u043f\u0430\u0440\u043e\u043b\u044c."
+        )
 
     def test_detect_terminal_issue_for_access_denied(self):
         issue = self.adapter._detect_terminal_issue("403 forbidden")
-        self.assertEqual(issue, "Портал вернул отказ в доступе.")
+        self.assertEqual(issue, "\u041f\u043e\u0440\u0442\u0430\u043b \u0432\u0435\u0440\u043d\u0443\u043b \u043e\u0442\u043a\u0430\u0437 \u0432 \u0434\u043e\u0441\u0442\u0443\u043f\u0435.")
 
     def test_looks_like_login_page(self):
-        self.assertTrue(self.adapter._looks_like_login_page("Логин\nПароль\nВойти"))
-        self.assertFalse(self.adapter._looks_like_login_page("Отчет по перегрузкам\nКрасных бланков нет"))
+        self.assertTrue(
+            self.adapter._looks_like_login_page(
+                "\u041b\u043e\u0433\u0438\u043d\n\u041f\u0430\u0440\u043e\u043b\u044c\n\u0412\u043e\u0439\u0442\u0438"
+            )
+        )
+        self.assertFalse(
+            self.adapter._looks_like_login_page(
+                "\u041e\u0442\u0447\u0435\u0442 \u043f\u043e \u043f\u0435\u0440\u0435\u0433\u0440\u0443\u0437\u043a\u0430\u043c\n"
+                "\u041a\u0440\u0430\u0441\u043d\u044b\u0445 \u0431\u043b\u0430\u043d\u043a\u043e\u0432 \u043d\u0435\u0442"
+            )
+        )
 
     def test_contains_report_context(self):
-        self.assertTrue(self.adapter._contains_report_context("Отчет по перегрузкам\nЕсть отклонения по лимиту"))
-        self.assertFalse(self.adapter._contains_report_context("Главная\nНастройки\nПрофиль"))
+        self.assertTrue(
+            self.adapter._contains_report_context(
+                "\u041e\u0442\u0447\u0435\u0442 \u043f\u043e \u043f\u0435\u0440\u0435\u0433\u0440\u0443\u0437\u043a\u0430\u043c\n"
+                "\u0415\u0441\u0442\u044c \u043e\u0442\u043a\u043b\u043e\u043d\u0435\u043d\u0438\u044f \u043f\u043e \u043b\u0438\u043c\u0438\u0442\u0443"
+            )
+        )
+        self.assertFalse(
+            self.adapter._contains_report_context(
+                "\u0413\u043b\u0430\u0432\u043d\u0430\u044f\n\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438\n\u041f\u0440\u043e\u0444\u0438\u043b\u044c"
+            )
+        )
 
     def test_point_match_score_prefers_relevant_point_labels(self):
-        strong = self.adapter._point_match_score("Верхний Уфалей Ленина 147", "Верхний Уфалей, Ленина 147")
-        weak = self.adapter._point_match_score("Екатеринбург Малышева 5", "Верхний Уфалей, Ленина 147")
+        strong = self.adapter._point_match_score(
+            "Upper Ufaley Lenina 147",
+            "Upper Ufaley, Lenina 147",
+        )
+        weak = self.adapter._point_match_score(
+            "Ekaterinburg Malysheva 5",
+            "Upper Ufaley, Lenina 147",
+        )
         self.assertGreater(strong, weak)
 
     def test_point_specificity_prefers_full_row_with_address(self):
-        detailed = self.adapter._point_specificity_score("Артемовский (1) Гагарина, 2А", "Артёмовский, Гагарина 2а")
-        short = self.adapter._point_specificity_score("Артемовский (1)", "Артёмовский, Гагарина 2а")
+        detailed = self.adapter._point_specificity_score(
+            "Artemovsky (1) Gagarina, 2A",
+            "Artemovsky, Gagarina 2a",
+        )
+        short = self.adapter._point_specificity_score(
+            "Artemovsky (1)",
+            "Artemovsky, Gagarina 2a",
+        )
         self.assertGreater(detailed, short)
+
+    def test_point_address_variants_include_nested_sidebar_label(self):
+        variants = self.adapter._point_address_variants("Testcity, Main 2a")
+        self.assertIn("Main 2a", variants)
+        self.assertIn("Main, 2a", variants)
+
+    def test_point_group_variants_include_sidebar_bucket(self):
+        variants = self.adapter._point_group_variants("Testcity, Main 2a")
+        self.assertIn("Testcity", variants)
+        self.assertIn("Testcity (1)", variants)
 
     def test_point_menu_looks_open_for_multiple_point_rows(self):
         self.assertTrue(
             self.adapter._point_menu_looks_open(
                 [
-                    "Артемовский (1) Гагарина, 2А",
-                    "Асбест (1) Ленина, 5",
-                    "Верхний Уфалей (1) Ленина, 147",
+                    "Artemovsky (1) Gagarina, 2A",
+                    "Asbest (1) Lenina, 5",
+                    "Upper Ufaley (1) Lenina, 147",
                 ]
             )
         )
-        self.assertFalse(self.adapter._point_menu_looks_open(["Артемовский (1) Гагарина, 2А"]))
+        self.assertFalse(self.adapter._point_menu_looks_open(["Artemovsky (1) Gagarina, 2A"]))
 
     def test_body_mentions_requested_point_by_address_tokens(self):
         self.assertTrue(
@@ -55,6 +101,20 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         self.assertFalse(
             self.adapter._body_mentions_requested_point(
                 "Point: Othercity\nDelivery address: Side, 12a",
+                "Testcity, Main 2a",
+            )
+        )
+
+    def test_point_header_matches_requested_point(self):
+        self.assertTrue(
+            self.adapter._point_header_matches_requested_point(
+                "Operator\nTestcity, Main, 2A\nBlank report",
+                "Testcity, Main 2a",
+            )
+        )
+        self.assertFalse(
+            self.adapter._point_header_matches_requested_point(
+                "Operator\nOthercity, Side, 12A\nBlank report",
                 "Testcity, Main 2a",
             )
         )
@@ -76,47 +136,67 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
 
     def test_normalize_report_filters_navigation_noise(self):
         report_text, has_red_flags = self.adapter._normalize_report(
-            "Тестовая точка",
+            "Test point",
             "\n".join(
                 [
-                    "Главная",
-                    "Настройки",
-                    "Отчет по перегрузкам",
-                    "Красный бланк по строке 12",
-                    "Лимит превышен",
+                    "\u0413\u043b\u0430\u0432\u043d\u0430\u044f",
+                    "\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438",
+                    "\u041e\u0442\u0447\u0435\u0442 \u043f\u043e \u043f\u0435\u0440\u0435\u0433\u0440\u0443\u0437\u043a\u0430\u043c",
+                    "\u041a\u0440\u0430\u0441\u043d\u044b\u0439 \u0431\u043b\u0430\u043d\u043a \u043f\u043e \u0441\u0442\u0440\u043e\u043a\u0435 12",
+                    "\u041b\u0438\u043c\u0438\u0442 \u043f\u0440\u0435\u0432\u044b\u0448\u0435\u043d",
                 ]
             ),
         )
         self.assertTrue(has_red_flags)
-        self.assertNotIn("Главная", report_text)
-        self.assertIn("Красный бланк", report_text)
+        self.assertNotIn("\u0413\u043b\u0430\u0432\u043d\u0430\u044f", report_text)
+        self.assertIn("\u041a\u0440\u0430\u0441\u043d\u044b\u0439 \u0431\u043b\u0430\u043d\u043a", report_text)
 
     def test_build_failed_result_marks_status_failed(self):
         result = self.adapter._build_failed_result(
-            "Тестовая точка",
-            "Портал вернул отказ в доступе.",
-            "текущий бланк",
+            "Test point",
+            "Portal denied access.",
+            "current blank",
             diagnostics={"stage": "login_submit", "point_selected": False},
         )
         self.assertEqual(result["status"], "failed")
         self.assertFalse(result["has_red_flags"])
-        self.assertIn("Портал вернул отказ", result["report_text"])
+        self.assertIn("Portal denied access.", result["report_text"])
         self.assertEqual(result["diagnostics"]["stage"], "login_submit")
         self.assertFalse(result["diagnostics"]["point_selected"])
 
     def test_period_candidates_support_six_hours(self):
-        candidates = self.adapter._period_candidates("за последние 6 часов")
-        self.assertIn("6 часов", candidates)
+        candidates = self.adapter._period_candidates(
+            "\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 6 \u0447\u0430\u0441\u043e\u0432"
+        )
+        self.assertIn("6 \u0447\u0430\u0441\u043e\u0432", candidates)
 
     def test_build_period_candidates_do_not_include_ambiguous_numeric_only_values(self):
-        candidates = self.adapter._period_candidates("за последние 6 часов")
+        candidates = self.adapter._period_candidates(
+            "\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 6 \u0447\u0430\u0441\u043e\u0432"
+        )
         self.assertNotIn("6", candidates)
 
+    def test_blank_hour_value_extracts_supported_numeric_chip(self):
+        self.assertEqual(
+            self.adapter._blank_hour_value("\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 3 \u0447\u0430\u0441\u0430"),
+            "3",
+        )
+        self.assertEqual(
+            self.adapter._blank_hour_value("\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 12 \u0447\u0430\u0441\u043e\u0432"),
+            "12",
+        )
+        self.assertIsNone(
+            self.adapter._blank_hour_value("\u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u0431\u043b\u0430\u043d\u043a")
+        )
+
     def test_build_period_help_message_uses_visible_controls(self):
-        message = self.adapter._build_period_help_message("за последние 6 часов", ["3 часа", "12 часов", "Сутки"])
-        self.assertIn("6 часов", message)
-        self.assertIn("3 часа", message)
-        self.assertIn("12 часов", message)
+        message = self.adapter._build_period_help_message(
+            "\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 6 \u0447\u0430\u0441\u043e\u0432",
+            ["3 \u0447\u0430\u0441\u0430", "12 \u0447\u0430\u0441\u043e\u0432", "\u0421\u0443\u0442\u043a\u0438"],
+        )
+        self.assertIn("6 \u0447\u0430\u0441\u043e\u0432", message)
+        self.assertIn("3 \u0447\u0430\u0441\u0430", message)
+        self.assertIn("12 \u0447\u0430\u0441\u043e\u0432", message)
 
 
 if __name__ == "__main__":
