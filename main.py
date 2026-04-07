@@ -18,6 +18,7 @@ from bot.support_handlers import router as support_router
 from config import BOT_TOKEN, HOST, PORT, USE_WEBHOOK, WEBHOOK_PATH, WEBHOOK_URL
 from db.database import get_db_session, init_db
 from webapp.app import app as webapp_app
+from webhook_lifecycle import build_webhook_lifespan
 
 
 logging.basicConfig(
@@ -82,38 +83,16 @@ def configure_webhook_mode() -> None:
     webapp_app.state.taskbridge_webhook_configured = True
     webapp_app.state.taskbridge_bot = None
     webapp_app.state.taskbridge_dispatcher = None
-
-    @webapp_app.on_event("startup")
-    async def on_webhook_startup() -> None:
-        if not USE_WEBHOOK:
-            return
-        if not WEBHOOK_URL or "your-domain.com" in WEBHOOK_URL:
-            raise RuntimeError("WEBHOOK_URL must be configured for webhook mode")
-
-        bot, dp = await initialize_bot_runtime()
-        webapp_app.state.taskbridge_bot = bot
-        webapp_app.state.taskbridge_dispatcher = dp
-
-        await bot.set_webhook(
-            get_webhook_target(),
-            allowed_updates=dp.resolve_used_update_types(),
-        )
-        logger.info("Webhook set to %s", get_webhook_target())
-
-        start_reminder_scheduler(bot)
-        logger.info("Reminder scheduler started")
-
-    @webapp_app.on_event("shutdown")
-    async def on_webhook_shutdown() -> None:
-        if not USE_WEBHOOK:
-            return
-
-        bot = getattr(webapp_app.state, "taskbridge_bot", None)
-        try:
-            await close_bot_runtime(bot)
-        finally:
-            webapp_app.state.taskbridge_bot = None
-            webapp_app.state.taskbridge_dispatcher = None
+    webapp_app.router.lifespan_context = build_webhook_lifespan(
+        app=webapp_app,
+        use_webhook=USE_WEBHOOK,
+        webhook_url=WEBHOOK_URL,
+        webhook_target=get_webhook_target(),
+        initialize_runtime=initialize_bot_runtime,
+        close_runtime=close_bot_runtime,
+        start_scheduler=start_reminder_scheduler,
+        logger=logger,
+    )
 
     @webapp_app.post(WEBHOOK_PATH, include_in_schema=False)
     async def telegram_webhook(request: Request) -> dict:
