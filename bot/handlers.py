@@ -12,11 +12,12 @@ from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from sqlalchemy.orm import Session
 
-from config import TASK_KEYWORDS, MINI_APP_URL, HOST, PORT, WEB_APP_DOMAIN
+from config import TASK_KEYWORDS, MINI_APP_URL, HOST, PORT
 from db.models import User, Message as MessageModel, Task, Category, PendingTask, TaskFile, Chat
 from db.database import get_db_session
 from bot.ai_extractor import analyze_message, telegram_message_requires_context
 from bot.task_file_binding import extract_task_reference, resolve_task_for_file_upload
+from bot.webapp_links import build_taskbridge_webapp_url
 from bot.task_notifications import (
     format_user_mention,
     notify_assigned_user,
@@ -383,7 +384,11 @@ async def cmd_start(message: Message):
 
         if pending_tasks:
             for task in pending_tasks:
-                task_webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}&task_id={task.id}"
+                task_webapp_url = build_taskbridge_webapp_url(
+                    user_id=user.id,
+                    mode="executor",
+                    task_id=task.id,
+                )
                 task_keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📱 Открыть задачу", web_app=WebAppInfo(url=task_webapp_url))]])
                 notification = (
                     f"📌 <b>У вас есть активная задача</b>\n\n"
@@ -395,7 +400,7 @@ async def cmd_start(message: Message):
                     notification += f"Срок: {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
                 await message.answer(notification, reply_markup=task_keyboard, parse_mode="HTML")
 
-        webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}"
+        webapp_url = build_taskbridge_webapp_url(user_id=user.id, mode="executor")
         reply_keyboard = _build_main_reply_keyboard(webapp_url)
         welcome_message = _build_welcome_message(is_first_auth, len(pending_tasks))
         await message.answer(welcome_message, reply_markup=reply_keyboard, parse_mode="HTML")
@@ -457,7 +462,7 @@ async def cmd_panel(message: Message):
             db=db
         )
 
-        webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}"
+        webapp_url = build_taskbridge_webapp_url(user_id=user.id, mode="executor")
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="📱 Открыть панель задач", web_app=WebAppInfo(url=webapp_url))]]
         )
@@ -705,9 +710,13 @@ async def handle_confirm_task(callback: CallbackQuery):
                         logger.error(f"Failed to send start prompt for assignee: {e}", exc_info=True)
 
         creator = db.query(User).filter(User.id == pending_task.created_by_id).first()
-        webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?task_id={task.id}"
+        webapp_url = build_taskbridge_webapp_url(user_id=pending_task.created_by_id, task_id=task.id)
         if creator:
-            webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=manager&user_id={creator.id}&task_id={task.id}"
+            webapp_url = build_taskbridge_webapp_url(
+                user_id=creator.id,
+                mode="manager",
+                task_id=task.id,
+            )
         manager_keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📱 Открыть задачу", web_app=WebAppInfo(url=webapp_url))]])
 
         confirmation_msg = (

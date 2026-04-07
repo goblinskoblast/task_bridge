@@ -23,6 +23,7 @@ from urllib import parse as urlparse
 from urllib import request as urlrequest
 
 from config_helpers import derive_internal_api_token
+from webapp_auth import build_webapp_auth_token, verify_webapp_auth_token
 
 app = FastAPI(title="TaskBridge API")
 
@@ -125,38 +126,20 @@ def _verify_telegram_init_data(init_data: str) -> dict[str, Any]:
 
 
 def _build_webapp_auth_token(user_id: int) -> str:
-    if not OAUTH_STATE_SECRET:
-        raise ValueError("OAUTH_STATE_SECRET is not configured")
-
-    payload = {"uid": user_id, "ts": int(time.time()), "nonce": secrets.token_urlsafe(8)}
-    payload_part = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-    sign = hmac.new(OAUTH_STATE_SECRET.encode("utf-8"), payload_part.encode("utf-8"), hashlib.sha256).digest()
-    return f"{payload_part}.{_b64url_encode(sign)}"
+    return build_webapp_auth_token(OAUTH_STATE_SECRET, user_id)
 
 
 def _verify_webapp_auth_token(token: str) -> int:
-    if not OAUTH_STATE_SECRET:
-        raise HTTPException(status_code=500, detail="OAUTH_STATE_SECRET is not configured")
-
     try:
-        payload_part, sign_part = token.split(".", 1)
+        return verify_webapp_auth_token(
+            OAUTH_STATE_SECRET,
+            token,
+            ttl_seconds=WEBAPP_AUTH_TTL_SECONDS,
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=401, detail="Invalid web session token") from exc
-
-    expected_sign = hmac.new(OAUTH_STATE_SECRET.encode("utf-8"), payload_part.encode("utf-8"), hashlib.sha256).digest()
-    provided_sign = _b64url_decode(sign_part)
-    if not hmac.compare_digest(expected_sign, provided_sign):
-        raise HTTPException(status_code=401, detail="Web session token signature is invalid")
-
-    payload = json.loads(_b64url_decode(payload_part).decode("utf-8"))
-    created_ts = int(payload.get("ts", 0))
-    if created_ts <= 0 or int(time.time()) - created_ts > WEBAPP_AUTH_TTL_SECONDS:
-        raise HTTPException(status_code=401, detail="Web session token has expired")
-
-    user_id = int(payload.get("uid", 0))
-    if user_id <= 0:
-        raise HTTPException(status_code=401, detail="Web session token user is invalid")
-    return user_id
+        detail = str(exc)
+        status_code = 500 if detail == "OAUTH_STATE_SECRET is not configured" else 401
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
 def _get_or_create_user_from_telegram_payload(db: Session, user_data: dict[str, Any]) -> User:
@@ -357,6 +340,41 @@ def _verify_oauth_state(state: str) -> int:
     if uid <= 0:
         raise ValueError("Invalid OAuth state user")
     return uid
+
+
+def _should_use_secure_cookie(request: Request) -> bool:
+    if WEB_APP_DOMAIN.startswith("https://"):
+        return True
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "").strip().lower()
+    return request.url.scheme == "https" or forwarded_proto == "https"
+
+
+def _set_webapp_auth_cookie(response: Response, request: Request, token: str) -> None:
+    response.set_cookie(
+        key=WEBAPP_AUTH_COOKIE_NAME,
+        value=token,
+        path="/",
+        max_age=WEBAPP_AUTH_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=_should_use_secure_cookie(request),
+    )
+
+
+def _serve_webapp_index(request: Request) -> FileResponse:
+    if not index_html_path.exists():
+        logger.error(f"index.html NOT FOUND at {index_html_path}")
+        raise HTTPException(status_code=404, detail=f"index.html not found at {index_html_path}")
+
+    response = FileResponse(str(index_html_path))
+    signed_token = (request.query_params.get("tb_auth") or "").strip()
+    if signed_token:
+        try:
+            _verify_webapp_auth_token(signed_token)
+            _set_webapp_auth_cookie(response, request, signed_token)
+        except HTTPException as exc:
+            logger.warning("Ignoring invalid tb_auth on webapp route: %s", exc.detail)
+    return response
 
 
 def _exchange_google_code(code: str) -> dict:
@@ -577,24 +595,18 @@ async def read_root():
 
 
 @app.get("/webapp/index.html", response_class=HTMLResponse)
-async def read_webapp():
+async def read_webapp(request: Request):
     """Отображение веб-приложения для WebApp-кнопок."""
-    if not index_html_path.exists():
-        logger.error(f"index.html NOT FOUND at {index_html_path}")
-        raise HTTPException(status_code=404, detail=f"index.html not found at {index_html_path}")
     logger.info(f"Serving index.html from {index_html_path}")
-    return FileResponse(str(index_html_path))
+    return _serve_webapp_index(request)
 
 
 @app.get("//webapp/index.html", response_class=HTMLResponse)
-async def read_webapp_double_slash():
+async def read_webapp_double_slash(request: Request):
     """Fallback для двойного слэша, если WEB_APP_DOMAIN оканчивается на /."""
     logger.warning("Request with double slash! Check WEB_APP_DOMAIN configuration")
-    if not index_html_path.exists():
-        logger.error(f"index.html NOT FOUND at {index_html_path}")
-        raise HTTPException(status_code=404, detail=f"index.html not found at {index_html_path}")
     logger.info(f"Serving index.html from {index_html_path}")
-    return FileResponse(str(index_html_path))
+    return _serve_webapp_index(request)
 
 
 @app.get("/health")

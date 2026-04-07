@@ -254,6 +254,26 @@ NOTIFICATION_MARKERS = [
     "это письмо не требует ответа",
     "отписаться от рассылки",
     "мой баланс",
+    "ваш код",
+    "код для входа",
+    "код входа",
+    "одноразовый код",
+    "one-time password",
+    "reset your password",
+    "password reset",
+    "сброс пароля",
+    "вход в аккаунт",
+    "login attempt",
+    "successful login",
+    "новый вход",
+    "payment received",
+    "оплата прошла",
+    "чек об оплате",
+    "трек-номер",
+    "заказ в пути",
+    "shipment",
+    "shipped",
+    "out for delivery",
 ]
 
 EMAIL_SERVICE_SENDERS = [
@@ -269,6 +289,27 @@ EMAIL_SERVICE_SENDERS = [
     "marketing",
     "promo",
     "sales",
+]
+
+TELEGRAM_ACKNOWLEDGEMENT_MARKERS = [
+    "ок",
+    "окей",
+    "хорошо",
+    "понял",
+    "поняла",
+    "принято",
+    "спасибо",
+    "благодарю",
+    "ясно",
+    "ага",
+    "угу",
+    "смешно",
+    "лол",
+    "класс",
+    "отлично",
+    "нормально",
+    "точно",
+    "абсолютно",
 ]
 
 EMAIL_BULK_HEADER_NAMES = [
@@ -729,6 +770,34 @@ def _contains_meeting_signal(text: str) -> bool:
     return any(marker in lowered for marker in MEETING_MARKERS)
 
 
+def _looks_like_casual_telegram_message(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", (text or "").strip().lower()).strip(" .,!?:;…")
+    if not normalized:
+        return True
+
+    if telegram_message_requires_context(normalized):
+        return False
+
+    if (
+        _contains_imperative_signal(normalized)
+        or _contains_strong_task_signal(normalized)
+        or _contains_meeting_signal(normalized)
+        or _contains_deadline_signal(normalized)
+        or _extract_mentions(normalized)
+    ):
+        return False
+
+    if len(normalized) <= 32 and normalized in TELEGRAM_ACKNOWLEDGEMENT_MARKERS:
+        return True
+
+    if len(normalized) <= 48 and any(
+        normalized.startswith(marker) for marker in TELEGRAM_ACKNOWLEDGEMENT_MARKERS
+    ):
+        return True
+
+    return False
+
+
 def _is_noise(text: str) -> bool:
     lowered = (text or "").lower()
     return any(marker in lowered for marker in NOISE_MARKERS)
@@ -1138,6 +1207,8 @@ async def analyze_message_with_ai(
 ) -> Optional[Dict[str, Any]]:
     if not text or not text.strip():
         return None
+    if _looks_like_casual_telegram_message(text):
+        return {"has_task": False, "task": None}
 
     try:
         return await _analyze_with_unified_prompt(
@@ -1244,6 +1315,11 @@ async def analyze_message(
 ) -> Optional[Dict[str, Any]]:
     if not text:
         return None
+    if _looks_like_casual_telegram_message(text):
+        return {
+            "has_task": False,
+            "task": None,
+        }
 
     if use_ai:
         try:

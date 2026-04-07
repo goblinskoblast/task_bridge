@@ -11,7 +11,7 @@ from aiogram.types import (
 )
 from sqlalchemy.orm import Session
 
-from config import WEB_APP_DOMAIN
+from bot.webapp_links import build_taskbridge_webapp_url
 from db.models import PendingTask, Task, User
 
 logger = logging.getLogger(__name__)
@@ -54,9 +54,10 @@ async def notify_comment_added(
         for participant in participants:
             if participant.telegram_id and participant.telegram_id != -1:
                 try:
-                    webapp_url = (
-                        f"{WEB_APP_DOMAIN}/webapp/index.html"
-                        f"?mode=executor&user_id={participant.id}&task_id={task.id}"
+                    webapp_url = build_taskbridge_webapp_url(
+                        user_id=participant.id,
+                        mode="executor",
+                        task_id=task.id,
                     )
                     keyboard = InlineKeyboardMarkup(
                         inline_keyboard=[
@@ -136,9 +137,10 @@ async def notify_assigned_user(
             notification += f"<b>Срок:</b> {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
         notification += f"<b>Приоритет:</b> {task.priority}\n"
 
-        webapp_url = (
-            f"{WEB_APP_DOMAIN}/webapp/index.html"
-            f"?mode=executor&user_id={assignee.id}&task_id={task.id}"
+        webapp_url = build_taskbridge_webapp_url(
+            user_id=assignee.id,
+            mode="executor",
+            task_id=task.id,
         )
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[

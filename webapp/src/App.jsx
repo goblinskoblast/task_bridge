@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react'
 import { TasksApp } from './components/TasksApp'
 import { getCurrentUser } from './services/api'
-import { getTelegramParams } from './utils/telegram'
+import {
+  applyTelegramTheme,
+  getTelegramParams,
+  prepareTelegramWebApp,
+  waitForTelegramInitData,
+} from './utils/telegram'
 
 function App() {
   const [currentUser, setCurrentUser] = useState(null)
@@ -10,40 +15,37 @@ function App() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    const params = getTelegramParams()
+    let isMounted = true
 
-    setTaskId(params.task_id ? parseInt(params.task_id, 10) : null)
+    const bootstrap = async () => {
+      const params = getTelegramParams()
+      setTaskId(params.task_id ? parseInt(params.task_id, 10) : null)
 
-    getCurrentUser()
-      .then(user => {
-        setCurrentUser(user)
-      })
-      .catch(err => {
+      const tg = prepareTelegramWebApp()
+      applyTelegramTheme(tg)
+      await waitForTelegramInitData()
+
+      try {
+        const user = await getCurrentUser()
+        if (isMounted) {
+          setCurrentUser(user)
+        }
+      } catch (err) {
         console.error('Failed to load authenticated user:', err)
-        setError('Не удалось подтвердить пользователя')
-      })
-      .finally(() => {
-        setLoading(false)
-      })
-
-    if (window.Telegram?.WebApp) {
-      const tg = window.Telegram.WebApp
-      tg.ready()
-      tg.expand()
-
-      document.documentElement.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#ffffff')
-      document.documentElement.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#000000')
-      document.documentElement.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#999999')
-      document.documentElement.style.setProperty('--tg-theme-link-color', tg.themeParams.link_color || '#2481cc')
-      document.documentElement.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#2481cc')
-      document.documentElement.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff')
-      document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#f4f4f5')
-
-      if (tg.colorScheme === 'dark') {
-        document.body.classList.add('dark-theme')
-      } else {
-        document.body.classList.remove('dark-theme')
+        if (isMounted) {
+          setError('Не удалось подтвердить пользователя')
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false)
+        }
       }
+    }
+
+    bootstrap()
+
+    return () => {
+      isMounted = false
     }
   }, [])
 

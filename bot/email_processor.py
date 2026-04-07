@@ -15,7 +15,7 @@ from bot.attachment_processor import extract_attachments_from_email, format_atta
 from bot.calendar_sync import sync_task_to_connected_calendars
 from bot.email_handler import fetch_new_emails
 from bot.notifications import get_notification_bot
-from config import WEB_APP_DOMAIN
+from bot.webapp_links import build_taskbridge_webapp_url
 from db.database import get_db_session
 from db.models import EmailAccount, EmailAttachment, EmailMessage, Message as MessageModel, PendingTask, Task, User
 
@@ -69,7 +69,11 @@ async def _send_email_task_created_notification(owner: User, task: Task) -> None
         return
 
     bot = get_notification_bot()
-    webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=manager&user_id={owner.id}&task_id={task.id}"
+    webapp_url = build_taskbridge_webapp_url(
+        user_id=owner.id,
+        mode="manager",
+        task_id=task.id,
+    )
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="📱 Открыть задачу", web_app=WebAppInfo(url=webapp_url))]]
     )
