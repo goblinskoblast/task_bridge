@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from bot.data_agent_client import data_agent_client
+from bot.data_agent_client import DataAgentClientError, data_agent_client
 from bot.report_delivery import (
     build_report_delivery_message,
     is_report_delivery_candidate,
@@ -245,26 +245,45 @@ async def _send_agent_request(message: Message, text: str) -> None:
                 "first_name": message.from_user.first_name,
             }
         )
-        answer = result.get("answer", "Не удалось получить ответ от агента.")
-        await message.answer(answer)
-
-        if is_report_delivery_candidate(result):
-            delivered_to = await _deliver_report_to_selected_chat(message, text, answer)
-            if delivered_to:
-                await message.answer(f"Этот отчёт также отправил в чат: {delivered_to}")
-
-        if result.get("status") == "failed":
-            debug_summary = (result.get("debug_summary") or "").strip()
-            if debug_summary:
-                await message.answer(
-                    trim_telegram_text(
-                        f"Диагностика последнего запроса:\n{debug_summary}\n\n"
-                        "Если нужно, можно повторно посмотреть это через /agentdebug"
-                    )
-                )
+    except DataAgentClientError as exc:
+        logger.error(
+            "Agent chat transport error type=%s user_id=%s message=%s detail=%s",
+            type(exc).__name__,
+            message.from_user.id,
+            text[:300],
+            exc,
+            exc_info=True,
+        )
+        await message.answer(exc.user_message)
+        return
     except Exception as exc:
-        logger.error("Agent chat error: %s", exc, exc_info=True)
+        logger.error(
+            "Agent chat unexpected error user_id=%s message=%s detail=%s",
+            message.from_user.id,
+            text[:300],
+            exc,
+            exc_info=True,
+        )
         await message.answer("Агент сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз.")
+        return
+
+    answer = result.get("answer", "Не удалось получить ответ от агента.")
+    await message.answer(answer)
+
+    if is_report_delivery_candidate(result):
+        delivered_to = await _deliver_report_to_selected_chat(message, text, answer)
+        if delivered_to:
+            await message.answer(f"Этот отчёт также отправил в чат: {delivered_to}")
+
+    if result.get("status") == "failed":
+        debug_summary = (result.get("debug_summary") or "").strip()
+        if debug_summary:
+            await message.answer(
+                trim_telegram_text(
+                    f"Диагностика последнего запроса:\n{debug_summary}\n\n"
+                    "Если нужно, можно повторно посмотреть это через /agentdebug"
+                )
+            )
 
 
 async def _open_agent_entry(message: Message, state: FSMContext) -> None:

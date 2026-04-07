@@ -51,6 +51,7 @@ OPENCLAW_SDD_MAX_CHARS = int(os.getenv("OPENCLAW_SDD_MAX_CHARS", "24000"))
 
 DATA_AGENT_URL = os.getenv("DATA_AGENT_URL", "http://localhost:8010").strip()
 DATA_AGENT_TIMEOUT = int(os.getenv("DATA_AGENT_TIMEOUT", "45"))
+DATA_AGENT_CHAT_TIMEOUT = int(os.getenv("DATA_AGENT_CHAT_TIMEOUT", str(max(DATA_AGENT_TIMEOUT, 90))))
 INTERNAL_API_URL = os.getenv("INTERNAL_API_URL", "http://localhost:8000/api/internal/data-agent").strip().rstrip("/")
 INTERNAL_API_TOKEN = derive_internal_api_token(os.getenv("INTERNAL_API_TOKEN", ""), BOT_TOKEN)
 REVIEWS_SHEET_URL = os.getenv("REVIEWS_SHEET_URL", "").strip()
