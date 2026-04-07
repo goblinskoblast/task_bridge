@@ -88,7 +88,53 @@ class ItalianPizzaPortalAdapter:
         lowered = self._normalize_text(text)
         return any(marker in lowered for marker in ["выбрать точку продаж", "точка продаж", "выберите точку"])
 
-    async def _click_visible_text_candidate(self, page, labels: list[str]) -> str | None:
+    def _label_match_score(self, text: str, labels: list[str]) -> int:
+        lowered = self._normalize_text(text)
+        best_score = 0
+        for raw_label in labels:
+            label = self._normalize_text(raw_label)
+            if not label:
+                continue
+            if lowered == label:
+                best_score = max(best_score, 120)
+                continue
+            if lowered.startswith(f"{label} "):
+                best_score = max(best_score, 95)
+            if label in lowered:
+                best_score = max(best_score, 70)
+            token_hits = 0
+            for token in re.split(r"[\s,./-]+", label):
+                token = token.strip()
+                if len(token) < 2:
+                    continue
+                if token in lowered:
+                    token_hits += 1
+            if token_hits:
+                best_score = max(best_score, 20 + token_hits * 12)
+        return best_score
+
+    async def _iter_controls_for_labels(self, page, labels: list[str], max_items: int = 220) -> list[tuple[int, str, int]]:
+        locator = page.locator(self._POINT_CONTROL_SELECTOR)
+        count = min(await locator.count(), max_items)
+        results: list[tuple[int, str, int]] = []
+        for idx in range(count):
+            item = locator.nth(idx)
+            try:
+                if not await item.is_visible():
+                    continue
+                text = (await item.inner_text()).strip()
+            except Exception:
+                continue
+            if not text or len(text) > 160:
+                continue
+            normalized = re.sub(r"\s+", " ", text)
+            score = self._label_match_score(normalized, labels)
+            if score <= 0:
+                continue
+            results.append((idx, normalized, score))
+        return results
+
+    async def _dispatch_visible_text_candidate_click(self, page, labels: list[str]) -> str | None:
         cleaned_labels = []
         for raw in labels:
             normalized = re.sub(r"\s+", " ", (raw or "").strip())
@@ -172,6 +218,30 @@ class ItalianPizzaPortalAdapter:
             await page.wait_for_timeout(1200)
             return str(result).strip()
         return None
+
+    async def _click_visible_text_candidate(self, page, labels: list[str]) -> str | None:
+        controls = await self._iter_controls_for_labels(page, labels)
+        if controls:
+            locator = page.locator(self._POINT_CONTROL_SELECTOR)
+            best_idx, best_text, _ = sorted(controls, key=lambda item: (-item[2], len(item[1]), item[0]))[0]
+            target = locator.nth(best_idx)
+            try:
+                await target.scroll_into_view_if_needed()
+                await target.click(timeout=2500)
+                await page.wait_for_timeout(1200)
+                logger.info("Blanks control clicked via playwright index=%s text=%s", best_idx, best_text)
+                return best_text
+            except Exception as exc:
+                logger.info("Blanks playwright click failed index=%s text=%s error=%s", best_idx, best_text, exc)
+                try:
+                    await target.click(timeout=2500, force=True)
+                    await page.wait_for_timeout(1200)
+                    logger.info("Blanks control clicked via playwright force index=%s text=%s", best_idx, best_text)
+                    return best_text
+                except Exception as force_exc:
+                    logger.info("Blanks forced playwright click failed index=%s text=%s error=%s", best_idx, best_text, force_exc)
+
+        return await self._dispatch_visible_text_candidate_click(page, labels)
 
     async def _iter_point_controls(self, page, point_name: str, max_items: int = 220) -> list[tuple[int, str, int]]:
         locator = page.locator(self._POINT_CONTROL_SELECTOR)
