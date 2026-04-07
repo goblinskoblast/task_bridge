@@ -1,18 +1,30 @@
 import { useEffect, useState } from 'react'
 import { TasksApp } from './components/TasksApp'
+import { getCurrentUser } from './services/api'
 import { getTelegramParams } from './utils/telegram'
 
 function App() {
-  const [userId, setUserId] = useState(null)
+  const [currentUser, setCurrentUser] = useState(null)
   const [taskId, setTaskId] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     const params = getTelegramParams()
 
-    setUserId(params.user_id ? parseInt(params.user_id, 10) : null)
     setTaskId(params.task_id ? parseInt(params.task_id, 10) : null)
-    setLoading(false)
+
+    getCurrentUser()
+      .then(user => {
+        setCurrentUser(user)
+      })
+      .catch(err => {
+        console.error('Failed to load authenticated user:', err)
+        setError('Не удалось подтвердить пользователя')
+      })
+      .finally(() => {
+        setLoading(false)
+      })
 
     if (window.Telegram?.WebApp) {
       const tg = window.Telegram.WebApp
@@ -44,18 +56,18 @@ function App() {
     )
   }
 
-  if (!userId) {
+  if (!currentUser) {
     return (
       <div className="error-container">
         <h2>Ошибка</h2>
-        <p>Не удалось определить пользователя</p>
+        <p>{error || 'Не удалось определить пользователя'}</p>
       </div>
     )
   }
 
   return (
     <div className="app">
-      <TasksApp userId={userId} taskId={taskId} />
+      <TasksApp currentUser={currentUser} taskId={taskId} />
     </div>
   )
 }

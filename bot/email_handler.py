@@ -18,6 +18,7 @@ from urllib import request as urlrequest
 from db.database import get_db_session
 from db.models import EmailAccount, EmailMessage
 from config import GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, YANDEX_OAUTH_CLIENT_ID, YANDEX_OAUTH_CLIENT_SECRET
+from email_integration.email_secrets import decrypt_email_secret
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +211,7 @@ def connect_imap(email_account: EmailAccount) -> Optional[IMAPClient]:
             ssl=email_account.use_ssl
         )
 
-        raw_secret = email_account.imap_password or ""
+        raw_secret = decrypt_email_secret(email_account.imap_password or "")
         if raw_secret.startswith(GOOGLE_REFRESH_PREFIX):
             refresh_token = raw_secret[len(GOOGLE_REFRESH_PREFIX):]
             access_token = _get_google_access_token(refresh_token)

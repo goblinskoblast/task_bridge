@@ -1,12 +1,30 @@
 import axios from 'axios'
+import { getTelegramAuthHeaders, getTelegramInitData } from '../utils/telegram'
 
-// Базовый URL API (будет работать через proxy в dev mode)
 const API_BASE_URL = '/api'
 
-// Вспомогательная функция для получения полного URL
-export const getApiUrl = (endpoint) => {
-  // В development используем прокси Vite, в production - относительные пути
-  return `${API_BASE_URL}${endpoint}`
+export const getApiUrl = (endpoint) => `${API_BASE_URL}${endpoint}`
+
+export const getAuthorizedApiUrl = (endpoint) => {
+  const initData = getTelegramInitData()
+  if (!initData) {
+    return getApiUrl(endpoint)
+  }
+
+  const separator = endpoint.includes('?') ? '&' : '?'
+  return `${API_BASE_URL}${endpoint}${separator}tg_init_data=${encodeURIComponent(initData)}`
+}
+
+export const apiFetch = (endpoint, options = {}) => {
+  const headers = {
+    ...(options.headers || {}),
+    ...getTelegramAuthHeaders()
+  }
+
+  return fetch(getApiUrl(endpoint), {
+    ...options,
+    headers
+  })
 }
 
 const api = axios.create({
@@ -16,7 +34,19 @@ const api = axios.create({
   }
 })
 
-// Задачи
+api.interceptors.request.use(config => {
+  config.headers = {
+    ...(config.headers || {}),
+    ...getTelegramAuthHeaders()
+  }
+  return config
+})
+
+export const getCurrentUser = async () => {
+  const response = await api.get('/me')
+  return response.data
+}
+
 export const getTasks = async (params = {}) => {
   const response = await api.get('/tasks', { params })
   return response.data
@@ -27,12 +57,8 @@ export const getTask = async (taskId) => {
   return response.data
 }
 
-export const updateTaskStatus = async (taskId, status, userId = null) => {
-  const params = { status }
-  if (userId) {
-    params.user_id = userId
-  }
-  const response = await api.patch(`/tasks/${taskId}/status`, null, { params })
+export const updateTaskStatus = async (taskId, status) => {
+  const response = await api.patch(`/tasks/${taskId}/status`, null, { params: { status } })
   return response.data
 }
 
@@ -48,46 +74,36 @@ export const updateTaskDueDate = async (taskId, dueDate) => {
   return response.data
 }
 
-// Файлы задач
 export const getTaskFiles = async (taskId) => {
   const response = await api.get(`/tasks/${taskId}/files`)
   return response.data
 }
 
-// Комментарии
 export const getTaskComments = async (taskId) => {
   const response = await api.get(`/tasks/${taskId}/comments`)
   return response.data
 }
 
-export const createTaskComment = async (taskId, text, userId) => {
-  const response = await api.post(`/tasks/${taskId}/comments`, {
-    text,
-    user_id: userId
-  })
+export const createTaskComment = async (taskId, text) => {
+  const response = await api.post(`/tasks/${taskId}/comments`, { text })
   return response.data
 }
 
-// Категории
 export const getCategories = async () => {
   const response = await api.get('/categories')
   return response.data
 }
 
-// Пользователи
-export const getUsers = async (currentUserId = null) => {
-  const params = currentUserId ? { current_user_id: currentUserId } : {}
-  const response = await api.get('/users', { params })
+export const getUsers = async () => {
+  const response = await api.get('/users')
   return response.data
 }
 
-// Статистика
 export const getStats = async (params = {}) => {
   const response = await api.get('/stats', { params })
   return response.data
 }
 
-// Управление исполнителями
 export const addTaskAssignee = async (taskId, userId) => {
   const response = await api.post(`/tasks/${taskId}/assignees`, {
     user_id: userId

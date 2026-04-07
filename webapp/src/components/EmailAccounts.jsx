@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect } from 'react'
 import { Mail, Plus, Trash2, Check, X, AlertCircle } from 'lucide-react'
-import { getApiUrl } from '../services/api'
+import { apiFetch, getAuthorizedApiUrl } from '../services/api'
 import '../styles/EmailAccounts.css'
 
 export default function EmailAccounts({ currentUser }) {
@@ -65,7 +65,7 @@ export default function EmailAccounts({ currentUser }) {
 
   const loadAccounts = async () => {
     try {
-      const response = await fetch(getApiUrl(`/email-accounts?user_id=${currentUser.id}`))
+      const response = await apiFetch('/email-accounts')
       if (response.ok) {
         const data = await response.json()
         setAccounts(data)
@@ -79,7 +79,7 @@ export default function EmailAccounts({ currentUser }) {
 
   const loadMessages = async (accountId) => {
     try {
-      const response = await fetch(getApiUrl(`/email-accounts/${accountId}/messages?limit=10`))
+      const response = await apiFetch(`/email-accounts/${accountId}/messages?limit=10`)
       if (!response.ok) return
       const data = await response.json()
       setMessagesByAccount(prev => ({ ...prev, [accountId]: data }))
@@ -102,7 +102,7 @@ export default function EmailAccounts({ currentUser }) {
       alert('Пользователь не найден')
       return
     }
-    window.location.href = getApiUrl(`/oauth/google/start?user_id=${currentUser.id}`)
+    window.location.href = getAuthorizedApiUrl('/oauth/google/start')
   }
 
   const connectYandex = () => {
@@ -110,13 +110,13 @@ export default function EmailAccounts({ currentUser }) {
       alert('Пользователь не найден')
       return
     }
-    window.location.href = getApiUrl(`/oauth/yandex/start?user_id=${currentUser.id}`)
+    window.location.href = getAuthorizedApiUrl('/oauth/yandex/start')
   }
 
   const testConnection = async () => {
     setTesting(true)
     try {
-      const response = await fetch(getApiUrl('/email-accounts/test'), {
+      const response = await apiFetch('/email-accounts/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -145,7 +145,7 @@ export default function EmailAccounts({ currentUser }) {
 
   const createAccount = async () => {
     try {
-      const response = await fetch(getApiUrl(`/email-accounts?user_id=${currentUser.id}`), {
+      const response = await apiFetch('/email-accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newAccount)
@@ -167,7 +167,7 @@ export default function EmailAccounts({ currentUser }) {
 
   const toggleActive = async (accountId, currentStatus) => {
     try {
-      const response = await fetch(getApiUrl(`/email-accounts/${accountId}`), {
+      const response = await apiFetch(`/email-accounts/${accountId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: !currentStatus })
@@ -183,7 +183,7 @@ export default function EmailAccounts({ currentUser }) {
 
   const toggleAutoConfirm = async (accountId, currentStatus) => {
     try {
-      const response = await fetch(getApiUrl(`/email-accounts/${accountId}`), {
+      const response = await apiFetch(`/email-accounts/${accountId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ auto_confirm: !currentStatus })
@@ -201,7 +201,7 @@ export default function EmailAccounts({ currentUser }) {
     if (!confirm(`Удалить аккаунт ${email}?`)) return
 
     try {
-      const response = await fetch(getApiUrl(`/email-accounts/${accountId}`), {
+      const response = await apiFetch(`/email-accounts/${accountId}`, {
         method: 'DELETE'
       })
 
@@ -463,7 +463,7 @@ export default function EmailAccounts({ currentUser }) {
                               <a
                                 key={attachment.id}
                                 className="email-attachment-link"
-                                href={getApiUrl(`/email-attachments/${attachment.id}/download`)}
+                                href={getAuthorizedApiUrl(`/email-attachments/${attachment.id}/download`)}
                                 target="_blank"
                                 rel="noreferrer"
                               >
@@ -499,4 +499,3 @@ export default function EmailAccounts({ currentUser }) {
     </div>
   )
 }
-

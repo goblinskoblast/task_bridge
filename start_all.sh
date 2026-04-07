@@ -26,7 +26,7 @@ fi
 source venv/bin/activate
 
 echo "[1/3] Starting Telegram Bot..."
-nohup python bot/main.py > bot.log 2>&1 &
+nohup python main.py > bot.log 2>&1 &
 BOT_PID=$!
 echo "Bot started with PID: $BOT_PID"
 

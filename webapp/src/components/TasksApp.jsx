@@ -1,12 +1,12 @@
-﻿import { useState, useEffect } from 'react'
-import { getTasks, getStats, getCategories, getApiUrl } from '../services/api'
+import { useState, useEffect } from 'react'
+import { getTasks, getStats, getCategories } from '../services/api'
 import { TaskList } from './TaskList'
 import { TaskDetail } from './TaskDetail'
 import { StatsWidget } from './StatsWidget'
 import { FilterBar } from './FilterBar'
 import EmailAccounts from './EmailAccounts'
 
-export function TasksApp({ userId }) {
+export function TasksApp({ currentUser }) {
   const initialTab = new URLSearchParams(window.location.search).get('tab') || 'my_tasks'
   const [tasks, setTasks] = useState([])
   const [stats, setStats] = useState(null)
@@ -14,19 +14,12 @@ export function TasksApp({ userId }) {
   const [selectedTask, setSelectedTask] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [activeTab, setActiveTab] = useState(initialTab) // my_tasks | created_by_me | emails
-  const [currentUser, setCurrentUser] = useState(null)
+  const [activeTab, setActiveTab] = useState(initialTab)
 
-  // Фильтры
   const [filters, setFilters] = useState({
     status: null,
     category_id: null
   })
-
-  // Загрузка данных пользователя при первом рендере
-  useEffect(() => {
-    loadUserData()
-  }, [])
 
   useEffect(() => {
     if (activeTab !== 'emails') {
@@ -34,46 +27,24 @@ export function TasksApp({ userId }) {
     }
   }, [filters, activeTab])
 
-  async function loadUserData() {
-    // Fallback: enough for email APIs, even if /users temporarily fails.
-    setCurrentUser({ id: userId })
-
-    try {
-      const response = await fetch(getApiUrl(`/users?current_user_id=${userId}`))
-      if (response.ok) {
-        const users = await response.json()
-        const user = users.find(u => u.id === userId)
-        if (user) {
-          setCurrentUser(user)
-        }
-      }
-    } catch (error) {
-      console.error('Error loading user data:', error)
-    }
-  }
-
   async function loadData() {
     try {
       setLoading(true)
       setError(null)
 
-      // Формируем фильтры в зависимости от вкладки
       const apiFilters = { ...filters }
 
       if (activeTab === 'my_tasks') {
-        // Вкладка "Мои задачи" - где я исполнитель
-        apiFilters.assigned_to = userId
+        apiFilters.assigned_to = currentUser.id
       } else if (activeTab === 'created_by_me') {
-        // Вкладка "Назначенные мной" - где я создатель
-        apiFilters.created_by = userId
+        apiFilters.created_by = currentUser.id
       }
 
-      // Параметры для статистики
       const statsParams = {}
       if (activeTab === 'my_tasks') {
-        statsParams.assigned_to = userId
+        statsParams.assigned_to = currentUser.id
       } else if (activeTab === 'created_by_me') {
-        statsParams.created_by = userId
+        statsParams.created_by = currentUser.id
       }
 
       const [tasksData, statsData, categoriesData] = await Promise.all([
@@ -99,15 +70,14 @@ export function TasksApp({ userId }) {
 
   function handleBackToList() {
     setSelectedTask(null)
-    loadData() // Перезагружаем данные
+    loadData()
   }
 
   function handleFilterChange(newFilters) {
     setFilters({ ...filters, ...newFilters })
   }
 
-  // Определяем является ли пользователь создателем выбранной задачи
-  const isCreator = selectedTask && selectedTask.creator && selectedTask.creator.id === userId
+  const isCreator = selectedTask && selectedTask.creator && selectedTask.creator.id === currentUser.id
 
   if (loading && !tasks.length) {
     return (
@@ -134,7 +104,7 @@ export function TasksApp({ userId }) {
         task={selectedTask}
         onBack={handleBackToList}
         isManager={isCreator}
-        currentUserId={userId}
+        currentUserId={currentUser.id}
       />
     )
   }
@@ -146,7 +116,6 @@ export function TasksApp({ userId }) {
         <p className="subtitle">Управление задачами</p>
       </header>
 
-      {/* Вкладки */}
       <div className="tabs">
         <button
           className={`tab ${activeTab === 'my_tasks' ? 'active' : ''}`}
@@ -168,12 +137,10 @@ export function TasksApp({ userId }) {
         </button>
       </div>
 
-      {/* Контент в зависимости от вкладки */}
       {activeTab === 'emails' ? (
         <EmailAccounts currentUser={currentUser} />
       ) : (
         <>
-          {/* Статистика для обеих вкладок */}
           {stats && <StatsWidget stats={stats} />}
 
           <FilterBar
@@ -190,7 +157,7 @@ export function TasksApp({ userId }) {
         </>
       )}
 
-      {!loading && tasks.length === 0 && (
+      {!loading && tasks.length === 0 && activeTab !== 'emails' && (
         <div className="empty-state">
           <p>
             {activeTab === 'my_tasks'
@@ -202,4 +169,3 @@ export function TasksApp({ userId }) {
     </div>
   )
 }
-

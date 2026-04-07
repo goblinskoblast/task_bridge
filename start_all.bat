@@ -26,7 +26,7 @@ REM Активация виртуального окружения
 call venv\Scripts\activate.bat
 
 echo [1/3] Starting Telegram Bot...
-start "TaskBridge Bot" cmd /k "cd /d %~dp0 && venv\Scripts\activate.bat && python bot/main.py"
+start "TaskBridge Bot" cmd /k "cd /d %~dp0 && venv\Scripts\activate.bat && python main.py"
 
 timeout /t 3 /nobreak >nul
 

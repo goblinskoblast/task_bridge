@@ -65,7 +65,7 @@ export function TaskDetail({ task: initialTask, onBack, isManager, currentUserId
         getTask(task.id),
         getTaskComments(task.id),
         getTaskFiles(task.id),
-        isManager && currentUserId ? getUsers(currentUserId) : Promise.resolve([])
+        isManager && currentUserId ? getUsers() : Promise.resolve([])
       ])
 
       setTask(taskData)
@@ -82,7 +82,7 @@ export function TaskDetail({ task: initialTask, onBack, isManager, currentUserId
 
   async function handleStatusChange(newStatus) {
     try {
-      await updateTaskStatus(task.id, newStatus, currentUserId)
+      await updateTaskStatus(task.id, newStatus)
       setTask(prev => ({ ...prev, status: newStatus }))
       showTelegramAlert('Статус обновлен')
     } catch (err) {
@@ -127,7 +127,7 @@ export function TaskDetail({ task: initialTask, onBack, isManager, currentUserId
     if (!newComment.trim() || !currentUserId) return
 
     try {
-      const comment = await createTaskComment(task.id, newComment, currentUserId)
+      const comment = await createTaskComment(task.id, newComment)
       setComments([...comments, comment])
       setNewComment('')
     } catch (err) {
