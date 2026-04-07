@@ -191,7 +191,7 @@ class DataAgentService:
             fallback_log = (
                 db.query(DataAgentRequestLog)
                 .filter(DataAgentRequestLog.user_id == user.id)
-                .order_by(DataAgentRequestLog.created_at.desc())
+                .order_by(DataAgentRequestLog.created_at.desc(), DataAgentRequestLog.id.desc())
                 .first()
             )
 

@@ -118,16 +118,67 @@ class ItalianPizzaPortalAdapter:
             "Сменить точку",
         ]
         for candidate in openers:
-            locator = page.locator(f"text={candidate}")
-            if await locator.count() == 0:
-                continue
-            try:
-                await locator.first.click(timeout=2500)
-                await page.wait_for_timeout(900)
-                logger.info("Blanks point opener clicked=%s", candidate)
-                return
-            except Exception:
-                continue
+            selectors = [
+                f"button:has-text('{candidate}')",
+                f"[role='button']:has-text('{candidate}')",
+                f"text={candidate}",
+            ]
+            for selector in selectors:
+                locator = page.locator(selector)
+                count = await locator.count()
+                if count == 0:
+                    continue
+                for idx in range(count):
+                    item = locator.nth(idx)
+                    try:
+                        if not await item.is_visible():
+                            continue
+                        await item.click(timeout=2500, force=True)
+                        await page.wait_for_timeout(1200)
+                        logger.info("Blanks point opener clicked=%s selector=%s index=%s", candidate, selector, idx)
+                        return
+                    except Exception as exc:
+                        logger.info(
+                            "Blanks point opener click failed candidate=%s selector=%s index=%s error=%s",
+                            candidate,
+                            selector,
+                            idx,
+                            exc,
+                        )
+                        continue
+
+    async def _search_point_if_possible(self, page, point_name: str) -> str | None:
+        queries = []
+        for variant in self._point_variants(point_name):
+            city = variant.split(",")[0].strip()
+            if city and city not in queries:
+                queries.append(city)
+        selectors = [
+            "input[placeholder*='точк']",
+            "input[placeholder*='поиск']",
+            "input[aria-label*='точк']",
+            "input[type='search']",
+            "[role='combobox'] input",
+            "input[type='text']",
+        ]
+        for selector in selectors:
+            locator = page.locator(selector)
+            count = await locator.count()
+            for idx in range(count):
+                field = locator.nth(idx)
+                try:
+                    if not await field.is_visible():
+                        continue
+                    for query in queries[:2]:
+                        await field.click(timeout=2000)
+                        await field.fill("")
+                        await field.fill(query)
+                        await page.wait_for_timeout(800)
+                        logger.info("Blanks point search selector=%s index=%s query=%s", selector, idx, query)
+                        return query
+                except Exception:
+                    continue
+        return None
 
     async def _click_best_point_candidate(self, page, point_name: str) -> tuple[str | None, list[str]]:
         controls = await self._iter_point_controls(page, point_name)
@@ -176,6 +227,7 @@ class ItalianPizzaPortalAdapter:
         if matched_point is None:
             visible_point_controls = await self._visible_point_controls(page, point_name)
             await self._open_point_menu_if_needed(page)
+            await self._search_point_if_possible(page, point_name)
             matched_point, visible_point_controls = await self._click_best_point_candidate(page, point_name)
         return {
             "selected": matched_point is not None,
