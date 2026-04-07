@@ -10,6 +10,30 @@ logger = logging.getLogger(__name__)
 
 
 class ItalianPizzaPortalAdapter:
+    def _detect_terminal_issue(self, text: str) -> str | None:
+        lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+        if not lowered:
+            return None
+        if any(token in lowered for token in ["код подтверждения", "sms", "2fa", "двухфактор"]):
+            return "Требуется 2FA или код подтверждения."
+        if any(token in lowered for token in ["неверный пароль", "неверный логин", "invalid credentials", "wrong password", "логин или пароль"]):
+            return "Не удалось войти в портал: проверьте логин и пароль."
+        if any(token in lowered for token in ["нет доступа", "access denied", "403", "forbidden", "permission denied"]):
+            return "Портал вернул отказ в доступе."
+        return None
+
+    def _build_failed_result(self, point_name: str, issue_text: str, period_hint: str) -> dict:
+        report_text = f"Точка: {point_name}\nСтатус: {issue_text}"
+        return {
+            "status": "failed",
+            "point_name": point_name,
+            "has_red_flags": False,
+            "alert_hash": None,
+            "report_text": report_text,
+            "period_hint": period_hint or "текущий бланк",
+            "message": issue_text,
+        }
+
     def _period_candidates(self, lowered: str) -> list[str]:
         if "12 часов" in lowered:
             return ["12 часов", "12ч", "За 12 часов", "Последние 12 часов", "12"]
@@ -169,6 +193,9 @@ class ItalianPizzaPortalAdapter:
                         await page.locator(selector).first.click()
                         break
                 await page.wait_for_timeout(1800)
+                issue = self._detect_terminal_issue(await page.locator("body").inner_text())
+                if issue:
+                    return self._build_failed_result(point_name, issue, period_hint)
                 point_candidates = [point_name, point_name.split(",")[0], point_name.split(",")[-1].strip()]
                 for candidate in point_candidates:
                     locator = page.locator(f"text={candidate}")
@@ -189,6 +216,9 @@ class ItalianPizzaPortalAdapter:
                             continue
                 await self._select_period(page, period_hint)
                 body = (await page.locator("body").inner_text())[:8000]
+                issue = self._detect_terminal_issue(body)
+                if issue:
+                    return self._build_failed_result(point_name, issue, period_hint)
                 if period_hint:
                     body = f"Период: {period_hint}\n{body}"
                 report_text, has_red_flags = self._normalize_report(point_name, body)

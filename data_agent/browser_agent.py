@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import csv
 import hashlib
 import io
 import json
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -187,12 +189,17 @@ class BrowserAgent:
             await self._safe_wait(page)
             logger.info("BrowserAgent step=%s current_url=%s", step + 1, page.url)
 
+            dismissed_overlay = await self._dismiss_common_overlays(page)
+            if dismissed_overlay:
+                logger.info("BrowserAgent dismissed common overlay on step=%s", step + 1)
+                await self._safe_wait(page)
+
             if self._last_download:
                 if progress_callback:
                     await progress_callback("Файл скачан, читаю данные...")
                 file_path = self._last_download
                 self._last_download = None
-                return await self._parse_excel(file_path)
+                return await self._parse_downloaded_file(file_path)
 
             special_state = await self._detect_special_state(page)
             if special_state:
@@ -266,7 +273,32 @@ class BrowserAgent:
 
     async def _fallback_action(self, page: Any, user_task: str, visible_text: str) -> dict:
         lowered_task = user_task.lower()
-        lowered_text = visible_text.lower()
+        page_issue = self._classify_page_issue_text(visible_text)
+        if page_issue:
+            return {"action": "done", "data": page_issue}
+
+        dismiss_candidates = [
+            "button:has-text('Принять')",
+            "button:has-text('Accept')",
+            "button:has-text('Ок')",
+            "button:has-text('OK')",
+            "button:has-text('Понятно')",
+            "button:has-text('Закрыть')",
+            "[role='button']:has-text('Принять')",
+            "[role='button']:has-text('Accept')",
+            "text=Принять",
+            "text=Accept",
+        ]
+        dismiss_selector = await self._first_existing_selector(page, dismiss_candidates)
+        if dismiss_selector:
+            box = await self._selector_center(page, dismiss_selector)
+            return {
+                "action": "click",
+                "selector": dismiss_selector,
+                "x": box["x"] if box else self.VIEWPORT_W // 2,
+                "y": box["y"] if box else self.VIEWPORT_H // 2,
+                "reason": "Похоже на popup/cookie banner",
+            }
 
         export_candidates = [
             "button:has-text('Экспорт')",
@@ -290,7 +322,7 @@ class BrowserAgent:
                     "reason": "Найдена кнопка экспорта",
                 }
 
-        if len(visible_text.strip()) > 100:
+        if len(visible_text.strip()) > 100 and not self._looks_like_auth_screen(visible_text):
             return {"action": "done", "data": visible_text[:3000]}
 
         return {"action": "wait", "reason": "Ожидаю стабилизации страницы"}
@@ -367,12 +399,8 @@ class BrowserAgent:
         return None
 
     async def _detect_special_state(self, page: Any) -> Optional[str]:
-        text = (await page.locator("body").inner_text()).lower()
-        if any(token in text for token in ["код подтверждения", "sms", "2fa", "двухфактор", "verification code", "one-time code"]):
-            return "ТРЕБУЕТСЯ_2FA"
-        if any(token in text for token in ["нет доступа", "access denied", "403", "forbidden", "permission denied"]):
-            return "ОШИБКА_ДОСТУПА: обнаружена страница отказа в доступе"
-        return None
+        text = await page.locator("body").inner_text()
+        return self._classify_page_issue_text(text)
 
     async def _safe_wait(self, page: Any, timeout: int = TIMEOUT_PAGE) -> None:
         try:
@@ -404,7 +432,15 @@ class BrowserAgent:
     async def _first_existing_selector(self, page: Any, selectors: list[str]) -> Optional[str]:
         for selector in selectors:
             try:
-                if await page.locator(selector).count() > 0:
+                locator = page.locator(selector)
+                count = min(await locator.count(), 5)
+                for idx in range(count):
+                    try:
+                        if await locator.nth(idx).is_visible():
+                            return selector
+                    except Exception:
+                        continue
+                if await locator.count() > 0:
                     return selector
             except Exception:
                 continue
@@ -429,8 +465,10 @@ class BrowserAgent:
         await download.save_as(tmp_path)
         self._last_download = tmp_path
 
-    async def _parse_excel(self, file_path: str) -> str:
+    async def _parse_downloaded_file(self, file_path: str) -> str:
         try:
+            if file_path.endswith((".csv", ".tsv", ".txt")):
+                return self._parse_delimited_text(file_path)
             if file_path.endswith(".xls"):
                 return self._parse_xls(file_path)
             return self._parse_xlsx(file_path)
@@ -470,6 +508,80 @@ class BrowserAgent:
                     continue
                 lines.append("\t".join(str(value) for value in row))
         return "\n".join(lines)
+
+    def _parse_delimited_text(self, file_path: str) -> str:
+        with open(file_path, "r", encoding="utf-8-sig", newline="") as handle:
+            sample = handle.read(2048)
+            handle.seek(0)
+            delimiter = ";"
+            try:
+                dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+                delimiter = dialect.delimiter
+            except Exception:
+                if sample.count(",") > sample.count(";"):
+                    delimiter = ","
+                elif sample.count("\t") > 0:
+                    delimiter = "\t"
+
+            reader = csv.reader(handle, delimiter=delimiter)
+            lines: list[str] = []
+            for idx, row in enumerate(reader):
+                if idx >= 200:
+                    lines.append("... (обрезано, больше 200 строк)")
+                    break
+                if not any((cell or "").strip() for cell in row):
+                    continue
+                lines.append("\t".join((cell or "").strip() for cell in row))
+            return "\n".join(lines)
+
+    def _classify_page_issue_text(self, text: str) -> Optional[str]:
+        lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+        if not lowered:
+            return None
+        if any(token in lowered for token in ["код подтверждения", "sms", "2fa", "двухфактор", "verification code", "one-time code"]):
+            return "ТРЕБУЕТСЯ_2FA"
+        if any(token in lowered for token in ["captcha", "капча", "я не робот", "i am not a robot"]):
+            return "ТРЕБУЕТСЯ_КАПЧА"
+        if any(token in lowered for token in ["неверный пароль", "неверный логин", "invalid credentials", "wrong password", "incorrect password", "логин или пароль"]):
+            return "ОШИБКА_АВТОРИЗАЦИИ: не удалось пройти вход"
+        if any(token in lowered for token in ["нет доступа", "access denied", "403", "forbidden", "permission denied"]):
+            return "ОШИБКА_ДОСТУПА: обнаружена страница отказа в доступе"
+        return None
+
+    def _looks_like_auth_screen(self, text: str) -> bool:
+        lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+        auth_markers = [
+            "войти",
+            "login",
+            "sign in",
+            "password",
+            "пароль",
+            "username",
+            "логин",
+            "email",
+            "вход в систему",
+            "авторизация",
+        ]
+        return sum(1 for marker in auth_markers if marker in lowered) >= 2
+
+    async def _dismiss_common_overlays(self, page: Any) -> bool:
+        selectors = [
+            "button:has-text('Принять')",
+            "button:has-text('Accept')",
+            "button:has-text('Согласен')",
+            "button:has-text('Понятно')",
+            "button:has-text('Закрыть')",
+            "[role='button']:has-text('Принять')",
+            "[role='button']:has-text('Accept')",
+        ]
+        selector = await self._first_existing_selector(page, selectors)
+        if not selector:
+            return False
+        try:
+            await page.locator(selector).first.click(timeout=self.TIMEOUT_CLICK)
+            return True
+        except Exception:
+            return False
 
 
 browser_agent = BrowserAgent()
