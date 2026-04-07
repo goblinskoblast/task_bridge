@@ -8,6 +8,8 @@ import {
   waitForTelegramInitData,
 } from './utils/telegram'
 
+const AUTH_RETRY_DELAYS_MS = [0, 600, 1200, 2000]
+
 function App() {
   const [currentUser, setCurrentUser] = useState(null)
   const [taskId, setTaskId] = useState(null)
@@ -23,10 +25,32 @@ function App() {
 
       const tg = prepareTelegramWebApp()
       applyTelegramTheme(tg)
-      await waitForTelegramInitData()
 
       try {
-        const user = await getCurrentUser()
+        let user = null
+
+        for (const delayMs of AUTH_RETRY_DELAYS_MS) {
+          if (delayMs > 0) {
+            await new Promise(resolve => window.setTimeout(resolve, delayMs))
+          }
+
+          await waitForTelegramInitData()
+
+          try {
+            user = await getCurrentUser()
+            break
+          } catch (attemptError) {
+            const status = attemptError?.response?.status
+            if (status !== 401) {
+              throw attemptError
+            }
+          }
+        }
+
+        if (!user) {
+          throw new Error('AUTH_RETRY_EXHAUSTED')
+        }
+
         if (isMounted) {
           setCurrentUser(user)
         }

@@ -6,6 +6,11 @@ function getUrlSearchParams() {
   return new URLSearchParams(window.location.search)
 }
 
+export function getWebappAuthToken() {
+  const urlParams = getUrlSearchParams()
+  return urlParams.get('tb_auth') || null
+}
+
 export function getTelegramWebApp() {
   return window.Telegram?.WebApp || null
 }
@@ -53,7 +58,7 @@ export function getTelegramInitData() {
   return tg?.initData || urlParams.get('tg_init_data') || null
 }
 
-export async function waitForTelegramInitData(timeoutMs = 1500, pollIntervalMs = 50) {
+export async function waitForTelegramInitData(timeoutMs = 5000, pollIntervalMs = 100) {
   const startedAt = Date.now()
 
   while (Date.now() - startedAt < timeoutMs) {
@@ -83,6 +88,21 @@ export function getTelegramParams() {
 export function getTelegramAuthHeaders() {
   const initData = getTelegramInitData()
   return initData ? { 'X-Telegram-Init-Data': initData } : {}
+}
+
+export function getWebappAuthQueryParams() {
+  const params = {}
+  const initData = getTelegramInitData()
+  const webappAuthToken = getWebappAuthToken()
+
+  if (initData) {
+    params.tg_init_data = initData
+  }
+  if (webappAuthToken) {
+    params.tb_auth = webappAuthToken
+  }
+
+  return params
 }
 
 export function closeTelegramWebApp() {

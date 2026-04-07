@@ -1,18 +1,28 @@
 import axios from 'axios'
-import { getTelegramAuthHeaders, getTelegramInitData } from '../utils/telegram'
+import {
+  getTelegramAuthHeaders,
+  getWebappAuthQueryParams,
+} from '../utils/telegram'
 
 const API_BASE_URL = '/api'
 
 export const getApiUrl = (endpoint) => `${API_BASE_URL}${endpoint}`
 
 export const getAuthorizedApiUrl = (endpoint) => {
-  const initData = getTelegramInitData()
-  if (!initData) {
+  const authParams = getWebappAuthQueryParams()
+  const queryEntries = Object.entries(authParams)
+  if (!queryEntries.length) {
     return getApiUrl(endpoint)
   }
 
   const separator = endpoint.includes('?') ? '&' : '?'
-  return `${API_BASE_URL}${endpoint}${separator}tg_init_data=${encodeURIComponent(initData)}`
+  const query = new URLSearchParams()
+  queryEntries.forEach(([key, value]) => {
+    if (value) {
+      query.set(key, value)
+    }
+  })
+  return `${API_BASE_URL}${endpoint}${separator}${query.toString()}`
 }
 
 export const apiFetch = (endpoint, options = {}) => {
@@ -39,6 +49,18 @@ api.interceptors.request.use(config => {
     ...(config.headers || {}),
     ...getTelegramAuthHeaders()
   }
+
+  const authParams = getWebappAuthQueryParams()
+  if (!config.params) {
+    config.params = {}
+  }
+  if (authParams.tg_init_data && !config.params.tg_init_data) {
+    config.params.tg_init_data = authParams.tg_init_data
+  }
+  if (authParams.tb_auth && !config.params.tb_auth) {
+    config.params.tb_auth = authParams.tb_auth
+  }
+
   return config
 })
 
