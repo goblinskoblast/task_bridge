@@ -23,6 +23,11 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         self.assertTrue(self.adapter._contains_report_context("Отчет по перегрузкам\nЕсть отклонения по лимиту"))
         self.assertFalse(self.adapter._contains_report_context("Главная\nНастройки\nПрофиль"))
 
+    def test_point_match_score_prefers_relevant_point_labels(self):
+        strong = self.adapter._point_match_score("Верхний Уфалей Ленина 147", "Верхний Уфалей, Ленина 147")
+        weak = self.adapter._point_match_score("Екатеринбург Малышева 5", "Верхний Уфалей, Ленина 147")
+        self.assertGreater(strong, weak)
+
     def test_normalize_report_filters_navigation_noise(self):
         report_text, has_red_flags = self.adapter._normalize_report(
             "Тестовая точка",

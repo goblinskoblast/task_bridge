@@ -88,6 +88,32 @@ class DataAgentDebuggingTest(unittest.TestCase):
         self.assertIn("Адрес: не удалось заполнить", summary)
         self.assertIn("Найдено позиций: 0", summary)
 
+    def test_build_debug_artifacts_keeps_visible_point_controls_in_payload(self):
+        payload, _ = build_debug_artifacts(
+            trace_id="trace-900",
+            scenario="blanks_report",
+            status="failed",
+            selected_tools=["blanks_tool"],
+            tool_results={
+                "blanks_tool": {
+                    "status": "failed",
+                    "message": "Не удалось выбрать нужную точку на портале.",
+                    "diagnostics": {
+                        "stage": "point_selection",
+                        "url": "https://tochka.example.com/#/",
+                        "visible_point_controls": ["Выберите точку", "Верхний Уфалей", "Екатеринбург"],
+                        "point_candidates": ["Верхний Уфалей, Ленина 147", "Верхний Уфалей", "Ленина 147"],
+                        "page_excerpt": "выберите точку верхний уфалей екатеринбург",
+                    },
+                }
+            },
+        )
+
+        tool = payload["tools"][0]
+        self.assertEqual(tool["visible_point_controls"][0], "Выберите точку")
+        self.assertIn("Верхний Уфалей", tool["point_candidates"])
+        self.assertIn("выберите точку", tool["page_excerpt"])
+
     def test_build_debug_artifacts_uses_failed_target_error(self):
         payload, summary = build_debug_artifacts(
             trace_id="trace-456",

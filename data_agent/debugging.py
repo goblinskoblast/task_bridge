@@ -135,10 +135,15 @@ def _summarize_tool_result(tool_name: str, result: Dict[str, Any]) -> dict:
         if key in diagnostics:
             item[key] = diagnostics[key]
 
-    for key in ("matched_point", "matched_period"):
+    for key in ("matched_point", "matched_period", "page_excerpt"):
         value = diagnostics.get(key)
         if value:
             item[key] = _compact_text(str(value), limit=160)
+
+    for key in ("point_candidates", "visible_point_controls", "visible_period_controls"):
+        value = diagnostics.get(key)
+        if isinstance(value, list) and value:
+            item[key] = [_compact_text(str(entry), limit=120) for entry in value[:12]]
 
     target = _extract_target_label(result)
     if target:

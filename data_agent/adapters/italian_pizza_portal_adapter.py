@@ -24,11 +24,31 @@ class ItalianPizzaPortalAdapter:
 
     def _point_variants(self, point_name: str) -> list[str]:
         variants: list[str] = []
-        for raw in [point_name, point_name.split(",")[0], point_name.split(",")[-1].strip()]:
+        city = point_name.split(",")[0].strip()
+        address = point_name.split(",")[-1].strip()
+        seeds = [
+            point_name,
+            city,
+            address,
+            f"{city} {address}",
+            city.split()[-1] if city else "",
+        ]
+        for raw in seeds:
             normalized = re.sub(r"\s+", " ", (raw or "").strip())
             if normalized and normalized not in variants:
                 variants.append(normalized)
         return variants
+
+    def _point_tokens(self, point_name: str) -> list[str]:
+        tokens: list[str] = []
+        for variant in self._point_variants(point_name):
+            for token in re.split(r"[\s,./-]+", variant.lower()):
+                token = token.strip()
+                if len(token) < 2:
+                    continue
+                if token not in tokens:
+                    tokens.append(token)
+        return tokens
 
     def _point_appears_selected(self, text: str, point_name: str) -> bool:
         lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
@@ -37,6 +57,98 @@ class ItalianPizzaPortalAdapter:
             for candidate in self._point_variants(point_name)
             if len(candidate) >= 3
         )
+
+    def _point_match_score(self, text: str, point_name: str) -> int:
+        lowered = self._normalize_text(text)
+        score = 0
+        for candidate in self._point_variants(point_name):
+            normalized_candidate = self._normalize_text(candidate)
+            if not normalized_candidate:
+                continue
+            if lowered == normalized_candidate:
+                score += 12
+            elif normalized_candidate in lowered:
+                score += 6
+        for token in self._point_tokens(point_name):
+            if token in lowered:
+                score += 2 if not any(ch.isdigit() for ch in token) else 4
+        return score
+
+    async def _iter_point_controls(self, page, point_name: str, max_items: int = 220) -> list[tuple[int, str, int]]:
+        locator = page.locator("button, [role='button'], [role='option'], [role='tab'], label, span, div, li, option")
+        count = min(await locator.count(), max_items)
+        results: list[tuple[int, str, int]] = []
+        for idx in range(count):
+            item = locator.nth(idx)
+            try:
+                if not await item.is_visible():
+                    continue
+                text = (await item.inner_text()).strip()
+            except Exception:
+                continue
+            if not text or len(text) > 120:
+                continue
+            normalized = re.sub(r"\s+", " ", text)
+            lowered = self._normalize_text(normalized)
+            if any(marker in lowered for marker in ["логин", "пароль", "войти", "выход", "поддержка"]):
+                continue
+            score = self._point_match_score(normalized, point_name)
+            results.append((idx, normalized, score))
+        return results
+
+    async def _visible_point_controls(self, page, point_name: str) -> list[str]:
+        controls = await self._iter_point_controls(page, point_name)
+        seen: list[str] = []
+        for _, text, score in sorted(controls, key=lambda item: item[2], reverse=True):
+            if text in seen:
+                continue
+            if score > 0 or len(seen) < 12:
+                seen.append(text)
+        return seen[:20]
+
+    async def _open_point_menu_if_needed(self, page) -> None:
+        openers = ["Точка", "Выберите точку", "Ресторан", "Подразделение", "Филиал", "Сменить точку"]
+        for candidate in openers:
+            locator = page.locator(f"text={candidate}")
+            if await locator.count() == 0:
+                continue
+            try:
+                await locator.first.click(timeout=2500)
+                await page.wait_for_timeout(900)
+                logger.info("Blanks point opener clicked=%s", candidate)
+                return
+            except Exception:
+                continue
+
+    async def _click_best_point_candidate(self, page, point_name: str) -> tuple[str | None, list[str]]:
+        controls = await self._iter_point_controls(page, point_name)
+        visible_controls = []
+        best_idx = None
+        best_text = None
+        best_score = 0
+        for idx, text, score in controls:
+            if text not in visible_controls:
+                visible_controls.append(text)
+            if score > best_score:
+                best_idx = idx
+                best_text = text
+                best_score = score
+        logger.info(
+            "Blanks point candidates best_text=%s best_score=%s visible_controls=%s",
+            best_text,
+            best_score,
+            visible_controls[:12],
+        )
+        if best_idx is None or best_score < 6:
+            return None, visible_controls[:12]
+        locator = page.locator("button, [role='button'], [role='option'], [role='tab'], label, span, div, li, option")
+        try:
+            await locator.nth(best_idx).click(timeout=2500)
+            await page.wait_for_timeout(900)
+            return best_text, visible_controls[:12]
+        except Exception as exc:
+            logger.info("Blanks point candidate click failed idx=%s text=%s error=%s", best_idx, best_text, exc)
+            return None, visible_controls[:12]
 
     async def _select_point(self, page, point_name: str) -> dict:
         matched_point = None
@@ -51,10 +163,16 @@ class ItalianPizzaPortalAdapter:
                 break
             except Exception:
                 continue
+        visible_point_controls: list[str] = []
+        if matched_point is None:
+            visible_point_controls = await self._visible_point_controls(page, point_name)
+            await self._open_point_menu_if_needed(page)
+            matched_point, visible_point_controls = await self._click_best_point_candidate(page, point_name)
         return {
             "selected": matched_point is not None,
             "matched_point": matched_point,
             "point_candidates": self._point_variants(point_name),
+            "visible_point_controls": visible_point_controls,
         }
 
     def _detect_terminal_issue(self, text: str) -> str | None:
@@ -324,6 +442,8 @@ class ItalianPizzaPortalAdapter:
                             point_selected=False,
                             matched_point=point_result["matched_point"],
                             point_candidates=point_result["point_candidates"],
+                            visible_point_controls=point_result["visible_point_controls"],
+                            page_excerpt=self._normalize_text(body_text)[:400],
                         ),
                     )
                 stage = "report_navigation"
@@ -348,6 +468,7 @@ class ItalianPizzaPortalAdapter:
                             page.url,
                             point_selected=point_selected,
                             matched_point=point_result["matched_point"],
+                            visible_point_controls=point_result["visible_point_controls"],
                             period_selected=False,
                             matched_period=period_result["matched_period"],
                             visible_period_controls=period_result["visible_period_controls"],
@@ -366,6 +487,7 @@ class ItalianPizzaPortalAdapter:
                             page.url,
                             point_selected=point_selected,
                             matched_point=point_result["matched_point"],
+                            visible_point_controls=point_result["visible_point_controls"],
                             period_selected=period_result["selected"],
                             matched_period=period_result["matched_period"],
                             visible_period_controls=period_result["visible_period_controls"],
@@ -381,6 +503,7 @@ class ItalianPizzaPortalAdapter:
                             page.url,
                             point_selected=point_selected,
                             matched_point=point_result["matched_point"],
+                            visible_point_controls=point_result["visible_point_controls"],
                             period_selected=period_result["selected"],
                             matched_period=period_result["matched_period"],
                             visible_period_controls=period_result["visible_period_controls"],
@@ -396,6 +519,7 @@ class ItalianPizzaPortalAdapter:
                             page.url,
                             point_selected=point_selected,
                             matched_point=point_result["matched_point"],
+                            visible_point_controls=point_result["visible_point_controls"],
                             period_selected=period_result["selected"],
                             matched_period=period_result["matched_period"],
                             visible_period_controls=period_result["visible_period_controls"],
@@ -417,6 +541,7 @@ class ItalianPizzaPortalAdapter:
                         page.url,
                         point_selected=point_selected,
                         matched_point=point_result["matched_point"],
+                        visible_point_controls=point_result["visible_point_controls"],
                         period_selected=period_result["selected"],
                         matched_period=period_result["matched_period"],
                         visible_period_controls=period_result["visible_period_controls"],
