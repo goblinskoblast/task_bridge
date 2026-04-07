@@ -185,15 +185,6 @@ def _get_or_create_user_from_telegram_payload(db: Session, user_data: dict[str, 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     init_data = _extract_telegram_init_data(request)
     signed_token = request.cookies.get(WEBAPP_AUTH_COOKIE_NAME) or request.query_params.get("tb_auth")
-    request_path = request.url.path
-
-    logger.info(
-        "Web auth attempt path=%s has_init_data=%s has_signed_token=%s has_user_id=%s",
-        request_path,
-        bool(init_data),
-        bool(signed_token),
-        bool(request.query_params.get("user_id")),
-    )
 
     if init_data or signed_token:
         try:
@@ -205,41 +196,18 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
             )
         except HTTPException as exc:
             if init_data and signed_token:
-                logger.warning(
-                    "Web auth fallback failed path=%s has_init_data=%s has_signed_token=%s detail=%s",
-                    request_path,
-                    bool(init_data),
-                    bool(signed_token),
-                    exc.detail,
-                )
-            else:
-                logger.warning(
-                    "Web auth failed path=%s has_init_data=%s has_signed_token=%s detail=%s",
-                    request_path,
-                    bool(init_data),
-                    bool(signed_token),
-                    exc.detail,
-                )
+                logger.warning("Web auth fallback failed after Telegram init error: %s", exc.detail)
             raise
         except ValueError as exc:
-            logger.warning(
-                "Web auth value error path=%s has_init_data=%s has_signed_token=%s detail=%s",
-                request_path,
-                bool(init_data),
-                bool(signed_token),
-                str(exc),
-            )
             raise HTTPException(status_code=401, detail=str(exc)) from exc
 
         if auth_source == "telegram":
-            logger.info("Web auth success path=%s source=telegram telegram_id=%s", request_path, auth_payload.get("id"))
             return _get_or_create_user_from_telegram_payload(db, auth_payload)
 
         user_id = int(auth_payload)
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             raise HTTPException(status_code=401, detail="Authenticated user not found")
-        logger.info("Web auth success path=%s source=signed user_id=%s", request_path, user.id)
         return user
 
     if ALLOW_INSECURE_USER_ID_AUTH:
@@ -253,10 +221,8 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
             user = db.query(User).filter(User.id == fallback_user_id_int).first()
             if not user:
                 raise HTTPException(status_code=401, detail="Fallback user not found")
-            logger.warning("Web auth insecure fallback path=%s user_id=%s", request_path, user.id)
             return user
 
-    logger.warning("Web auth missing credentials path=%s", request_path)
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
@@ -413,21 +379,13 @@ def _set_webapp_auth_cookie(response: Response, request: Request, token: str) ->
     )
 
 
-def _serve_webapp_index(request: Request) -> FileResponse:
+def _serve_webapp_index(request: Request, signed_token: str | None = None) -> FileResponse:
     if not index_html_path.exists():
         logger.error(f"index.html NOT FOUND at {index_html_path}")
         raise HTTPException(status_code=404, detail=f"index.html not found at {index_html_path}")
 
-    logger.info(
-        "Serving webapp index path=%s has_tb_auth=%s has_tg_init_data=%s has_user_id=%s",
-        request.url.path,
-        bool((request.query_params.get("tb_auth") or "").strip()),
-        bool((request.query_params.get("tg_init_data") or "").strip()),
-        bool((request.query_params.get("user_id") or "").strip()),
-    )
-
     response = FileResponse(str(index_html_path))
-    signed_token = (request.query_params.get("tb_auth") or "").strip()
+    signed_token = (signed_token or request.query_params.get("tb_auth") or "").strip()
     if signed_token:
         try:
             _verify_webapp_auth_token(signed_token)
@@ -659,6 +617,12 @@ async def read_webapp(request: Request):
     """Отображение веб-приложения для WebApp-кнопок."""
     logger.info(f"Serving index.html from {index_html_path}")
     return _serve_webapp_index(request)
+
+
+@app.get("/webapp/s/{signed_token}", response_class=HTMLResponse)
+async def read_signed_webapp(request: Request, signed_token: str):
+    logger.info(f"Serving signed webapp route from {index_html_path}")
+    return _serve_webapp_index(request, signed_token=signed_token)
 
 
 @app.get("//webapp/index.html", response_class=HTMLResponse)

@@ -6,9 +6,18 @@ function getUrlSearchParams() {
   return new URLSearchParams(window.location.search)
 }
 
+function getPathname() {
+  return window.location.pathname || ''
+}
+
+function getPathAuthToken() {
+  const match = getPathname().match(/\/webapp\/s\/([^/?#]+)/)
+  return match?.[1] || null
+}
+
 export function getWebappAuthToken() {
   const urlParams = getUrlSearchParams()
-  return urlParams.get('tb_auth') || null
+  return urlParams.get('tb_auth') || getPathAuthToken()
 }
 
 export function getTelegramWebApp() {

@@ -40,13 +40,17 @@ class WebappAuthHelpersTest(unittest.TestCase):
 
         parsed = urlparse(url)
         params = parse_qs(parsed.query)
+        signed_token = parsed.path.removeprefix("/webapp/s/")
 
-        self.assertEqual(parsed.path, "/webapp/index.html")
+        self.assertTrue(parsed.path.startswith("/webapp/s/"))
         self.assertEqual(params["user_id"], ["11"])
         self.assertEqual(params["mode"], ["executor"])
         self.assertEqual(params["task_id"], ["99"])
         self.assertEqual(params["tab"], ["emails"])
-        self.assertIn("tb_auth", params)
+        self.assertEqual(
+            verify_webapp_auth_token("secret", signed_token, ttl_seconds=3600, now_ts=2000),
+            11,
+        )
 
     def test_signed_token_fallback_works_when_telegram_init_is_invalid(self):
         auth_source, auth_payload = resolve_authenticated_webapp_user(

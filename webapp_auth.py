@@ -116,6 +116,7 @@ def build_signed_webapp_url(
     if not normalized_base:
         raise ValueError("WEB_APP_DOMAIN is not configured")
 
+    signed_token: str | None = None
     query_params: dict[str, Any] = {"user_id": int(user_id)}
     if mode:
         query_params["mode"] = mode
@@ -127,6 +128,10 @@ def build_signed_webapp_url(
         if value is not None:
             query_params[str(key)] = value
     if auth_secret:
-        query_params["tb_auth"] = build_webapp_auth_token(auth_secret, int(user_id))
+        signed_token = build_webapp_auth_token(auth_secret, int(user_id))
 
-    return f"{normalized_base}/webapp/index.html?{urlencode(query_params)}"
+    webapp_path = "/webapp/index.html"
+    if signed_token:
+        webapp_path = f"/webapp/s/{signed_token}"
+
+    return f"{normalized_base}{webapp_path}?{urlencode(query_params)}"
