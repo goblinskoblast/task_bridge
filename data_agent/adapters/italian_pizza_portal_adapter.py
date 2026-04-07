@@ -1233,6 +1233,32 @@ class ItalianPizzaPortalAdapter:
     }
     return { matched: false, sample: null };
   };
+  const parseNumeric = (value) => {
+    const match = clean(value).replace(",", ".").match(/-?\\d+(?:\\.\\d+)?/);
+    if (!match) return null;
+    const numeric = Number(match[0]);
+    return Number.isFinite(numeric) ? numeric : null;
+  };
+  const pickMetricRow = (rowsMap, aliases) => {
+    for (const [label, values] of rowsMap.entries()) {
+      if (aliases.some((alias) => label === alias || label.includes(alias))) {
+        return values;
+      }
+    }
+    return null;
+  };
+  const ensureGroupedEntry = (grouped, key, payload) => {
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        slot_id: payload.slot_id,
+        service: payload.service,
+        time_range: payload.time_range,
+        column: payload.column,
+        rows: [],
+      });
+    }
+    return grouped.get(key);
+  };
 
   const cards = Array.from(document.querySelectorAll("[data-cy^='timesection-']"));
   const signals = [];
@@ -1261,15 +1287,24 @@ class ItalianPizzaPortalAdapter:
         fallbackColumns = parsedColumns;
       }
       const grouped = new Map();
+      const metricRows = new Map();
 
       const bodyRows = Array.from(table.tBodies || []).flatMap((section) => Array.from(section.rows || []));
       for (const tr of bodyRows) {
         const tds = Array.from(tr.children || []).filter((node) => String(node.tagName || "").toLowerCase() === "td");
         if (!tds.length) continue;
         const rowLabel = clean(tds[0].innerText);
+        const normalizedRowLabel = clean(rowLabel).toLowerCase();
+        if (!metricRows.has(normalizedRowLabel)) {
+          metricRows.set(normalizedRowLabel, new Map());
+        }
         tds.slice(1).forEach((td, idx) => {
           const column = columns[idx] || `Колонка ${idx + 1}`;
           const value = clean(td.innerText);
+          metricRows.get(normalizedRowLabel).set(column, {
+            row_label: rowLabel,
+            value,
+          });
           if (styledCellSamples.length < 20 && isVisuallyInteresting(td)) {
             styledCellSamples.push({
               slot_id: slotId,
@@ -1303,16 +1338,12 @@ class ItalianPizzaPortalAdapter:
           }
 
           const key = `${service}|${timeRange}|${column}`;
-          if (!grouped.has(key)) {
-            grouped.set(key, {
-              slot_id: slotId,
-              service,
-              time_range: timeRange,
-              column,
-              rows: [],
-            });
-          }
-          grouped.get(key).rows.push({
+          ensureGroupedEntry(grouped, key, {
+            slot_id: slotId,
+            service,
+            time_range: timeRange,
+            column,
+          }).rows.push({
             row_label: rowLabel,
             value,
             background_color: cellMatch.sample?.background_color || "",
@@ -1323,6 +1354,64 @@ class ItalianPizzaPortalAdapter:
             matched_tag: cellMatch.sample?.tag || "",
           });
         });
+      }
+
+      const maxRow = pickMetricRow(metricRows, ["макс", "максимум", "лимит"]);
+      const acceptedRow = pickMetricRow(metricRows, ["принято"]);
+      const remainingRow = pickMetricRow(metricRows, ["остаток"]);
+      const metricColumns = new Set([
+        ...Array.from(maxRow?.keys() || []),
+        ...Array.from(acceptedRow?.keys() || []),
+        ...Array.from(remainingRow?.keys() || []),
+      ]);
+      for (const column of metricColumns) {
+        const maxCell = maxRow?.get(column);
+        const acceptedCell = acceptedRow?.get(column);
+        const remainingCell = remainingRow?.get(column);
+        const maxValue = parseNumeric(maxCell?.value);
+        const acceptedValue = parseNumeric(acceptedCell?.value);
+        const remainingValue = parseNumeric(remainingCell?.value);
+
+        if (
+          acceptedCell &&
+          maxCell &&
+          maxValue !== null &&
+          acceptedValue !== null &&
+          (acceptedValue > maxValue || (maxValue <= 0 && acceptedValue > 0))
+        ) {
+          const key = `${service}|${timeRange}|${column}`;
+          const entry = ensureGroupedEntry(grouped, key, {
+            slot_id: slotId,
+            service,
+            time_range: timeRange,
+            column,
+          });
+          entry.rows.push({
+            row_label: maxCell.row_label,
+            value: maxCell.value,
+            inferred_rule: "accepted_gt_max",
+          });
+          entry.rows.push({
+            row_label: acceptedCell.row_label,
+            value: acceptedCell.value,
+            inferred_rule: "accepted_gt_max",
+          });
+        }
+
+        if (remainingCell && remainingValue !== null && remainingValue <= 0) {
+          const key = `${service}|${timeRange}|${column}`;
+          const entry = ensureGroupedEntry(grouped, key, {
+            slot_id: slotId,
+            service,
+            time_range: timeRange,
+            column,
+          });
+          entry.rows.push({
+            row_label: remainingCell.row_label,
+            value: remainingCell.value,
+            inferred_rule: "remaining_non_positive",
+          });
+        }
       }
 
       for (const entry of grouped.values()) {
