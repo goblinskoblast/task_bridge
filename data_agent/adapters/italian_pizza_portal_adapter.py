@@ -420,6 +420,30 @@ class ItalianPizzaPortalAdapter:
         login_markers = ["логин", "пароль", "войти", "login", "password", "remember me"]
         return sum(1 for marker in login_markers if marker in lowered) >= 2
 
+    async def _wait_for_post_login_state(self, page, attempts: int = 8, delay_ms: int = 800) -> tuple[str, str]:
+        last_text = ""
+        for _ in range(max(1, attempts)):
+            await page.wait_for_timeout(delay_ms)
+            try:
+                last_text = await page.locator("body").inner_text()
+            except Exception:
+                last_text = ""
+            issue = self._detect_terminal_issue(last_text)
+            if issue:
+                return "issue", last_text
+            current_url = page.url or ""
+            if "/login" not in current_url.lower():
+                return "ok", last_text
+            if not self._looks_like_login_page(last_text):
+                return "ok", last_text
+            try:
+                password_fields = page.locator("input[name='password'], input[type='password']")
+                if await password_fields.count() == 0:
+                    return "ok", last_text
+            except Exception:
+                return "ok", last_text
+        return "login_page", last_text
+
     def _contains_report_context(self, text: str) -> bool:
         lowered = self._normalize_text(text)
         report_markers = ["бланк", "перегруз", "отклон", "лимит", "норматив", "красн", "отчет", "отчёт"]
@@ -634,23 +658,23 @@ class ItalianPizzaPortalAdapter:
                     if await page.locator(selector).count() > 0:
                         await page.locator(selector).first.click()
                         break
-                await page.wait_for_timeout(900)
                 current_url = page.url
-                post_login_text = await page.locator("body").inner_text()
-                issue = self._detect_terminal_issue(post_login_text)
-                if issue:
+                login_state, post_login_text = await self._wait_for_post_login_state(page)
+                current_url = page.url
+                if login_state == "issue":
+                    issue = self._detect_terminal_issue(post_login_text) or "Не удалось войти в портал."
                     return self._build_failed_result(
                         point_name,
                         issue,
                         period_hint,
-                        diagnostics=self._build_diagnostics(stage, current_url),
+                        diagnostics=self._build_diagnostics(stage, current_url, page_excerpt=self._normalize_text(post_login_text)[:400]),
                     )
-                if self._looks_like_login_page(post_login_text):
+                if login_state == "login_page":
                     return self._build_failed_result(
                         point_name,
                         "Не удалось войти в портал: форма авторизации осталась открыта.",
                         period_hint,
-                        diagnostics=self._build_diagnostics(stage, current_url),
+                        diagnostics=self._build_diagnostics(stage, current_url, page_excerpt=self._normalize_text(post_login_text)[:400]),
                     )
                 stage = "point_selection"
                 point_result = await self._select_point(page, point_name)
