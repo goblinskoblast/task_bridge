@@ -64,6 +64,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
 def init_db():
     Base.metadata.create_all(bind=sync_engine)
     _ensure_task_columns()
+    _ensure_data_agent_profile_columns()
 
 
 def _ensure_task_columns():
@@ -81,6 +82,32 @@ def _ensure_task_columns():
     if "last_creator_reminder_sent_at" not in column_names:
         alter_statements.append(
             f"ALTER TABLE tasks ADD COLUMN last_creator_reminder_sent_at {datetime_type}"
+        )
+
+    if not alter_statements:
+        return
+
+    with sync_engine.begin() as connection:
+        for statement in alter_statements:
+            connection.execute(text(statement))
+
+
+def _ensure_data_agent_profile_columns():
+    inspector = inspect(sync_engine)
+    if "data_agent_profiles" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("data_agent_profiles")}
+    bigint_type = "BIGINT" if sync_engine.dialect.name == "postgresql" else "INTEGER"
+    alter_statements = []
+
+    if "default_report_chat_id" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE data_agent_profiles ADD COLUMN default_report_chat_id {bigint_type}"
+        )
+    if "default_report_chat_title" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE data_agent_profiles ADD COLUMN default_report_chat_title VARCHAR(500)"
         )
 
     if not alter_statements:

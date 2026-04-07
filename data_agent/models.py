@@ -18,6 +18,8 @@ class DataAgentChatResponse(BaseModel):
     answer: str
     selected_tools: List[str] = Field(default_factory=list)
     trace_id: str
+    scenario: Optional[str] = None
+    status: str = "completed"
 
 
 class SystemConnectRequest(BaseModel):

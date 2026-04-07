@@ -437,6 +437,8 @@ class DataAgentProfile(Base):
     business_context = Column(Text, nullable=True)
     primary_goal = Column(Text, nullable=True)
     reporting_frequency = Column(String(100), nullable=True)
+    default_report_chat_id = Column(BigInteger, nullable=True)
+    default_report_chat_title = Column(String(500), nullable=True)
     onboarding_completed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

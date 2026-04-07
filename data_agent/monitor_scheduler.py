@@ -9,13 +9,27 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import BOT_TOKEN, TIMEZONE
 from db.database import get_db_session
-from db.models import DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentSystem, User
+from db.models import DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentProfile, DataAgentSystem, User
 
 from .blanks_tool import blanks_tool
 
 logger = logging.getLogger(__name__)
 
 _scheduler = None
+
+
+def _resolve_monitor_delivery_chat_id(db, user: User | None) -> int | None:
+    if not user:
+        return None
+
+    profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user.id).first()
+    if profile and profile.default_report_chat_id:
+        return int(profile.default_report_chat_id)
+
+    if user.telegram_id and user.telegram_id != -1:
+        return int(user.telegram_id)
+
+    return None
 
 
 async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
@@ -66,9 +80,10 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
             db.refresh(event)
 
             user = db.query(User).filter(User.id == config.user_id).first()
-            if user and user.telegram_id and user.telegram_id != -1:
+            delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user)
+            if delivery_chat_id:
                 await bot.send_message(
-                    chat_id=user.telegram_id,
+                    chat_id=delivery_chat_id,
                     text=(
                         f"Обнаружены красные бланки\n\n"
                         f"<b>Точка:</b> {config.point_name}\n"

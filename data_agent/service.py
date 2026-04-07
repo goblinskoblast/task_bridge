@@ -127,7 +127,13 @@ class DataAgentService:
             if decision.missing_slots:
                 answer = agent_runtime.build_missing_slots_answer(decision)
                 agent_runtime.save_session(payload.user_id, decision, user_message=normalized_message, answer=answer, status="awaiting_user_input")
-                return DataAgentChatResponse(answer=answer, selected_tools=selected_tools, trace_id=trace_id)
+                return DataAgentChatResponse(
+                    answer=answer,
+                    selected_tools=selected_tools,
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="awaiting_user_input",
+                )
 
             execution = await scenario_engine.execute(
                 scenario=decision.scenario,
@@ -140,7 +146,13 @@ class DataAgentService:
             logger.info("DataAgent tool_results trace=%s keys=%s", trace_id, list(execution.tool_results.keys()))
             answer = execution.answer or "Не удалось сформировать ответ."
             agent_runtime.save_session(payload.user_id, decision, user_message=normalized_message, answer=answer, status="completed")
-            return DataAgentChatResponse(answer=answer, selected_tools=selected_tools, trace_id=trace_id)
+            return DataAgentChatResponse(
+                answer=answer,
+                selected_tools=selected_tools,
+                trace_id=trace_id,
+                scenario=decision.scenario,
+                status="completed",
+            )
         except Exception as exc:
             success = False
             error_message = str(exc)
@@ -148,7 +160,14 @@ class DataAgentService:
             fallback_decision = await agent_runtime.decide(payload.user_id, normalized_message, systems_count=0)
             fallback_answer = f"DataAgent не смог обработать запрос: {exc}"
             agent_runtime.save_session(payload.user_id, fallback_decision, user_message=normalized_message, answer=fallback_answer, status="failed")
-            return DataAgentChatResponse(ok=False, answer=fallback_answer, selected_tools=selected_tools, trace_id=trace_id)
+            return DataAgentChatResponse(
+                ok=False,
+                answer=fallback_answer,
+                selected_tools=selected_tools,
+                trace_id=trace_id,
+                scenario=fallback_decision.scenario,
+                status="failed",
+            )
         finally:
             duration_ms = int((time.perf_counter() - started_at) * 1000)
             self._log_request(payload=payload, trace_id=trace_id, selected_tools=selected_tools, success=success, duration_ms=duration_ms, error_message=error_message)
