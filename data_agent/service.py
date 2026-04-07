@@ -7,14 +7,16 @@ from typing import List, Optional
 from uuid import uuid4
 
 from db.database import get_db_session
-from db.models import DataAgentMonitorConfig, DataAgentProfile, DataAgentRequestLog, DataAgentSystem, User
+from db.models import DataAgentMonitorConfig, DataAgentProfile, DataAgentRequestLog, DataAgentSession, DataAgentSystem, User
 from email_integration.encryption import encrypt_password
 
 from .agent_runtime import agent_runtime
+from .debugging import build_debug_artifacts, derive_response_status
 from .models import (
     ConnectedSystem,
     DataAgentChatRequest,
     DataAgentChatResponse,
+    DataAgentDebugResponse,
     MonitorConfigItem,
     MonitorDeleteResponse,
     SystemConnectRequest,
@@ -178,6 +180,31 @@ class DataAgentService:
         finally:
             db.close()
 
+    def get_debug_snapshot(self, user_id: int) -> DataAgentDebugResponse:
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return DataAgentDebugResponse(found=False)
+
+            session = db.query(DataAgentSession).filter(DataAgentSession.user_id == user.id).first()
+            if not session or not session.last_trace_id:
+                return DataAgentDebugResponse(found=False)
+
+            return DataAgentDebugResponse(
+                found=True,
+                trace_id=session.last_trace_id,
+                scenario=session.active_scenario,
+                status=session.status or "unknown",
+                summary=session.last_debug_summary,
+                selected_tools=list(session.last_selected_tools or []),
+                user_message=session.last_user_message,
+                answer=session.last_answer,
+                details=session.last_debug_payload or {},
+            )
+        finally:
+            db.close()
+
     def _upsert_monitor(
         self,
         *,
@@ -245,6 +272,7 @@ class DataAgentService:
         selected_tools: List[str] = []
         success = True
         error_message: Optional[str] = None
+        debug_summary: Optional[str] = None
         normalized_message = self._normalize_user_message(payload.message)
 
         try:
@@ -256,13 +284,31 @@ class DataAgentService:
 
             if decision.missing_slots:
                 answer = agent_runtime.build_missing_slots_answer(decision)
-                agent_runtime.save_session(payload.user_id, decision, user_message=normalized_message, answer=answer, status="awaiting_user_input")
+                debug_payload, debug_summary = build_debug_artifacts(
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="awaiting_user_input",
+                    selected_tools=selected_tools,
+                    tool_results={},
+                    error_message=f"missing_slots: {', '.join(decision.missing_slots)}",
+                )
+                agent_runtime.save_session(
+                    payload.user_id,
+                    decision,
+                    user_message=normalized_message,
+                    answer=answer,
+                    status="awaiting_user_input",
+                    trace_id=trace_id,
+                    debug_summary=debug_summary,
+                    debug_payload=debug_payload,
+                )
                 return DataAgentChatResponse(
                     answer=answer,
                     selected_tools=selected_tools,
                     trace_id=trace_id,
                     scenario=decision.scenario,
                     status="awaiting_user_input",
+                    debug_summary=debug_summary,
                 )
 
             execution = await scenario_engine.execute(
@@ -275,6 +321,15 @@ class DataAgentService:
             selected_tools = execution.selected_tools
             logger.info("DataAgent tool_results trace=%s keys=%s", trace_id, list(execution.tool_results.keys()))
             answer = execution.answer or "Не удалось сформировать ответ."
+            response_status = derive_response_status(execution.tool_results)
+            debug_payload, debug_summary = build_debug_artifacts(
+                trace_id=trace_id,
+                scenario=decision.scenario,
+                status=response_status,
+                selected_tools=selected_tools,
+                tool_results=execution.tool_results,
+            )
+            success = response_status != "failed"
             interval_minutes = decision.slots.get("monitor_interval_minutes")
             point_name = decision.slots.get("point_name")
             if isinstance(interval_minutes, int) and interval_minutes > 0 and point_name:
@@ -286,13 +341,24 @@ class DataAgentService:
                 )
                 if monitor_note:
                     answer = f"{answer}{monitor_note}"
-            agent_runtime.save_session(payload.user_id, decision, user_message=normalized_message, answer=answer, status="completed")
+            agent_runtime.save_session(
+                payload.user_id,
+                decision,
+                user_message=normalized_message,
+                answer=answer,
+                status=response_status,
+                trace_id=trace_id,
+                debug_summary=debug_summary,
+                debug_payload=debug_payload,
+            )
             return DataAgentChatResponse(
+                ok=response_status != "failed",
                 answer=answer,
                 selected_tools=selected_tools,
                 trace_id=trace_id,
                 scenario=decision.scenario,
-                status="completed",
+                status=response_status,
+                debug_summary=debug_summary,
             )
         except Exception as exc:
             success = False
@@ -300,7 +366,24 @@ class DataAgentService:
             logger.exception("DataAgent chat failed trace=%s", trace_id)
             fallback_decision = await agent_runtime.decide(payload.user_id, normalized_message, systems_count=0)
             fallback_answer = f"DataAgent не смог обработать запрос: {exc}"
-            agent_runtime.save_session(payload.user_id, fallback_decision, user_message=normalized_message, answer=fallback_answer, status="failed")
+            debug_payload, debug_summary = build_debug_artifacts(
+                trace_id=trace_id,
+                scenario=fallback_decision.scenario,
+                status="failed",
+                selected_tools=selected_tools,
+                tool_results={},
+                error_message=error_message,
+            )
+            agent_runtime.save_session(
+                payload.user_id,
+                fallback_decision,
+                user_message=normalized_message,
+                answer=fallback_answer,
+                status="failed",
+                trace_id=trace_id,
+                debug_summary=debug_summary,
+                debug_payload=debug_payload,
+            )
             return DataAgentChatResponse(
                 ok=False,
                 answer=fallback_answer,
@@ -308,6 +391,7 @@ class DataAgentService:
                 trace_id=trace_id,
                 scenario=fallback_decision.scenario,
                 status="failed",
+                debug_summary=debug_summary,
             )
         finally:
             duration_ms = int((time.perf_counter() - started_at) * 1000)

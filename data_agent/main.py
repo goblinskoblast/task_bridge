@@ -9,6 +9,7 @@ from .monitor_scheduler import start_data_agent_monitor_scheduler, stop_data_age
 from .models import (
     DataAgentChatRequest,
     DataAgentChatResponse,
+    DataAgentDebugResponse,
     MonitorDeleteResponse,
     MonitorsListResponse,
     SystemConnectRequest,
@@ -65,3 +66,8 @@ async def list_monitors(user_id: int) -> MonitorsListResponse:
 @app.delete("/monitors/{user_id}/{monitor_id}", response_model=MonitorDeleteResponse)
 async def delete_monitor(user_id: int, monitor_id: int) -> MonitorDeleteResponse:
     return service.delete_monitor(user_id, monitor_id)
+
+
+@app.get("/debug/{user_id}", response_model=DataAgentDebugResponse)
+async def get_debug(user_id: int) -> DataAgentDebugResponse:
+    return service.get_debug_snapshot(user_id)

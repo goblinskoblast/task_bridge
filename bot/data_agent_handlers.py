@@ -28,7 +28,8 @@ AGENT_WELCOME = (
     "• проверить стоп-лист и бланки по точке\n"
     "• посмотреть письма и календарь\n"
     "• зайти в подключённую веб-систему и собрать данные\n\n"
-    "Напишите обычным сообщением, что нужно сделать."
+    "Напишите обычным сообщением, что нужно сделать.\n"
+    "Если агент ошибётся, можно посмотреть последнюю диагностику командой /agentdebug."
 )
 
 AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
@@ -42,6 +43,7 @@ AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
         ],
         [
             InlineKeyboardButton(text="Мониторы", callback_data="agent_hint_monitors"),
+            InlineKeyboardButton(text="Диагностика", callback_data="agent_show_debug"),
         ],
     ]
 )
@@ -194,6 +196,39 @@ def _get_command_args(raw_text: str | None) -> str:
     return parts[1].strip()
 
 
+def _format_agent_debug_message(result: dict) -> str:
+    summary = (result.get("summary") or "").strip()
+    if summary:
+        lines = ["Последняя диагностика агента:", summary]
+    else:
+        lines = ["Последняя диагностика агента недоступна."]
+
+    user_message = (result.get("user_message") or "").strip()
+    if user_message:
+        lines.extend(["", f"Последний запрос: {user_message[:500]}"])
+
+    answer = (result.get("answer") or "").strip()
+    if answer:
+        lines.extend(["", f"Последний ответ: {answer[:700]}"])
+
+    return trim_telegram_text("\n".join(lines))
+
+
+async def _send_agent_debug_message(message: Message, telegram_user_id: int) -> None:
+    try:
+        result = await data_agent_client.get_debug(telegram_user_id)
+    except Exception as exc:
+        logger.error("Agent debug error: %s", exc, exc_info=True)
+        await message.answer("Не удалось получить последнюю диагностику агента.")
+        return
+
+    if not result.get("found"):
+        await message.answer("Для этого пользователя пока нет сохранённой диагностики агента.")
+        return
+
+    await message.answer(_format_agent_debug_message(result))
+
+
 async def _send_quick_report_request(message: Message, command_text: str | None, prefix: str) -> None:
     args = _get_command_args(command_text)
     payload = f"{prefix}. {args}".strip() if args else prefix
@@ -217,6 +252,16 @@ async def _send_agent_request(message: Message, text: str) -> None:
             delivered_to = await _deliver_report_to_selected_chat(message, text, answer)
             if delivered_to:
                 await message.answer(f"Этот отчёт также отправил в чат: {delivered_to}")
+
+        if result.get("status") == "failed":
+            debug_summary = (result.get("debug_summary") or "").strip()
+            if debug_summary:
+                await message.answer(
+                    trim_telegram_text(
+                        f"Диагностика последнего запроса:\n{debug_summary}\n\n"
+                        "Если нужно, можно повторно посмотреть это через /agentdebug"
+                    )
+                )
     except Exception as exc:
         logger.error("Agent chat error: %s", exc, exc_info=True)
         await message.answer("Агент сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз.")
@@ -345,6 +390,13 @@ async def callback_agent_hint_monitors(callback: CallbackQuery) -> None:
             "Посмотреть активные мониторинги: /monitors\n"
             "Отключить: /unmonitor 12"
         )
+
+
+@router.callback_query(F.data == "agent_show_debug")
+async def callback_agent_show_debug(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if callback.message:
+        await _send_agent_debug_message(callback.message, callback.from_user.id)
 
 
 @router.message(StateFilter(AgentOnboardingState.waiting_for_business_context), F.text)
@@ -498,6 +550,11 @@ async def cmd_unmonitor(message: Message) -> None:
             f"Не удалось отключить мониторинг #{monitor_id_raw}: "
             f"{result.get('error', 'неизвестная ошибка')}"
         )
+
+
+@router.message(Command("agentdebug"))
+async def cmd_agentdebug(message: Message) -> None:
+    await _send_agent_debug_message(message, message.from_user.id)
 
 
 @router.message(Command("connect"))

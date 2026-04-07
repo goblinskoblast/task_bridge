@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -20,6 +20,7 @@ class DataAgentChatResponse(BaseModel):
     trace_id: str
     scenario: Optional[str] = None
     status: str = "completed"
+    debug_summary: Optional[str] = None
 
 
 class SystemConnectRequest(BaseModel):
@@ -66,6 +67,18 @@ class MonitorDeleteResponse(BaseModel):
     success: bool
     deleted_id: Optional[int] = None
     error: Optional[str] = None
+
+
+class DataAgentDebugResponse(BaseModel):
+    found: bool = False
+    trace_id: Optional[str] = None
+    scenario: Optional[str] = None
+    status: str = "unknown"
+    summary: Optional[str] = None
+    selected_tools: List[str] = Field(default_factory=list)
+    user_message: Optional[str] = None
+    answer: Optional[str] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
 
 
 class EmailSummaryItem(BaseModel):

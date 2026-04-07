@@ -85,7 +85,18 @@ class DataAgentRuntime:
         finally:
             db.close()
 
-    def save_session(self, user_id: int, decision: AgentDecision, *, user_message: str, answer: str = "", status: str = "completed") -> None:
+    def save_session(
+        self,
+        user_id: int,
+        decision: AgentDecision,
+        *,
+        user_message: str,
+        answer: str = "",
+        status: str = "completed",
+        trace_id: str | None = None,
+        debug_summary: str | None = None,
+        debug_payload: Dict[str, Any] | None = None,
+    ) -> None:
         db = get_db_session()
         try:
             user = db.query(User).filter(User.telegram_id == user_id).first()
@@ -104,6 +115,9 @@ class DataAgentRuntime:
             session.last_user_message = user_message
             if answer:
                 session.last_answer = answer
+            session.last_trace_id = trace_id
+            session.last_debug_summary = debug_summary
+            session.last_debug_payload = debug_payload
             db.commit()
         except Exception:
             db.rollback()

@@ -65,6 +65,7 @@ def init_db():
     Base.metadata.create_all(bind=sync_engine)
     _ensure_task_columns()
     _ensure_data_agent_profile_columns()
+    _ensure_data_agent_session_columns()
 
 
 def _ensure_task_columns():
@@ -108,6 +109,35 @@ def _ensure_data_agent_profile_columns():
     if "default_report_chat_title" not in column_names:
         alter_statements.append(
             "ALTER TABLE data_agent_profiles ADD COLUMN default_report_chat_title VARCHAR(500)"
+        )
+
+    if not alter_statements:
+        return
+
+    with sync_engine.begin() as connection:
+        for statement in alter_statements:
+            connection.execute(text(statement))
+
+
+def _ensure_data_agent_session_columns():
+    inspector = inspect(sync_engine)
+    if "data_agent_sessions" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("data_agent_sessions")}
+    alter_statements = []
+
+    if "last_trace_id" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE data_agent_sessions ADD COLUMN last_trace_id VARCHAR(64)"
+        )
+    if "last_debug_summary" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE data_agent_sessions ADD COLUMN last_debug_summary TEXT"
+        )
+    if "last_debug_payload" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE data_agent_sessions ADD COLUMN last_debug_payload JSON"
         )
 
     if not alter_statements:

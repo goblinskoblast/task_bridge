@@ -511,6 +511,9 @@ class DataAgentSession(Base):
     last_selected_tools = Column(JSON, nullable=True)
     last_user_message = Column(Text, nullable=True)
     last_answer = Column(Text, nullable=True)
+    last_trace_id = Column(String(64), nullable=True)
+    last_debug_summary = Column(Text, nullable=True)
+    last_debug_payload = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
