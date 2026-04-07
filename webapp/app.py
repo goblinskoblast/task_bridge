@@ -308,8 +308,8 @@ async def _notify_comment(task_id: int, comment_author_id: int, comment_text: st
 
 
 async def _notify_assignee(task_id: int, assignee_id: int) -> None:
-    from bot.handlers import notify_assigned_user
     from bot.notifications import get_notification_bot
+    from bot.task_notifications import notify_assigned_user
 
     session = get_db_session()
     try:

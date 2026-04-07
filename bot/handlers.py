@@ -1,5 +1,4 @@
 import logging
-import re
 from typing import List, Optional
 from datetime import datetime, timedelta
 from aiogram import Bot, Router, F
@@ -16,136 +15,19 @@ from config import TASK_KEYWORDS, MINI_APP_URL, HOST, PORT, WEB_APP_DOMAIN
 from db.models import User, Message as MessageModel, Task, Category, PendingTask, TaskFile, Chat
 from db.database import get_db_session
 from bot.ai_extractor import analyze_message, telegram_message_requires_context
+from bot.task_file_binding import extract_task_reference, resolve_task_for_file_upload
+from bot.task_notifications import (
+    format_user_mention,
+    notify_assigned_user,
+    send_assignee_start_prompt,
+    send_creator_start_prompt,
+    send_private_assignee_selection,
+)
+from bot.telegram_context import get_recent_chat_context
 
 logger = logging.getLogger(__name__)
 
 router = Router()
-TASK_REFERENCE_PATTERNS = [
-    re.compile(r"#task\s*(\d+)", flags=re.IGNORECASE),
-    re.compile(r"\btask\s*[:#]?\s*(\d+)\b", flags=re.IGNORECASE),
-    re.compile(r"\bзадач[аеиу]?\s*#?\s*(\d+)\b", flags=re.IGNORECASE),
-]
-
-
-def get_recent_chat_context(
-    db: Session,
-    chat_id: int,
-    current_message_db_id: int,
-    current_message_date: Optional[datetime] = None,
-    current_user_id: Optional[int] = None,
-    limit: int = 3,
-    max_age_minutes: int = 15,
-) -> List[dict]:
-    """Return recent chat messages for context-aware task extraction."""
-    query = (
-        db.query(MessageModel)
-        .filter(
-            MessageModel.chat_id == chat_id,
-            MessageModel.id < current_message_db_id,
-            MessageModel.text.isnot(None),
-            MessageModel.has_task.is_(False),
-        )
-    )
-
-    if current_message_date is not None:
-        min_context_date = current_message_date - timedelta(minutes=max_age_minutes)
-        query = query.filter(
-            MessageModel.date <= current_message_date,
-            MessageModel.date >= min_context_date,
-        )
-
-    if current_user_id is not None:
-        query = query.filter(MessageModel.user_id == current_user_id)
-
-    recent_messages = (
-        query
-        .order_by(MessageModel.date.desc(), MessageModel.id.desc())
-        .limit(limit)
-        .all()
-    )
-
-    context_messages: List[dict] = []
-    for item in reversed(recent_messages):
-        sender_name = "unknown"
-        if item.user:
-            sender_name = (
-                item.user.first_name
-                or (f"@{item.user.username}" if item.user.username else None)
-                or f"user_{item.user_id}"
-            )
-
-        context_messages.append({
-            "sender": sender_name,
-            "date": item.date.strftime("%Y-%m-%d %H:%M:%S") if item.date else "",
-            "text": item.text or "",
-        })
-
-    return context_messages
-
-
-def _extract_task_reference(text: Optional[str]) -> Optional[int]:
-    if not text:
-        return None
-
-    for pattern in TASK_REFERENCE_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            return int(match.group(1))
-
-    return None
-
-
-def _get_user_in_progress_tasks(db: Session, user_id: int) -> List[Task]:
-    return (
-        db.query(Task)
-        .join(Task.assignees)
-        .filter(
-            User.id == user_id,
-            Task.status == "in_progress",
-        )
-        .all()
-    )
-
-
-def _build_file_upload_task_hint(tasks: List[Task]) -> str:
-    visible_tasks = sorted(
-        tasks,
-        key=lambda item: item.updated_at or item.created_at or datetime.min,
-        reverse=True,
-    )[:5]
-    task_lines = "\n".join(f"• #{task.id} {task.title}" for task in visible_tasks)
-
-    return (
-        "⚠️ У вас несколько задач в работе, поэтому я не буду гадать, к какой прикрепить файл.\n\n"
-        "Добавьте в подпись к файлу ссылку на задачу, например: #task123\n\n"
-        f"Сейчас у вас активны:\n{task_lines}"
-    )
-
-
-def _resolve_task_for_file_upload(db: Session, user_id: int, caption: Optional[str]) -> tuple[Optional[Task], Optional[str]]:
-    active_tasks = _get_user_in_progress_tasks(db, user_id)
-
-    if not active_tasks:
-        return None, (
-            "❌ У вас нет задач в процессе выполнения.\n\n"
-            "Сначала начните выполнение задачи, нажав кнопку '▶️ Начать выполнение'."
-        )
-
-    referenced_task_id = _extract_task_reference(caption)
-    if referenced_task_id is not None:
-        matched_task = next((task for task in active_tasks if task.id == referenced_task_id), None)
-        if matched_task is not None:
-            return matched_task, None
-
-        return None, (
-            f"❌ Задача #{referenced_task_id} не найдена среди ваших задач в работе.\n\n"
-            f"{_build_file_upload_task_hint(active_tasks)}"
-        )
-
-    if len(active_tasks) == 1:
-        return active_tasks[0], None
-
-    return None, _build_file_upload_task_hint(active_tasks)
 
 
 def init_default_categories(db: Session):
@@ -312,198 +194,6 @@ async def get_or_create_chat(chat_id: int, chat_type: str, title: str = None,
             logger.info(f"Updated chat info: {chat_id}")
 
     return chat
-
-
-async def notify_comment_added(bot: Bot, task_id: int, comment_author_id: int, comment_text: str, db: Session) -> None:
-    """
-    Отправляет уведомления о новом комментарии всем участникам задачи,
-    кроме автора комментария.
-    """
-    try:
-        task = db.query(Task).filter(Task.id == task_id).first()
-        if not task:
-            logger.warning(f"Task {task_id} not found")
-            return
-
-        comment_author = db.query(User).filter(User.id == comment_author_id).first()
-
-        # Собираем всех участников задачи
-        participants = set()
-
-        # Добавляем создателя задачи
-        if task.creator and task.creator.id != comment_author_id:
-            participants.add(task.creator)
-
-        # Добавляем всех исполнителей
-        for assignee in task.assignees:
-            if assignee.id != comment_author_id:
-                participants.add(assignee)
-
-        # Формируем уведомление
-        notification = (
-            f"💬 <b>Новый комментарий к задаче</b>\n\n"
-            f"<b>Задача:</b> {task.title}\n"
-            f"<b>Автор:</b> {comment_author.first_name or comment_author.username}\n"
-            f"<b>Комментарий:</b> {comment_text[:200]}{'...' if len(comment_text) > 200 else ''}\n"
-        )
-
-        # Отправляем уведомления всем участникам
-        for participant in participants:
-            if participant.telegram_id and participant.telegram_id != -1:
-                try:
-                    webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={participant.id}&task_id={task.id}"
-                    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                        [
-                            InlineKeyboardButton(
-                                text="📱 Открыть задачу",
-                                web_app=WebAppInfo(url=webapp_url)
-                            )
-                        ]
-                    ])
-
-                    await bot.send_message(
-                        chat_id=participant.telegram_id,
-                        text=notification,
-                        reply_markup=keyboard,
-                        parse_mode="HTML"
-                    )
-                    logger.info(f"Comment notification sent to user @{participant.username}")
-                except TelegramForbiddenError:
-                    logger.warning(f"User @{participant.username} blocked the bot")
-                except Exception as e:
-                    logger.error(f"Failed to send comment notification to @{participant.username}: {e}")
-    except Exception as e:
-        logger.error(f"Error in notify_comment_added: {e}", exc_info=True)
-
-
-async def notify_assigned_user(bot: Bot, task_id: int, db: Session, assignee: User = None) -> bool:
-    """Отправляет назначенному исполнителю уведомление о новой задаче."""
-    try:
-        task = db.query(Task).filter(Task.id == task_id).first()
-        if not task:
-            logger.warning("Task %s not found", task_id)
-            return False
-
-        if not assignee:
-            if not task.assignees:
-                logger.warning("Task %s has no assignees", task_id)
-                return False
-            assignee = task.assignees[0]
-
-        if assignee.telegram_id in (None, -1):
-            logger.warning("User @%s has not started the bot yet", assignee.username)
-            return False
-
-        notification = (
-            f"📌 <b>Вам назначили новую задачу</b>\n\n"
-            f"<b>Задача:</b> {task.title}\n"
-        )
-        if task.description and task.description != task.title:
-            notification += f"<b>Описание:</b> {task.description}\n"
-        if len(task.assignees) > 1:
-            assignees_str = ", ".join([f"@{a.username}" for a in task.assignees if a.username])
-            if assignees_str:
-                notification += f"<b>Исполнители:</b> {assignees_str}\n"
-        if task.due_date:
-            notification += f"<b>Срок:</b> {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
-        notification += f"<b>Приоритет:</b> {task.priority}\n"
-        notification += f"<b>Статус:</b> {task.status}"
-
-        webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={assignee.id}&task_id={task.id}"
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📱 Открыть задачу", web_app=WebAppInfo(url=webapp_url))],
-            [InlineKeyboardButton(text="▶️ Начать выполнение", callback_data=f"task_start:{task.id}")],
-            [InlineKeyboardButton(text="✅ Завершить", callback_data=f"task_complete:{task.id}")],
-        ])
-
-        await bot.send_message(
-            chat_id=assignee.telegram_id,
-            text=notification,
-            reply_markup=keyboard,
-            parse_mode="HTML",
-        )
-        logger.info("Notification sent to user @%s (ID: %s)", assignee.username, assignee.telegram_id)
-        return True
-    except TelegramForbiddenError:
-        logger.warning("User blocked the bot or has not started it")
-        return False
-    except Exception as e:
-        logger.error(f"Failed to send notification: {e}", exc_info=True)
-        return False
-
-def _build_bot_start_url(bot_username: str, start_param: str = "taskbridge") -> str:
-    return f"https://t.me/{bot_username}?start={start_param}"
-
-
-def _format_user_mention(user: User) -> str:
-    if user.username:
-        return f"@{user.username}"
-    if user.first_name:
-        return user.first_name
-    return "Пользователь"
-
-
-async def _send_assignee_start_prompt(bot: Bot, chat_id: int, assignee: User, task_title: str) -> None:
-    bot_info = await bot.get_me()
-    start_url = _build_bot_start_url(bot_info.username)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть чат с ботом", url=start_url)]])
-    mention = _format_user_mention(assignee)
-    await bot.send_message(
-        chat_id=chat_id,
-        text=(
-            f"{mention}, вам назначили задачу <b>{task_title}</b>.\n\n"
-            "Пожалуйста, перейдите в чат со мной и нажмите Start, чтобы получать задачи и работать с ними."
-        ),
-        reply_markup=keyboard,
-        parse_mode="HTML",
-    )
-
-
-async def _send_creator_start_prompt(bot: Bot, source_message: Message) -> None:
-    bot_info = await bot.get_me()
-    start_url = _build_bot_start_url(bot_info.username)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть чат с ботом", url=start_url)]])
-    mention = f"@{source_message.from_user.username}" if source_message.from_user.username else source_message.from_user.first_name
-    await source_message.answer(
-        f"{mention}, чтобы подтвердить задачу, перейдите в личный чат со мной и нажмите Start.",
-        reply_markup=keyboard,
-    )
-
-
-async def _send_private_assignee_selection(bot: Bot, creator: User, pending_task: PendingTask, members: list[dict]) -> bool:
-    if creator.telegram_id in (None, -1):
-        return False
-
-    ask_text = (
-        f"👤 <b>Выберите исполнителя</b>\n\n"
-        f"<b>Задача:</b> {pending_task.title}\n"
-    )
-    if pending_task.description:
-        ask_text += f"<b>Описание:</b> {pending_task.description}\n"
-    if pending_task.due_date:
-        ask_text += f"<b>Срок:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
-    ask_text += "\nКому назначить эту задачу?"
-
-    buttons = []
-    row = []
-    for member in members:
-        display_name = member.get("first_name") or member.get("username") or f"User {member['id']}"
-        row.append(InlineKeyboardButton(text=display_name[:24], callback_data=f"assign_user:{pending_task.id}:{member['id']}"))
-        if len(row) == 2:
-            buttons.append(row)
-            row = []
-    if row:
-        buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_task:{pending_task.id}")])
-
-    sent = await bot.send_message(
-        chat_id=creator.telegram_id,
-        text=ask_text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-        parse_mode="HTML",
-    )
-    pending_task.telegram_message_id = sent.message_id
-    return True
 
 
 @router.message(Command("start"))
@@ -736,7 +426,7 @@ async def handle_assign_user(callback: CallbackQuery):
         pending_task.assignee_username = assignee_token
         db.commit()
 
-        assignee_name = _format_user_mention(assignee)
+        assignee_name = format_user_mention(assignee)
         confirmation_text = (
             f"📋 <b>Подтвердите задачу</b>\n\n"
             f"<b>Задача:</b> {pending_task.title}\n"
@@ -812,7 +502,7 @@ async def handle_confirm_task(callback: CallbackQuery):
                 notification_sent = await notify_assigned_user(callback.bot, task.id, db, assignee=assignee)
                 if not notification_sent:
                     try:
-                        await _send_assignee_start_prompt(callback.bot, pending_task.chat_id, assignee, task.title)
+                        await send_assignee_start_prompt(callback.bot, pending_task.chat_id, assignee, task.title)
                     except Exception as e:
                         logger.error(f"Failed to send start prompt for assignee: {e}", exc_info=True)
 
@@ -828,9 +518,9 @@ async def handle_confirm_task(callback: CallbackQuery):
         )
         if task.assignees:
             if len(task.assignees) == 1:
-                confirmation_msg += f"<b>Исполнитель:</b> {_format_user_mention(task.assignees[0])}\n"
+                confirmation_msg += f"<b>Исполнитель:</b> {format_user_mention(task.assignees[0])}\n"
             else:
-                confirmation_msg += f"<b>Исполнители:</b> {', '.join(_format_user_mention(a) for a in task.assignees)}\n"
+                confirmation_msg += f"<b>Исполнители:</b> {', '.join(format_user_mention(a) for a in task.assignees)}\n"
         else:
             confirmation_msg += "<b>Исполнитель:</b> не выбран\n"
         confirmation_msg += f"<b>Срок:</b> {task.due_date.strftime('%d.%m.%Y %H:%M') if task.due_date else 'не задан'}\n"
@@ -1020,7 +710,7 @@ async def handle_group_message(message: Message):
                 chat_members.append({"id": message.from_user.id, "username": message.from_user.username, "first_name": message.from_user.first_name})
 
             try:
-                if await _send_private_assignee_selection(message.bot, user, pending_task, chat_members):
+                if await send_private_assignee_selection(message.bot, user, pending_task, chat_members):
                     db.commit()
                     return
             except TelegramForbiddenError:
@@ -1028,7 +718,7 @@ async def handle_group_message(message: Message):
             except Exception as e:
                 logger.error("Error sending private assignee selection: %s", e, exc_info=True)
 
-            await _send_creator_start_prompt(message.bot, message)
+            await send_creator_start_prompt(message.bot, message)
             return
 
         confirmation_text = (
@@ -1059,7 +749,7 @@ async def handle_group_message(message: Message):
             logger.info("Task confirmation sent to user %s", user.telegram_id)
         except TelegramForbiddenError:
             logger.warning("User has not started the bot; cannot send private confirmation")
-            await _send_creator_start_prompt(message.bot, message)
+            await send_creator_start_prompt(message.bot, message)
     except Exception as e:
         logger.error(f"Error handling group message: {e}", exc_info=True)
     finally:
@@ -1083,36 +773,14 @@ async def handle_file_upload(message: Message):
             db=db
         )
 
-        # Находим активные задачи пользователя через many-to-many связь
-        active_tasks = db.query(Task).join(
-            Task.assignees
-        ).filter(
-            User.id == user.id,
-            Task.status == "in_progress"
-        ).all()
-
-        if not active_tasks:
-            await message.answer(
-                "❌ У вас нет задач в процессе выполнения.\n\n"
-                "Сначала начните выполнение задачи, нажав кнопку '▶️ Начать выполнение'."
-            )
-            return
-
-        
-        task = active_tasks[0]
-        if len(active_tasks) > 1:
-            task = max(active_tasks, key=lambda t: t.updated_at or t.created_at)
-            logger.info(f"User has {len(active_tasks)} active tasks, using most recent: {task.id}")
-
-        
         file_type = None
         file_id = None
         file_name = None
         file_size = None
         mime_type = None
         caption = message.caption
-        referenced_task_id = _extract_task_reference(caption)
-        task, task_resolution_error = _resolve_task_for_file_upload(db, user.id, caption)
+        referenced_task_id = extract_task_reference(caption)
+        task, task_resolution_error = resolve_task_for_file_upload(db, user.id, caption)
         if task_resolution_error:
             await message.answer(task_resolution_error)
             return
