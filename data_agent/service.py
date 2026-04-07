@@ -7,11 +7,20 @@ from typing import List, Optional
 from uuid import uuid4
 
 from db.database import get_db_session
-from db.models import DataAgentRequestLog, DataAgentSystem, User
+from db.models import DataAgentMonitorConfig, DataAgentProfile, DataAgentRequestLog, DataAgentSystem, User
 from email_integration.encryption import encrypt_password
 
 from .agent_runtime import agent_runtime
-from .models import ConnectedSystem, DataAgentChatRequest, DataAgentChatResponse, SystemConnectRequest, SystemConnectResponse
+from .models import (
+    ConnectedSystem,
+    DataAgentChatRequest,
+    DataAgentChatResponse,
+    MonitorConfigItem,
+    MonitorDeleteResponse,
+    SystemConnectRequest,
+    SystemConnectResponse,
+)
+from .monitoring import build_monitor_saved_note, scenario_to_monitor_type
 from .scenario_engine import scenario_engine
 
 logger = logging.getLogger(__name__)
@@ -109,6 +118,123 @@ class DataAgentService:
         finally:
             db.close()
 
+    def list_monitors(self, user_id: int) -> List[MonitorConfigItem]:
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return []
+            items = (
+                db.query(DataAgentMonitorConfig)
+                .filter(
+                    DataAgentMonitorConfig.user_id == user.id,
+                    DataAgentMonitorConfig.is_active == True,
+                )
+                .order_by(
+                    DataAgentMonitorConfig.monitor_type.asc(),
+                    DataAgentMonitorConfig.point_name.asc(),
+                )
+                .all()
+            )
+            return [
+                MonitorConfigItem(
+                    id=item.id,
+                    monitor_type=item.monitor_type,
+                    point_name=item.point_name,
+                    check_interval_minutes=item.check_interval_minutes,
+                    is_active=item.is_active,
+                    last_status=item.last_status,
+                )
+                for item in items
+            ]
+        finally:
+            db.close()
+
+    def delete_monitor(self, user_id: int, monitor_id: int) -> MonitorDeleteResponse:
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return MonitorDeleteResponse(success=False, error="user_not_found")
+
+            item = (
+                db.query(DataAgentMonitorConfig)
+                .filter(
+                    DataAgentMonitorConfig.user_id == user.id,
+                    DataAgentMonitorConfig.id == monitor_id,
+                    DataAgentMonitorConfig.is_active == True,
+                )
+                .first()
+            )
+            if not item:
+                return MonitorDeleteResponse(success=False, error="monitor_not_found")
+
+            item.is_active = False
+            db.commit()
+            return MonitorDeleteResponse(success=True, deleted_id=monitor_id)
+        except Exception as exc:
+            db.rollback()
+            return MonitorDeleteResponse(success=False, error=str(exc))
+        finally:
+            db.close()
+
+    def _upsert_monitor(
+        self,
+        *,
+        user_id: int,
+        scenario: str,
+        point_name: str,
+        interval_minutes: int,
+    ) -> str | None:
+        monitor_type = scenario_to_monitor_type(scenario)
+        if not monitor_type or not point_name or not interval_minutes:
+            return None
+
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return None
+
+            existing = (
+                db.query(DataAgentMonitorConfig)
+                .filter(
+                    DataAgentMonitorConfig.user_id == user.id,
+                    DataAgentMonitorConfig.monitor_type == monitor_type,
+                    DataAgentMonitorConfig.point_name == point_name,
+                )
+                .first()
+            )
+            if not existing:
+                existing = DataAgentMonitorConfig(
+                    user_id=user.id,
+                    system_name="italian_pizza",
+                    monitor_type=monitor_type,
+                    point_name=point_name,
+                    check_interval_minutes=interval_minutes,
+                    is_active=True,
+                )
+                db.add(existing)
+            else:
+                existing.check_interval_minutes = interval_minutes
+                existing.is_active = True
+
+            profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user.id).first()
+            chat_title = profile.default_report_chat_title if profile else None
+            db.commit()
+            return build_monitor_saved_note(
+                monitor_type=monitor_type,
+                point_name=point_name,
+                interval_minutes=interval_minutes,
+                chat_title=chat_title,
+            )
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to upsert monitor")
+            return None
+        finally:
+            db.close()
+
     async def chat(self, payload: DataAgentChatRequest) -> DataAgentChatResponse:
         trace_id = str(uuid4())
         started_at = time.perf_counter()
@@ -145,6 +271,17 @@ class DataAgentService:
             selected_tools = execution.selected_tools
             logger.info("DataAgent tool_results trace=%s keys=%s", trace_id, list(execution.tool_results.keys()))
             answer = execution.answer or "Не удалось сформировать ответ."
+            interval_minutes = decision.slots.get("monitor_interval_minutes")
+            point_name = decision.slots.get("point_name")
+            if isinstance(interval_minutes, int) and interval_minutes > 0 and point_name:
+                monitor_note = self._upsert_monitor(
+                    user_id=payload.user_id,
+                    scenario=decision.scenario,
+                    point_name=point_name,
+                    interval_minutes=interval_minutes,
+                )
+                if monitor_note:
+                    answer = f"{answer}{monitor_note}"
             agent_runtime.save_session(payload.user_id, decision, user_message=normalized_message, answer=answer, status="completed")
             return DataAgentChatResponse(
                 answer=answer,

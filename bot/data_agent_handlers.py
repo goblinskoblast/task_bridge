@@ -40,6 +40,9 @@ AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
             InlineKeyboardButton(text="Стоп-лист", callback_data="agent_hint_stoplist"),
             InlineKeyboardButton(text="Бланки", callback_data="agent_hint_blanks"),
         ],
+        [
+            InlineKeyboardButton(text="Мониторы", callback_data="agent_hint_monitors"),
+        ],
     ]
 )
 
@@ -330,6 +333,19 @@ async def callback_agent_hint_blanks(callback: CallbackQuery) -> None:
         )
 
 
+@router.callback_query(F.data == "agent_hint_monitors")
+async def callback_agent_hint_monitors(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer(
+            "Для мониторинга можно написать, например:\n"
+            "/monitorblanks Екатеринбург, Малышева 5 каждый час\n"
+            "/monitorstoplist Екатеринбург, Малышева 5 каждые 3 часа\n\n"
+            "Посмотреть активные мониторинги: /monitors\n"
+            "Отключить: /unmonitor 12"
+        )
+
+
 @router.message(StateFilter(AgentOnboardingState.waiting_for_business_context), F.text)
 async def onboarding_business_context(message: Message, state: FSMContext) -> None:
     await state.update_data(business_context=(message.text or "").strip())
@@ -415,6 +431,67 @@ async def cmd_stoplist(message: Message, state: FSMContext) -> None:
 @router.message(Command("blanks"))
 async def cmd_blanks(message: Message, state: FSMContext) -> None:
     await _send_quick_report_request(message, message.text, "Проверь бланки загрузки")
+
+
+@router.message(Command("monitorblanks"))
+async def cmd_monitorblanks(message: Message, state: FSMContext) -> None:
+    await _send_quick_report_request(message, message.text, "Мониторь бланки загрузки")
+
+
+@router.message(Command("monitorstoplist"))
+async def cmd_monitorstoplist(message: Message, state: FSMContext) -> None:
+    await _send_quick_report_request(message, message.text, "Мониторь стоп-лист")
+
+
+@router.message(Command("monitors"))
+async def cmd_monitors(message: Message) -> None:
+    try:
+        monitors = await data_agent_client.list_monitors(message.from_user.id)
+    except Exception as exc:
+        logger.error("Agent monitors error: %s", exc, exc_info=True)
+        await message.answer("Не удалось получить список мониторингов.")
+        return
+
+    if not monitors:
+        await message.answer(
+            "Активных мониторингов пока нет.\n"
+            "Пример: /monitorblanks Екатеринбург, Малышева 5 каждый час",
+            reply_markup=AGENT_ENTRY_KEYBOARD,
+        )
+        return
+
+    lines = ["Активные мониторинги:"]
+    for item in monitors:
+        lines.append(
+            f"• #{item.get('id')} {item.get('monitor_type')} — {item.get('point_name')} "
+            f"(каждые {item.get('check_interval_minutes')} мин., статус: {item.get('last_status') or 'new'})"
+        )
+    lines.append("")
+    lines.append("Чтобы отключить, используйте: /unmonitor ID")
+    await message.answer("\n".join(lines), reply_markup=AGENT_ENTRY_KEYBOARD)
+
+
+@router.message(Command("unmonitor"))
+async def cmd_unmonitor(message: Message) -> None:
+    monitor_id_raw = _get_command_args(message.text)
+    if not monitor_id_raw.isdigit():
+        await message.answer("Укажите ID мониторинга, например: /unmonitor 12")
+        return
+
+    try:
+        result = await data_agent_client.delete_monitor(message.from_user.id, int(monitor_id_raw))
+    except Exception as exc:
+        logger.error("Agent delete monitor error: %s", exc, exc_info=True)
+        await message.answer("Не удалось отключить мониторинг.")
+        return
+
+    if result.get("success"):
+        await message.answer(f"Мониторинг #{monitor_id_raw} отключён.")
+    else:
+        await message.answer(
+            f"Не удалось отключить мониторинг #{monitor_id_raw}: "
+            f"{result.get('error', 'неизвестная ошибка')}"
+        )
 
 
 @router.message(Command("connect"))

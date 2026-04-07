@@ -6,7 +6,15 @@ from fastapi import FastAPI
 
 from db.database import init_db
 from .monitor_scheduler import start_data_agent_monitor_scheduler, stop_data_agent_monitor_scheduler
-from .models import DataAgentChatRequest, DataAgentChatResponse, SystemConnectRequest, SystemConnectResponse, SystemsListResponse
+from .models import (
+    DataAgentChatRequest,
+    DataAgentChatResponse,
+    MonitorDeleteResponse,
+    MonitorsListResponse,
+    SystemConnectRequest,
+    SystemConnectResponse,
+    SystemsListResponse,
+)
 from .service import service
 
 logging.basicConfig(
@@ -47,3 +55,13 @@ async def connect_system(payload: SystemConnectRequest) -> SystemConnectResponse
 @app.get("/systems/{user_id}", response_model=SystemsListResponse)
 async def list_systems(user_id: int) -> SystemsListResponse:
     return SystemsListResponse(systems=service.list_systems(user_id))
+
+
+@app.get("/monitors/{user_id}", response_model=MonitorsListResponse)
+async def list_monitors(user_id: int) -> MonitorsListResponse:
+    return MonitorsListResponse(monitors=service.list_monitors(user_id))
+
+
+@app.delete("/monitors/{user_id}/{monitor_id}", response_model=MonitorDeleteResponse)
+async def delete_monitor(user_id: int, monitor_id: int) -> MonitorDeleteResponse:
+    return service.delete_monitor(user_id, monitor_id)

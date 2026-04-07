@@ -28,6 +28,13 @@ class DataAgentClient:
         response = await self._request("GET", f"/systems/{user_id}")
         return response.get("systems", [])
 
+    async def list_monitors(self, user_id: int) -> List[Dict[str, Any]]:
+        response = await self._request("GET", f"/monitors/{user_id}")
+        return response.get("monitors", [])
+
+    async def delete_monitor(self, user_id: int, monitor_id: int) -> Dict[str, Any]:
+        return await self._request("DELETE", f"/monitors/{user_id}/{monitor_id}")
+
     async def _request(self, method: str, path: str, json: Dict[str, Any] | None = None) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
         timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
@@ -40,4 +47,3 @@ class DataAgentClient:
 
 
 data_agent_client = DataAgentClient()
-

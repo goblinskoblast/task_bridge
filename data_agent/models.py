@@ -49,6 +49,25 @@ class SystemsListResponse(BaseModel):
     systems: List[ConnectedSystem] = Field(default_factory=list)
 
 
+class MonitorConfigItem(BaseModel):
+    id: int
+    monitor_type: str
+    point_name: str
+    check_interval_minutes: int
+    is_active: bool = True
+    last_status: Optional[str] = None
+
+
+class MonitorsListResponse(BaseModel):
+    monitors: List[MonitorConfigItem] = Field(default_factory=list)
+
+
+class MonitorDeleteResponse(BaseModel):
+    success: bool
+    deleted_id: Optional[int] = None
+    error: Optional[str] = None
+
+
 class EmailSummaryItem(BaseModel):
     subject: str
     from_address: str
