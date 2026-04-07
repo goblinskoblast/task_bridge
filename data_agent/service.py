@@ -316,9 +316,19 @@ class DataAgentService:
         try:
             systems = self.list_systems(payload.user_id)
             logger.info("DataAgent chat trace=%s user_id=%s systems=%s message=%s", trace_id, payload.user_id, len(systems), normalized_message[:300])
+            routing_started = time.perf_counter()
             decision = await agent_runtime.decide(payload.user_id, normalized_message, systems_count=len(systems))
+            routing_elapsed = time.perf_counter() - routing_started
             selected_tools = decision.selected_tools
-            logger.info("DataAgent plan trace=%s scenario=%s selected_tools=%s slots=%s reasoning=%s", trace_id, decision.scenario, selected_tools, decision.slots, decision.reasoning)
+            logger.info(
+                "DataAgent plan trace=%s scenario=%s selected_tools=%s slots=%s reasoning=%s routing_elapsed=%.2fs",
+                trace_id,
+                decision.scenario,
+                selected_tools,
+                decision.slots,
+                decision.reasoning,
+                routing_elapsed,
+            )
 
             if decision.missing_slots:
                 answer = agent_runtime.build_missing_slots_answer(decision)
@@ -349,6 +359,7 @@ class DataAgentService:
                     debug_summary=debug_summary,
                 )
 
+            execution_started = time.perf_counter()
             execution = await scenario_engine.execute(
                 scenario=decision.scenario,
                 user_id=payload.user_id,
@@ -356,8 +367,15 @@ class DataAgentService:
                 slots=decision.slots,
                 systems=systems,
             )
+            execution_elapsed = time.perf_counter() - execution_started
             selected_tools = execution.selected_tools
-            logger.info("DataAgent tool_results trace=%s keys=%s", trace_id, list(execution.tool_results.keys()))
+            logger.info(
+                "DataAgent tool_results trace=%s keys=%s execution_elapsed=%.2fs total_elapsed=%.2fs",
+                trace_id,
+                list(execution.tool_results.keys()),
+                execution_elapsed,
+                time.perf_counter() - started_at,
+            )
             answer = execution.answer or "Не удалось сформировать ответ."
             response_status = derive_response_status(execution.tool_results)
             debug_payload, debug_summary = build_debug_artifacts(
@@ -402,7 +420,7 @@ class DataAgentService:
             success = False
             error_message = str(exc)
             logger.exception("DataAgent chat failed trace=%s", trace_id)
-            fallback_decision = await agent_runtime.decide(payload.user_id, normalized_message, systems_count=0)
+            fallback_decision = agent_runtime.decide_fast(payload.user_id, normalized_message, systems_count=0)
             fallback_answer = f"DataAgent не смог обработать запрос: {exc}"
             debug_payload, debug_summary = build_debug_artifacts(
                 trace_id=trace_id,

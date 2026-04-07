@@ -17,6 +17,14 @@ _ORDER_ACTION_LABELS = {
     "выбрать", "в корзину", "добавить", "заказать", "недоступно", "подробнее",
 }
 
+_DISABLED_TEXT_MARKERS = {
+    "недоступно", "нет в наличии", "sold out", "unavailable",
+}
+
+_DISABLED_CLASS_MARKERS = {
+    "disabled", "unavailable", "inactive", "soldout", "sold-out", "out-of-stock", "not-available", "is-disabled",
+}
+
 
 class ItalianPizzaPublicAdapter:
     def _build_diagnostics(self, stage: str, url: str, **extra) -> dict:
@@ -235,17 +243,17 @@ class ItalianPizzaPublicAdapter:
                     await field.click()
                     await field.fill("")
                     await field.fill(query)
-                    await page.wait_for_timeout(1200)
+                    await page.wait_for_timeout(700)
                     logger.info("Stoplist filled address input selector=%s index=%s value=%s", selector, idx, query)
                     suggestion_candidates = await self._collect_suggestion_candidates(page, query)
                     logger.info("Stoplist suggestion candidates=%s", suggestion_candidates)
                     if await self._click_suggestion(page, query):
-                        await page.wait_for_timeout(1500)
+                        await page.wait_for_timeout(800)
                         return True
                     await field.press("ArrowDown")
-                    await page.wait_for_timeout(500)
+                    await page.wait_for_timeout(250)
                     await field.press("Enter")
-                    await page.wait_for_timeout(1500)
+                    await page.wait_for_timeout(800)
                     logger.info("Stoplist used keyboard suggestion flow selector=%s index=%s", selector, idx)
                     return True
                 except Exception as exc:
@@ -266,31 +274,36 @@ class ItalianPizzaPublicAdapter:
         return False
 
     async def _scroll_all(self, page) -> None:
-        for _ in range(10):
+        for _ in range(5):
             try:
-                await page.mouse.wheel(0, 1800)
+                await page.mouse.wheel(0, 2200)
             except Exception:
-                await page.evaluate("window.scrollBy(0, 1800)")
-            await page.wait_for_timeout(600)
+                await page.evaluate("window.scrollBy(0, 2200)")
+            await page.wait_for_timeout(350)
 
-    async def _is_disabled_button(self, btn) -> bool:
+    def _has_disabled_markers(self, text: str, disabled_attr: str | None, aria_disabled: str | None, classes: str) -> bool:
+        lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+        normalized_classes = (classes or "").lower()
+        if any(marker in lowered for marker in _DISABLED_TEXT_MARKERS):
+            return True
+        if disabled_attr is not None or aria_disabled == "true":
+            return True
+        if any(marker in normalized_classes for marker in _DISABLED_CLASS_MARKERS):
+            return True
+        return False
+
+    async def _is_disabled_button(self, btn, action_text: str) -> bool:
         try:
             disabled_attr = await btn.get_attribute("disabled")
             aria_disabled = await btn.get_attribute("aria-disabled")
             classes = (await btn.get_attribute("class") or "").lower()
-            if disabled_attr is not None or aria_disabled == "true":
-                return True
-            if any(token in classes for token in ["disabled", "unavailable", "gray"]):
+            if self._has_disabled_markers(action_text, disabled_attr, aria_disabled, classes):
                 return True
             if not await btn.is_enabled():
                 return True
-            try:
-                await btn.click(trial=True, timeout=800)
-                return False
-            except Exception:
-                return True
         except Exception:
             return False
+        return False
 
     async def _extract_card_title(self, card) -> str:
         title_selectors = [
@@ -343,8 +356,8 @@ class ItalianPizzaPublicAdapter:
 
     async def _collect_disabled_products(self, page) -> list[str]:
         results: list[str] = []
-        locator = page.locator("button, [role='button'], a")
-        count = min(await locator.count(), 220)
+        locator = page.locator("button, [role='button']")
+        count = min(await locator.count(), 140)
         for idx in range(count):
             btn = locator.nth(idx)
             try:
@@ -353,7 +366,7 @@ class ItalianPizzaPublicAdapter:
                 text = re.sub(r"\s+", " ", (await btn.inner_text()).strip())
                 if not self._looks_like_order_action(text):
                     continue
-                if not await self._is_disabled_button(btn):
+                if not await self._is_disabled_button(btn, text):
                     continue
                 card_text = await self._extract_card_text(btn)
                 if not card_text:
@@ -393,7 +406,7 @@ class ItalianPizzaPublicAdapter:
                 stage = "goto"
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
                 current_url = page.url
-                await page.wait_for_timeout(2000)
+                await page.wait_for_timeout(1000)
                 await self._dismiss_common_overlays(page)
                 issue = self._detect_public_page_issue(await page.locator("body").inner_text())
                 if issue:

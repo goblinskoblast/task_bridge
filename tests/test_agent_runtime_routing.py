@@ -1,5 +1,6 @@
 import os
 import unittest
+from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("BOT_TOKEN", "test-bot-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
@@ -61,6 +62,22 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
         merged = self.runtime._merge_decisions(base, None, session)
 
         self.assertEqual(merged.slots.get("point_name"), "Верхний Уфалей, Ленина 147")
+
+
+class AgentRuntimeAsyncRoutingTest(unittest.IsolatedAsyncioTestCase):
+    async def test_decide_skips_llm_for_explicit_stoplist_request(self):
+        runtime = DataAgentRuntime()
+
+        with patch.object(runtime, "load_session", return_value=AgentSessionSnapshot(user_id=1)):
+            with patch.object(runtime, "_llm_decision", AsyncMock(return_value=None)) as mocked_llm:
+                decision = await runtime.decide(
+                    1,
+                    "проверь стоп-лист по точке Екатеринбург, Ленина 147",
+                    systems_count=1,
+                )
+
+        self.assertEqual(decision.scenario, "stoplist_report")
+        mocked_llm.assert_not_awaited()
 
 
 if __name__ == "__main__":

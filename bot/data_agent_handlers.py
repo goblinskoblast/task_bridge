@@ -196,6 +196,23 @@ def _get_command_args(raw_text: str | None) -> str:
     return parts[1].strip()
 
 
+def _looks_like_long_agent_request(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(
+        marker in lowered
+        for marker in [
+            "стоп-лист",
+            "стоп лист",
+            "бланк",
+            "бланки",
+            "отзывы по точке",
+            "отзывы по адресу",
+            "проверь точку",
+            "мониторь",
+        ]
+    )
+
+
 def _format_agent_debug_message(result: dict) -> str:
     summary = (result.get("summary") or "").strip()
     if summary:
@@ -236,6 +253,8 @@ async def _send_quick_report_request(message: Message, command_text: str | None,
 
 
 async def _send_agent_request(message: Message, text: str) -> None:
+    if _looks_like_long_agent_request(text):
+        await message.answer("Запрос принял. Сбор данных по точке может занять до 1-2 минут, особенно для стоп-листа и бланков.")
     try:
         result = await data_agent_client.chat(
             {

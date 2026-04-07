@@ -22,6 +22,12 @@ class StoplistAdapterHelpersTest(unittest.TestCase):
         self.assertTrue(self.adapter._looks_like_order_action("Добавить в корзину"))
         self.assertFalse(self.adapter._looks_like_order_action("Подробнее"))
 
+    def test_has_disabled_markers(self):
+        self.assertTrue(self.adapter._has_disabled_markers("Недоступно", None, None, ""))
+        self.assertTrue(self.adapter._has_disabled_markers("Выбрать", None, "true", ""))
+        self.assertTrue(self.adapter._has_disabled_markers("В корзину", None, None, "product-card is-disabled"))
+        self.assertFalse(self.adapter._has_disabled_markers("Выбрать", None, None, "product-card"))
+
     def test_clean_product_name_filters_prices_and_actions(self):
         self.assertEqual(self.adapter._clean_product_name("1199"), "")
         self.assertEqual(self.adapter._clean_product_name("Выбрать"), "")

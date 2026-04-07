@@ -17,6 +17,7 @@ from .review_report import review_report_service
 from .stoplist_tool import stoplist_tool
 
 logger = logging.getLogger(__name__)
+DIRECT_ANSWER_SCENARIOS = {"reviews_report", "stoplist_report", "blanks_report"}
 
 
 @dataclass
@@ -160,6 +161,9 @@ class DataAgentScenarioEngine:
         handler = self._scenarios.get(scenario, self._scenarios["general"])
         execution = await handler.execute(user_id=user_id, user_message=user_message, slots=slots, systems=systems)
         if execution.answer:
+            return execution
+        if scenario in DIRECT_ANSWER_SCENARIOS:
+            execution.answer = orchestrator._fallback_answer(execution.tool_results)
             return execution
         execution.answer = await orchestrator.synthesize(user_message, execution.tool_results)
         return execution

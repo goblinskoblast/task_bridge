@@ -61,8 +61,15 @@ class DataAgentRuntime:
     async def decide(self, user_id: int, message: str, systems_count: int = 0) -> AgentDecision:
         session = self.load_session(user_id)
         rule_decision = self._rule_based_decision(message, session, systems_count)
+        if self._should_skip_llm_routing(rule_decision):
+            return self._merge_decisions(rule_decision, None, session)
         llm_decision = await self._llm_decision(message, session, systems_count)
         return self._merge_decisions(rule_decision, llm_decision, session)
+
+    def decide_fast(self, user_id: int, message: str, systems_count: int = 0) -> AgentDecision:
+        session = self.load_session(user_id)
+        rule_decision = self._rule_based_decision(message, session, systems_count)
+        return self._merge_decisions(rule_decision, None, session)
 
     def load_session(self, user_id: int) -> AgentSessionSnapshot:
         db = get_db_session()
@@ -151,6 +158,9 @@ class DataAgentRuntime:
             reasoning=base.reasoning,
             response_style=base.response_style,
         )
+
+    def _should_skip_llm_routing(self, rule_decision: AgentDecision) -> bool:
+        return rule_decision.scenario != "general"
 
     def _rule_based_decision(self, message: str, session: AgentSessionSnapshot, systems_count: int) -> AgentDecision:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()

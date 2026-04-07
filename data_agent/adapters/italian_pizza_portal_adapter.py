@@ -42,7 +42,7 @@ class ItalianPizzaPortalAdapter:
                 continue
             try:
                 await locator.first.click(timeout=3000)
-                await page.wait_for_timeout(1500)
+                await page.wait_for_timeout(900)
                 matched_point = candidate
                 break
             except Exception:
@@ -181,7 +181,7 @@ class ItalianPizzaPortalAdapter:
             if await locator.count() > 0:
                 try:
                     await locator.first.click(timeout=3000)
-                    await page.wait_for_timeout(1500)
+                    await page.wait_for_timeout(900)
                     logger.info("Blanks period selected candidate=%s", candidate)
                     return {"selected": True, "matched_period": candidate, "visible_period_controls": []}
                 except Exception:
@@ -190,7 +190,7 @@ class ItalianPizzaPortalAdapter:
         logger.info("Blanks visible period controls=%s", visible_controls)
         await self._open_period_menu_if_needed(page)
         if await self._click_best_period_candidate(page, candidates):
-            await page.wait_for_timeout(1500)
+            await page.wait_for_timeout(900)
             return {
                 "selected": True,
                 "matched_period": candidates[0],
@@ -242,7 +242,7 @@ class ItalianPizzaPortalAdapter:
                 stage = "goto"
                 await page.goto(url, wait_until="domcontentloaded", timeout=20000)
                 current_url = page.url
-                await page.wait_for_timeout(1200)
+                await page.wait_for_timeout(700)
                 stage = "login_username"
                 for selector in ["input[name='username']", "input[name='login']", "input[type='email']"]:
                     if await page.locator(selector).count() > 0:
@@ -258,7 +258,7 @@ class ItalianPizzaPortalAdapter:
                     if await page.locator(selector).count() > 0:
                         await page.locator(selector).first.click()
                         break
-                await page.wait_for_timeout(1800)
+                await page.wait_for_timeout(900)
                 current_url = page.url
                 issue = self._detect_terminal_issue(await page.locator("body").inner_text())
                 if issue:
@@ -294,7 +294,7 @@ class ItalianPizzaPortalAdapter:
                     if await locator.count() > 0:
                         try:
                             await locator.first.click(timeout=3000)
-                            await page.wait_for_timeout(1500)
+                            await page.wait_for_timeout(900)
                             current_url = page.url
                         except Exception:
                             continue
