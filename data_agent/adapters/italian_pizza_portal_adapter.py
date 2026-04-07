@@ -1263,6 +1263,7 @@ class ItalianPizzaPortalAdapter:
   const cards = Array.from(document.querySelectorAll("[data-cy^='timesection-']"));
   const signals = [];
   const styledCellSamples = [];
+  const tableSamples = [];
   let tableCount = 0;
   for (const card of cards) {
     const slotId = clean((card.getAttribute("data-cy") || "").replace("timesection-", ""));
@@ -1364,6 +1365,21 @@ class ItalianPizzaPortalAdapter:
         ...Array.from(acceptedRow?.keys() || []),
         ...Array.from(remainingRow?.keys() || []),
       ]);
+      if (tableSamples.length < 12) {
+        tableSamples.push({
+          slot_id: slotId,
+          service,
+          time_range: timeRange,
+          columns: Array.from(metricColumns),
+          rows: Array.from(metricRows.values()).slice(0, 4).map((values) => {
+            const items = Array.from(values.values());
+            return {
+              row_label: items[0]?.row_label || "",
+              values: items.map((item) => item.value),
+            };
+          }),
+        });
+      }
       for (const column of metricColumns) {
         const maxCell = maxRow?.get(column);
         const acceptedCell = acceptedRow?.get(column);
@@ -1426,6 +1442,7 @@ class ItalianPizzaPortalAdapter:
     first_slot: clean((cards[0]?.getAttribute("data-cy") || "").replace("timesection-", "")),
     signals,
     styled_cell_samples: styledCellSamples,
+    table_samples: tableSamples,
   };
 }
 """
@@ -1482,6 +1499,7 @@ class ItalianPizzaPortalAdapter:
         observed_slot_counts: list[int] = []
         observed_table_counts: list[int] = []
         styled_cell_samples: list[dict] = []
+        table_samples: list[dict] = []
 
         if not scan_hours:
             snapshot = await self._read_blank_red_signals(page)
@@ -1506,6 +1524,7 @@ class ItalianPizzaPortalAdapter:
                 "table_count": max(observed_table_counts or [0]),
                 "red_signal_count": len(snapshot.get("signals") or []),
                 "styled_cell_samples": snapshot.get("styled_cell_samples") or [],
+                "table_samples": snapshot.get("table_samples") or [],
             }
 
         for hour_value in scan_hours:
@@ -1529,6 +1548,10 @@ class ItalianPizzaPortalAdapter:
                 if len(styled_cell_samples) >= 20:
                     break
                 styled_cell_samples.append(sample)
+            for table_sample in snapshot.get("table_samples") or []:
+                if len(table_samples) >= 12:
+                    break
+                table_samples.append(table_sample)
 
         unique_signals: list[dict] = []
         seen_keys: set[str] = set()
@@ -1567,6 +1590,7 @@ class ItalianPizzaPortalAdapter:
             "table_count": max(observed_table_counts or [0]),
             "red_signal_count": len(unique_signals),
             "styled_cell_samples": styled_cell_samples,
+            "table_samples": table_samples,
         }
 
     async def _iter_period_controls(self, page, max_items: int = 200) -> list[tuple[int, str]]:
@@ -2003,13 +2027,14 @@ class ItalianPizzaPortalAdapter:
                     )
                 scan_result = await self._scan_blank_report(page, point_name, period_hint)
                 logger.info(
-                    "Blanks scan summary point=%s period=%s red_signals=%s slot_count=%s table_count=%s samples=%s",
+                    "Blanks scan summary point=%s period=%s red_signals=%s slot_count=%s table_count=%s samples=%s tables=%s",
                     point_name,
                     period_hint,
                     scan_result.get("red_signal_count"),
                     scan_result.get("slot_count"),
                     scan_result.get("table_count"),
                     (scan_result.get("styled_cell_samples") or [])[:5],
+                    (scan_result.get("table_samples") or [])[:3],
                 )
                 if scan_result.get("status") == "needs_period":
                     message = scan_result.get("message") or "Нужно уточнить период отчета по бланкам."
@@ -2041,6 +2066,7 @@ class ItalianPizzaPortalAdapter:
                             table_count=scan_result.get("table_count"),
                             red_signal_count=scan_result.get("red_signal_count"),
                             styled_cell_samples=scan_result.get("styled_cell_samples"),
+                            table_samples=scan_result.get("table_samples"),
                         ),
                     }
 
@@ -2075,6 +2101,7 @@ class ItalianPizzaPortalAdapter:
                         table_count=scan_result.get("table_count"),
                         red_signal_count=scan_result.get("red_signal_count"),
                         styled_cell_samples=scan_result.get("styled_cell_samples"),
+                        table_samples=scan_result.get("table_samples"),
                     ),
                 }
             except Exception as exc:
