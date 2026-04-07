@@ -25,6 +25,7 @@ AGENT_WELCOME = (
     "Я на связи. Могу помочь с отзывами, почтой, календарём и внешними системами.\n\n"
     "Что можно попросить уже сейчас:\n"
     "• собрать отчёт по отзывам\n"
+    "• проверить стоп-лист и бланки по точке\n"
     "• посмотреть письма и календарь\n"
     "• зайти в подключённую веб-систему и собрать данные\n\n"
     "Напишите обычным сообщением, что нужно сделать."
@@ -34,6 +35,11 @@ AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="Подключить свою систему", callback_data="agent_connect_system")],
         [InlineKeyboardButton(text="Выбрать чат для отчётов", callback_data="agent_choose_report_chat")],
+        [
+            InlineKeyboardButton(text="Отзывы", callback_data="agent_hint_reviews"),
+            InlineKeyboardButton(text="Стоп-лист", callback_data="agent_hint_stoplist"),
+            InlineKeyboardButton(text="Бланки", callback_data="agent_hint_blanks"),
+        ],
     ]
 )
 
@@ -178,6 +184,19 @@ async def _deliver_report_to_selected_chat(message: Message, user_message: str, 
         db.close()
 
 
+def _get_command_args(raw_text: str | None) -> str:
+    parts = (raw_text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        return ""
+    return parts[1].strip()
+
+
+async def _send_quick_report_request(message: Message, command_text: str | None, prefix: str) -> None:
+    args = _get_command_args(command_text)
+    payload = f"{prefix}. {args}".strip() if args else prefix
+    await _send_agent_request(message, payload)
+
+
 async def _send_agent_request(message: Message, text: str) -> None:
     try:
         result = await data_agent_client.chat(
@@ -278,6 +297,39 @@ async def callback_agent_connect_system(callback: CallbackQuery, state: FSMConte
         await callback.message.answer("Введите URL системы, которую нужно подключить.")
 
 
+@router.callback_query(F.data == "agent_hint_reviews")
+async def callback_agent_hint_reviews(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer(
+            "Для отчёта по отзывам можно написать, например:\n"
+            "/reviews за неделю\n"
+            "/reviews Екатеринбург, Малышева 5 за сутки"
+        )
+
+
+@router.callback_query(F.data == "agent_hint_stoplist")
+async def callback_agent_hint_stoplist(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer(
+            "Для стоп-листа напишите, например:\n"
+            "/stoplist Екатеринбург, Малышева 5\n"
+            "или обычным текстом: пришли стоп-лист по точке Екатеринбург, Малышева 5"
+        )
+
+
+@router.callback_query(F.data == "agent_hint_blanks")
+async def callback_agent_hint_blanks(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer(
+            "Для бланков напишите, например:\n"
+            "/blanks Екатеринбург, Малышева 5 текущий бланк\n"
+            "/blanks Екатеринбург, Малышева 5 за 12 часов"
+        )
+
+
 @router.message(StateFilter(AgentOnboardingState.waiting_for_business_context), F.text)
 async def onboarding_business_context(message: Message, state: FSMContext) -> None:
     await state.update_data(business_context=(message.text or "").strip())
@@ -348,6 +400,21 @@ async def cmd_systems(message: Message) -> None:
     for item in systems:
         lines.append(f"• {item.get('system_name', 'web-system')} — {item.get('url')}")
     await message.answer("\n".join(lines), reply_markup=AGENT_ENTRY_KEYBOARD)
+
+
+@router.message(Command("reviews"))
+async def cmd_reviews(message: Message, state: FSMContext) -> None:
+    await _send_quick_report_request(message, message.text, "Собери отчёт по отзывам")
+
+
+@router.message(Command("stoplist"))
+async def cmd_stoplist(message: Message, state: FSMContext) -> None:
+    await _send_quick_report_request(message, message.text, "Собери отчёт по стоп-листу")
+
+
+@router.message(Command("blanks"))
+async def cmd_blanks(message: Message, state: FSMContext) -> None:
+    await _send_quick_report_request(message, message.text, "Проверь бланки загрузки")
 
 
 @router.message(Command("connect"))

@@ -78,6 +78,29 @@ class ReviewReportService:
         now = datetime.now()
         lowered = user_message.lower()
 
+        if "вчера" in lowered:
+            start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            end = start + timedelta(days=1)
+            return ReviewWindow(start=start, end=end, label="за вчера")
+
+        if "сегодня" in lowered:
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = start + timedelta(days=1)
+            return ReviewWindow(start=start, end=end, label="за сегодня")
+
+        if "12 часов" in lowered or "последние 12" in lowered or "предыдущие 12" in lowered:
+            return self._relative_hours_window(now, hours=12)
+
+        if "3 часа" in lowered or "последние 3" in lowered or "предыдущие 3" in lowered:
+            return self._relative_hours_window(now, hours=3)
+
+        if "сутки" in lowered or "24 часа" in lowered or "последние 24" in lowered:
+            return self._relative_hours_window(now, hours=24)
+
+        if "7 дней" in lowered or "последние 7 дней" in lowered:
+            start = now - timedelta(days=7)
+            return ReviewWindow(start=start, end=now, label="за последние 7 дней")
+
         if "month" in lowered or "месяц" in lowered:
             start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             if start.month == 12:
@@ -98,6 +121,10 @@ class ReviewReportService:
         start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         end = start + timedelta(days=7)
         return ReviewWindow(start=start, end=end, label="за текущую неделю")
+
+    def _relative_hours_window(self, now: datetime, *, hours: int) -> ReviewWindow:
+        start = now - timedelta(hours=hours)
+        return ReviewWindow(start=start, end=now, label=f"за последние {hours} часов")
 
     def _parse_explicit_range(self, text: str, now: datetime) -> ReviewWindow | None:
         matches = re.findall(r"\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b", text)
