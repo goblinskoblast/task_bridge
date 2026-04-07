@@ -383,6 +383,41 @@ class ItalianPizzaPortalAdapter:
                 continue
         return None
 
+    async def _probe_sidebar_routes_for_point(self, page, point_name: str) -> tuple[str | None, list[str], str | None, str | None]:
+        visible_point_controls: list[str] = []
+        opener_text: str | None = None
+        search_query: str | None = None
+        for label in ["Стоп-Лист", "Заказы", "Новые заказы"]:
+            clicked = await self._click_visible_text_candidate(page, [label])
+            if not clicked:
+                continue
+            await page.wait_for_timeout(1200)
+            visible_point_controls = await self._visible_point_controls(page, point_name)
+            control_meta = await self._visible_point_control_meta(page)
+            logger.info(
+                "Blanks sidebar probe label=%s url=%s controls=%s meta=%s",
+                label,
+                page.url,
+                visible_point_controls[:8],
+                control_meta[:8],
+            )
+            opener_text = await self._open_point_menu_if_needed(page)
+            matched_point = await self._click_point_variant_if_visible(page, point_name)
+            if matched_point:
+                return matched_point, visible_point_controls, opener_text, search_query
+            search_query = await self._search_point_if_possible(page, point_name)
+            if search_query:
+                matched_point = await self._click_point_variant_if_visible(page, point_name)
+                if matched_point:
+                    return matched_point, visible_point_controls, opener_text, search_query
+            if opener_text:
+                search_query = search_query or await self._type_point_query_via_keyboard(page, point_name)
+                if search_query:
+                    matched_point = await self._click_point_variant_if_visible(page, point_name)
+                    if matched_point:
+                        return matched_point, visible_point_controls, opener_text, search_query
+        return None, visible_point_controls, opener_text, search_query
+
     async def _click_best_point_candidate(self, page, point_name: str) -> tuple[str | None, list[str]]:
         controls = await self._iter_point_controls(page, point_name)
         visible_controls = []
@@ -441,6 +476,12 @@ class ItalianPizzaPortalAdapter:
             search_query = search_query or await self._type_point_query_via_keyboard(page, point_name)
             if search_query:
                 matched_point = await self._click_point_variant_if_visible(page, point_name)
+        if matched_point is None and visible_point_controls:
+            matched_point, probed_controls, probed_opener, probed_query = await self._probe_sidebar_routes_for_point(page, point_name)
+            if probed_controls:
+                visible_point_controls = probed_controls
+            opener_text = opener_text or probed_opener
+            search_query = search_query or probed_query
         if matched_point is None:
             matched_point, visible_point_controls = await self._click_best_point_candidate(page, point_name)
         else:
