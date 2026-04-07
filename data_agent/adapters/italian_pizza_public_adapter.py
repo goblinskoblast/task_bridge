@@ -15,6 +15,36 @@ _CATEGORY_STOPWORDS = {
 
 
 class ItalianPizzaPublicAdapter:
+    def _detect_public_page_issue(self, text: str) -> str | None:
+        lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+        if not lowered:
+            return None
+        if any(token in lowered for token in ["captcha", "капча", "я не робот", "i am not a robot"]):
+            return "Публичный сайт запросил captcha."
+        if any(token in lowered for token in ["нет доступа", "access denied", "403", "forbidden"]):
+            return "Публичный сайт вернул отказ в доступе."
+        if any(token in lowered for token in ["технические работы", "временно недоступен", "service unavailable", "502", "503", "504"]):
+            return "Публичный сайт временно недоступен."
+        return None
+
+    def _build_failed_result(self, point_name: str, issue_text: str) -> dict:
+        report_text = f"Точка: {point_name}\nСтатус: {issue_text}"
+        return {
+            "status": "failed",
+            "point_name": point_name,
+            "selected": False,
+            "report_text": report_text,
+            "message": issue_text,
+            "alert_hash": None,
+        }
+
+    def _looks_like_order_action(self, text: str) -> bool:
+        lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+        if not lowered:
+            return False
+        action_markers = ["выбрать", "в корзину", "добавить", "заказать", "недоступно"]
+        return any(marker in lowered for marker in action_markers)
+
     def _clean_product_name(self, raw: str) -> str:
         lines = [line.strip() for line in (raw or "").splitlines() if line.strip()]
         filtered: list[str] = []
@@ -36,6 +66,28 @@ class ItalianPizzaPublicAdapter:
         if any(lowered.startswith(prefix) for prefix in ["заказ по телефону", "франшиза", "акции"]):
             return ""
         return candidate
+
+    async def _dismiss_common_overlays(self, page) -> bool:
+        selectors = [
+            "button:has-text('Принять')",
+            "button:has-text('Accept')",
+            "button:has-text('Понятно')",
+            "button:has-text('Закрыть')",
+            "[role='button']:has-text('Принять')",
+            "[role='button']:has-text('Accept')",
+        ]
+        for selector in selectors:
+            locator = page.locator(selector)
+            try:
+                if await locator.count() == 0:
+                    continue
+                await locator.first.click(timeout=2000)
+                await page.wait_for_timeout(700)
+                logger.info("Stoplist overlay dismissed selector=%s", selector)
+                return True
+            except Exception:
+                continue
+        return False
 
     async def _open_address_modal(self, page, point) -> None:
         for candidate in ["Выберите адрес", point.city]:
@@ -236,12 +288,15 @@ class ItalianPizzaPublicAdapter:
 
     async def _collect_disabled_products(self, page) -> list[str]:
         results: list[str] = []
-        buttons = page.get_by_text("Выбрать", exact=True)
-        count = await buttons.count()
+        locator = page.locator("button, [role='button'], a")
+        count = min(await locator.count(), 220)
         for idx in range(count):
-            btn = buttons.nth(idx)
+            btn = locator.nth(idx)
             try:
                 if not await btn.is_visible():
+                    continue
+                text = re.sub(r"\s+", " ", (await btn.inner_text()).strip())
+                if not self._looks_like_order_action(text):
                     continue
                 if not await self._is_disabled_button(btn):
                     continue
@@ -279,12 +334,17 @@ class ItalianPizzaPublicAdapter:
                 logger.info("Stoplist public browser run point=%s url=%s", point.display_name, target_url)
                 await page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
                 await page.wait_for_timeout(2000)
+                await self._dismiss_common_overlays(page)
+                issue = self._detect_public_page_issue(await page.locator("body").inner_text())
+                if issue:
+                    return self._build_failed_result(point.display_name, issue)
                 await self._open_address_modal(page, point)
                 await self._set_delivery_mode(page)
                 await self._fill_address(page, point)
                 selected = await self._confirm_selected_point(page, point)
                 logger.info("Stoplist point selected=%s point=%s", selected, point.display_name)
                 await self._scroll_all(page)
+                await self._dismiss_common_overlays(page)
                 product_candidates = await self._collect_disabled_products(page)
                 logger.info("Stoplist disabled button candidates point=%s items=%s", point.display_name, product_candidates[:60])
                 cleaned: list[str] = []
@@ -299,6 +359,9 @@ class ItalianPizzaPublicAdapter:
                     )
                 else:
                     body = (await page.locator("body").inner_text())[:2000]
+                    issue = self._detect_public_page_issue(body)
+                    if issue:
+                        return self._build_failed_result(point.display_name, issue)
                     report_text = (
                         f"Точка: {point.display_name}\n"
                         "Статус: не удалось выделить недоступные позиции детерминированно.\n"
@@ -310,6 +373,7 @@ class ItalianPizzaPublicAdapter:
                     "point_name": point.display_name,
                     "selected": selected,
                     "report_text": report_text,
+                    "alert_hash": None,
                 }
             finally:
                 await context.close()
