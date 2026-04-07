@@ -79,6 +79,10 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         candidates = self.adapter._period_candidates("за последние 6 часов")
         self.assertIn("6 часов", candidates)
 
+    def test_build_period_candidates_do_not_include_ambiguous_numeric_only_values(self):
+        candidates = self.adapter._period_candidates("за последние 6 часов")
+        self.assertNotIn("6", candidates)
+
     def test_build_period_help_message_uses_visible_controls(self):
         message = self.adapter._build_period_help_message("за последние 6 часов", ["3 часа", "12 часов", "Сутки"])
         self.assertIn("6 часов", message)

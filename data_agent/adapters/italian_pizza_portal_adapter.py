@@ -289,6 +289,8 @@ class ItalianPizzaPortalAdapter:
             lowered = self._normalize_text(normalized)
             if any(marker in lowered for marker in ["логин", "пароль", "войти", "выход", "поддержка"]):
                 continue
+            if len(re.findall(r"\(\d+\)", normalized)) > 1:
+                continue
             score = self._point_match_score(normalized, point_name)
             results.append((idx, normalized, score))
         return results
@@ -744,19 +746,19 @@ class ItalianPizzaPortalAdapter:
         if "сегодня" in normalized:
             return ["Сегодня"]
         if "сутки" in normalized or "24 часа" in normalized:
-            return ["Сутки", "24 часа", "За сутки", "Последние сутки", "24"]
+            return ["Сутки", "24 часа", "За сутки", "Последние сутки"]
         if "15 часов" in normalized:
-            return ["15 часов", "15ч", "За 15 часов", "Последние 15 часов", "15"]
+            return ["15 часов", "15ч", "За 15 часов", "Последние 15 часов"]
         if "12 часов" in normalized:
-            return ["12 часов", "12ч", "За 12 часов", "Последние 12 часов", "12"]
+            return ["12 часов", "12ч", "За 12 часов", "Последние 12 часов"]
         if "6 часов" in normalized:
-            return ["6 часов", "6ч", "За 6 часов", "Последние 6 часов", "6"]
+            return ["6 часов", "6ч", "За 6 часов", "Последние 6 часов"]
         if "12 часов" in lowered:
-            return ["12 часов", "12ч", "За 12 часов", "Последние 12 часов", "12"]
+            return ["12 часов", "12ч", "За 12 часов", "Последние 12 часов"]
         if "3 часа" in lowered:
-            return ["3 часа", "3ч", "За 3 часа", "Последние 3 часа", "3"]
+            return ["3 часа", "3ч", "За 3 часа", "Последние 3 часа"]
         if "сутки" in lowered or "24 часа" in lowered:
-            return ["Сутки", "24 часа", "За сутки", "Последние сутки", "24"]
+            return ["Сутки", "24 часа", "За сутки", "Последние сутки"]
         hours_match = re.search(r"(\d+)\s*час", normalized)
         if hours_match:
             hours = int(hours_match.group(1))
@@ -768,7 +770,6 @@ class ItalianPizzaPortalAdapter:
                     f"{hours}ч",
                     f"За {hours} часов",
                     f"Последние {hours} часов",
-                    str(hours),
                 ]
         return []
 
@@ -803,7 +804,7 @@ class ItalianPizzaPortalAdapter:
                 continue
             normalized = re.sub(r"\s+", " ", text)
             lowered = normalized.lower()
-            if not ("час" in lowered or "сут" in lowered or "сегод" in lowered or lowered in {"12", "6", "3", "24", "15"}):
+            if not ("час" in lowered or "сут" in lowered or "сегод" in lowered):
                 continue
             results.append((idx, normalized))
         return results
@@ -899,6 +900,9 @@ class ItalianPizzaPortalAdapter:
                 best_score = score
         if best_idx is None or best_score < 5:
             logger.info("Blanks period click result=%s", {"clicked": False, "text": best_text, "score": best_score})
+            return False
+        if best_text.strip().isdigit():
+            logger.info("Blanks period click skipped ambiguous numeric control text=%s", best_text)
             return False
         try:
             await locator.nth(best_idx).click(timeout=2500)
