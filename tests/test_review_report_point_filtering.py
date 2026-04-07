@@ -84,6 +84,28 @@ class ReviewReportPointFilteringTest(unittest.IsolatedAsyncioTestCase):
         mocked_build_report.assert_not_awaited()
         mocked_browser.assert_awaited_once()
 
+    async def test_reviews_scenario_requests_point_when_sheet_missing(self):
+        scenario = ReviewsReportScenario()
+
+        with patch(
+            "data_agent.scenario_engine.review_report_service.build_report",
+            AsyncMock(return_value={"status": "not_configured", "message": "Не задан REVIEWS_SHEET_URL"}),
+        ) as mocked_build_report, patch(
+            "data_agent.scenario_engine._run_public_reviews_browser",
+            AsyncMock(),
+        ) as mocked_browser:
+            execution = await scenario.execute(
+                user_id=17,
+                user_message="собери отзывы за сегодня",
+                slots={"period_hint": "сегодня"},
+                systems=[],
+            )
+
+        self.assertEqual(execution.tool_results["review_tool"]["status"], "needs_point")
+        self.assertIn("укажите конкретную точку", execution.tool_results["review_tool"]["message"])
+        mocked_build_report.assert_awaited_once_with("собери отзывы за сегодня", point_name=None)
+        mocked_browser.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()
