@@ -188,19 +188,54 @@ class DataAgentService:
                 return DataAgentDebugResponse(found=False)
 
             session = db.query(DataAgentSession).filter(DataAgentSession.user_id == user.id).first()
-            if not session or not session.last_trace_id:
+            if session and session.last_trace_id:
+                return DataAgentDebugResponse(
+                    found=True,
+                    trace_id=session.last_trace_id,
+                    scenario=session.active_scenario,
+                    status=session.status or "unknown",
+                    summary=session.last_debug_summary,
+                    selected_tools=list(session.last_selected_tools or []),
+                    user_message=session.last_user_message,
+                    answer=session.last_answer,
+                    details=session.last_debug_payload or {},
+                )
+
+            fallback_log = (
+                db.query(DataAgentRequestLog)
+                .filter(DataAgentRequestLog.user_id == user.id)
+                .order_by(DataAgentRequestLog.created_at.desc())
+                .first()
+            )
+            if not fallback_log:
                 return DataAgentDebugResponse(found=False)
+
+            selected_tools = list(fallback_log.selected_tools or [])
+            fallback_status = "completed" if fallback_log.success else "failed"
+            summary_lines = [
+                f"Trace: {fallback_log.trace_id}",
+                "Сценарий: unknown",
+                f"Статус: {fallback_status}",
+            ]
+            if selected_tools:
+                summary_lines.append(f"Инструменты: {', '.join(str(item) for item in selected_tools)}")
+            if fallback_log.error_message:
+                summary_lines.append(f"Причина: {fallback_log.error_message}")
 
             return DataAgentDebugResponse(
                 found=True,
-                trace_id=session.last_trace_id,
-                scenario=session.active_scenario,
-                status=session.status or "unknown",
-                summary=session.last_debug_summary,
-                selected_tools=list(session.last_selected_tools or []),
-                user_message=session.last_user_message,
-                answer=session.last_answer,
-                details=session.last_debug_payload or {},
+                trace_id=fallback_log.trace_id,
+                scenario="unknown",
+                status=fallback_status,
+                summary="\n".join(summary_lines),
+                selected_tools=selected_tools,
+                user_message=fallback_log.user_message,
+                answer=None,
+                details={
+                    "source": "request_log_fallback",
+                    "duration_ms": fallback_log.duration_ms,
+                    "success": fallback_log.success,
+                },
             )
         finally:
             db.close()
