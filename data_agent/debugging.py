@@ -135,7 +135,7 @@ def _summarize_tool_result(tool_name: str, result: Dict[str, Any]) -> dict:
         if key in diagnostics:
             item[key] = diagnostics[key]
 
-    for key in ("matched_point", "matched_period", "page_excerpt"):
+    for key in ("matched_point", "matched_period", "page_excerpt", "point_menu_opener", "point_search_query"):
         value = diagnostics.get(key)
         if value:
             item[key] = _compact_text(str(value), limit=160)

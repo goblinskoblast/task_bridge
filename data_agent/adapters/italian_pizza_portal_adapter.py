@@ -10,6 +10,16 @@ logger = logging.getLogger(__name__)
 
 
 class ItalianPizzaPortalAdapter:
+    _POINT_CONTROL_SELECTOR = "button, [role='button'], [role='option'], [role='tab'], [role='menuitem'], label, span, div, li, option, a"
+    _POINT_SEARCH_SELECTORS = [
+        "input[placeholder*='точк']",
+        "input[placeholder*='поиск']",
+        "input[aria-label*='точк']",
+        "input[type='search']",
+        "[role='combobox'] input",
+        "input[type='text']",
+    ]
+
     def _build_diagnostics(self, stage: str, url: str, **extra) -> dict:
         diagnostics = {"stage": stage, "url": url}
         for key, value in extra.items():
@@ -78,8 +88,93 @@ class ItalianPizzaPortalAdapter:
         lowered = self._normalize_text(text)
         return any(marker in lowered for marker in ["выбрать точку продаж", "точка продаж", "выберите точку"])
 
+    async def _click_visible_text_candidate(self, page, labels: list[str]) -> str | None:
+        cleaned_labels = []
+        for raw in labels:
+            normalized = re.sub(r"\s+", " ", (raw or "").strip())
+            if normalized and normalized not in cleaned_labels:
+                cleaned_labels.append(normalized)
+        if not cleaned_labels:
+            return None
+
+        result = await page.evaluate(
+            """
+            (labels) => {
+              const normalize = (value) => (value || "").toLowerCase().replace(/ё/g, "е").replace(/\\s+/g, " ").trim();
+              const labelTokens = labels
+                .map((label) => normalize(label))
+                .filter(Boolean)
+                .map((label) => ({ label, tokens: label.split(/[\\s,./-]+/).filter((item) => item.length >= 2) }));
+              const isVisible = (node) => {
+                if (!(node instanceof Element)) return false;
+                const style = window.getComputedStyle(node);
+                if (!style || style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+                  return false;
+                }
+                const rect = node.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+              };
+              let best = null;
+              for (const node of Array.from(document.querySelectorAll("button, [role='button'], [role='option'], [role='tab'], [role='menuitem'], label, span, div, li, option, a"))) {
+                if (!isVisible(node)) continue;
+                const rawText = (node.innerText || node.textContent || "").replace(/\\s+/g, " ").trim();
+                const text = normalize(rawText);
+                if (!text || text.length > 160) continue;
+                let score = 0;
+                for (const item of labelTokens) {
+                  if (text === item.label) {
+                    score = Math.max(score, 120);
+                    continue;
+                  }
+                  if (text.startsWith(item.label + " ")) {
+                    score = Math.max(score, 95);
+                  }
+                  if (text.includes(item.label)) {
+                    score = Math.max(score, 70);
+                  }
+                  let tokenHits = 0;
+                  for (const token of item.tokens) {
+                    if (text.includes(token)) tokenHits += 1;
+                  }
+                  if (tokenHits) {
+                    score = Math.max(score, 20 + tokenHits * 12);
+                  }
+                }
+                if (!score) continue;
+                const candidate = {
+                  node,
+                  text: rawText,
+                  score,
+                  textLength: rawText.length,
+                };
+                if (
+                  !best ||
+                  candidate.score > best.score ||
+                  (candidate.score === best.score && candidate.textLength < best.textLength)
+                ) {
+                  best = candidate;
+                }
+              }
+              if (!best) return null;
+              best.node.scrollIntoView({ block: "center", inline: "center" });
+              if (typeof best.node.click === "function") {
+                best.node.click();
+              }
+              for (const eventName of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+                best.node.dispatchEvent(new MouseEvent(eventName, { bubbles: true, cancelable: true, view: window }));
+              }
+              return (best.text || "").trim();
+            }
+            """,
+            cleaned_labels,
+        )
+        if result:
+            await page.wait_for_timeout(1200)
+            return str(result).strip()
+        return None
+
     async def _iter_point_controls(self, page, point_name: str, max_items: int = 220) -> list[tuple[int, str, int]]:
-        locator = page.locator("button, [role='button'], [role='option'], [role='tab'], label, span, div, li, option")
+        locator = page.locator(self._POINT_CONTROL_SELECTOR)
         count = min(await locator.count(), max_items)
         results: list[tuple[int, str, int]] = []
         for idx in range(count):
@@ -110,7 +205,7 @@ class ItalianPizzaPortalAdapter:
                 seen.append(text)
         return seen[:20]
 
-    async def _open_point_menu_if_needed(self, page) -> None:
+    async def _open_point_menu_if_needed(self, page) -> str | None:
         openers = [
             "Выбрать точку продаж",
             "Точка продаж",
@@ -121,6 +216,10 @@ class ItalianPizzaPortalAdapter:
             "Филиал",
             "Сменить точку",
         ]
+        clicked_text = await self._click_visible_text_candidate(page, openers)
+        if clicked_text:
+            logger.info("Blanks point opener clicked via dom text=%s", clicked_text)
+            return clicked_text
         for candidate in openers:
             selectors = [
                 f"button:has-text('{candidate}')",
@@ -150,6 +249,39 @@ class ItalianPizzaPortalAdapter:
                             exc,
                         )
                         continue
+        return None
+
+    async def _click_point_variant_if_visible(self, page, point_name: str) -> str | None:
+        matched = await self._click_visible_text_candidate(page, self._point_variants(point_name))
+        if matched:
+            logger.info("Blanks point selected via dom text=%s", matched)
+            return matched
+
+        for candidate in self._point_variants(point_name):
+            for exact in (True, False):
+                locator = page.get_by_text(candidate, exact=exact)
+                count = await locator.count()
+                if count == 0:
+                    continue
+                for idx in range(count):
+                    item = locator.nth(idx)
+                    try:
+                        if not await item.is_visible():
+                            continue
+                        await item.scroll_into_view_if_needed()
+                        await item.click(timeout=2500, force=True)
+                        await page.wait_for_timeout(900)
+                        logger.info("Blanks point selected via locator text=%s exact=%s index=%s", candidate, exact, idx)
+                        return candidate
+                    except Exception as exc:
+                        logger.info(
+                            "Blanks point locator click failed text=%s exact=%s index=%s error=%s",
+                            candidate,
+                            exact,
+                            idx,
+                            exc,
+                        )
+        return None
 
     async def _search_point_if_possible(self, page, point_name: str) -> str | None:
         queries = []
@@ -157,15 +289,7 @@ class ItalianPizzaPortalAdapter:
             city = variant.split(",")[0].strip()
             if city and city not in queries:
                 queries.append(city)
-        selectors = [
-            "input[placeholder*='точк']",
-            "input[placeholder*='поиск']",
-            "input[aria-label*='точк']",
-            "input[type='search']",
-            "[role='combobox'] input",
-            "input[type='text']",
-        ]
-        for selector in selectors:
+        for selector in self._POINT_SEARCH_SELECTORS:
             locator = page.locator(selector)
             count = await locator.count()
             for idx in range(count):
@@ -184,13 +308,37 @@ class ItalianPizzaPortalAdapter:
                     continue
         return None
 
+    async def _type_point_query_via_keyboard(self, page, point_name: str) -> str | None:
+        queries = []
+        for variant in self._point_variants(point_name):
+            city = variant.split(",")[0].strip()
+            if city and city not in queries:
+                queries.append(city)
+        for query in queries[:2]:
+            try:
+                await page.keyboard.press("Control+A")
+            except Exception:
+                pass
+            try:
+                await page.keyboard.press("Delete")
+            except Exception:
+                pass
+            try:
+                await page.keyboard.type(query, delay=40)
+                await page.wait_for_timeout(900)
+                logger.info("Blanks point search via keyboard query=%s", query)
+                return query
+            except Exception:
+                continue
+        return None
+
     async def _click_best_point_candidate(self, page, point_name: str) -> tuple[str | None, list[str]]:
         controls = await self._iter_point_controls(page, point_name)
         visible_controls = []
         best_idx = None
         best_text = None
         best_score = 0
-        locator = page.locator("button, [role='button'], [role='option'], [role='tab'], label, span, div, li, option")
+        locator = page.locator(self._POINT_CONTROL_SELECTOR)
         for idx, text, _ in controls:
             if self._is_point_menu_control(text):
                 try:
@@ -217,7 +365,8 @@ class ItalianPizzaPortalAdapter:
         if best_idx is None or best_score < 6:
             return None, visible_controls[:12]
         try:
-            await locator.nth(best_idx).click(timeout=2500)
+            await locator.nth(best_idx).scroll_into_view_if_needed()
+            await locator.nth(best_idx).click(timeout=2500, force=True)
             await page.wait_for_timeout(900)
             return best_text, visible_controls[:12]
         except Exception as exc:
@@ -225,29 +374,33 @@ class ItalianPizzaPortalAdapter:
             return None, visible_controls[:12]
 
     async def _select_point(self, page, point_name: str) -> dict:
-        matched_point = None
-        for candidate in self._point_variants(point_name):
-            locator = page.locator(f"text={candidate}")
-            if await locator.count() == 0:
-                continue
-            try:
-                await locator.first.click(timeout=3000)
-                await page.wait_for_timeout(900)
-                matched_point = candidate
-                break
-            except Exception:
-                continue
+        matched_point = await self._click_point_variant_if_visible(page, point_name)
         visible_point_controls: list[str] = []
+        opener_text: str | None = None
+        search_query: str | None = None
         if matched_point is None:
             visible_point_controls = await self._visible_point_controls(page, point_name)
-            await self._open_point_menu_if_needed(page)
-            await self._search_point_if_possible(page, point_name)
+            opener_text = await self._open_point_menu_if_needed(page)
+            matched_point = await self._click_point_variant_if_visible(page, point_name)
+        if matched_point is None:
+            search_query = await self._search_point_if_possible(page, point_name)
+            if search_query:
+                matched_point = await self._click_point_variant_if_visible(page, point_name)
+        if matched_point is None and opener_text:
+            search_query = search_query or await self._type_point_query_via_keyboard(page, point_name)
+            if search_query:
+                matched_point = await self._click_point_variant_if_visible(page, point_name)
+        if matched_point is None:
             matched_point, visible_point_controls = await self._click_best_point_candidate(page, point_name)
+        else:
+            visible_point_controls = await self._visible_point_controls(page, point_name)
         return {
             "selected": matched_point is not None,
             "matched_point": matched_point,
             "point_candidates": self._point_variants(point_name),
             "visible_point_controls": visible_point_controls,
+            "opener_text": opener_text,
+            "search_query": search_query,
         }
 
     def _detect_terminal_issue(self, text: str) -> str | None:
@@ -518,6 +671,8 @@ class ItalianPizzaPortalAdapter:
                             matched_point=point_result["matched_point"],
                             point_candidates=point_result["point_candidates"],
                             visible_point_controls=point_result["visible_point_controls"],
+                            point_menu_opener=point_result["opener_text"],
+                            point_search_query=point_result["search_query"],
                             page_excerpt=self._normalize_text(body_text)[:400],
                         ),
                     )
@@ -544,6 +699,8 @@ class ItalianPizzaPortalAdapter:
                             point_selected=point_selected,
                             matched_point=point_result["matched_point"],
                             visible_point_controls=point_result["visible_point_controls"],
+                            point_menu_opener=point_result["opener_text"],
+                            point_search_query=point_result["search_query"],
                             period_selected=False,
                             matched_period=period_result["matched_period"],
                             visible_period_controls=period_result["visible_period_controls"],
@@ -563,6 +720,8 @@ class ItalianPizzaPortalAdapter:
                             point_selected=point_selected,
                             matched_point=point_result["matched_point"],
                             visible_point_controls=point_result["visible_point_controls"],
+                            point_menu_opener=point_result["opener_text"],
+                            point_search_query=point_result["search_query"],
                             period_selected=period_result["selected"],
                             matched_period=period_result["matched_period"],
                             visible_period_controls=period_result["visible_period_controls"],
@@ -579,6 +738,8 @@ class ItalianPizzaPortalAdapter:
                             point_selected=point_selected,
                             matched_point=point_result["matched_point"],
                             visible_point_controls=point_result["visible_point_controls"],
+                            point_menu_opener=point_result["opener_text"],
+                            point_search_query=point_result["search_query"],
                             period_selected=period_result["selected"],
                             matched_period=period_result["matched_period"],
                             visible_period_controls=period_result["visible_period_controls"],
@@ -595,6 +756,8 @@ class ItalianPizzaPortalAdapter:
                             point_selected=point_selected,
                             matched_point=point_result["matched_point"],
                             visible_point_controls=point_result["visible_point_controls"],
+                            point_menu_opener=point_result["opener_text"],
+                            point_search_query=point_result["search_query"],
                             period_selected=period_result["selected"],
                             matched_period=period_result["matched_period"],
                             visible_period_controls=period_result["visible_period_controls"],
@@ -617,6 +780,8 @@ class ItalianPizzaPortalAdapter:
                         point_selected=point_selected,
                         matched_point=point_result["matched_point"],
                         visible_point_controls=point_result["visible_point_controls"],
+                        point_menu_opener=point_result["opener_text"],
+                        point_search_query=point_result["search_query"],
                         period_selected=period_result["selected"],
                         matched_period=period_result["matched_period"],
                         visible_period_controls=period_result["visible_period_controls"],

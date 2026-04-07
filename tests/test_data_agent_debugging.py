@@ -140,5 +140,30 @@ class DataAgentDebuggingTest(unittest.TestCase):
         self.assertIn("Цель: Екатеринбург, Малышева 5", summary)
 
 
+    def test_build_debug_artifacts_keeps_point_opener_and_query(self):
+        payload, _ = build_debug_artifacts(
+            trace_id="trace-901",
+            scenario="blanks_report",
+            status="failed",
+            selected_tools=["blanks_tool"],
+            tool_results={
+                "blanks_tool": {
+                    "status": "failed",
+                    "message": "Point not selected",
+                    "diagnostics": {
+                        "stage": "point_selection",
+                        "url": "https://tochka.example.com/#/",
+                        "point_menu_opener": "Выбрать точку продаж",
+                        "point_search_query": "Верхний Уфалей",
+                    },
+                }
+            },
+        )
+
+        tool = payload["tools"][0]
+        self.assertEqual(tool["point_menu_opener"], "Выбрать точку продаж")
+        self.assertEqual(tool["point_search_query"], "Верхний Уфалей")
+
+
 if __name__ == "__main__":
     unittest.main()
