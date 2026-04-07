@@ -444,6 +444,23 @@ class ItalianPizzaPortalAdapter:
                 return "ok", last_text
         return "login_page", last_text
 
+    async def _wait_for_portal_ready(self, page, point_name: str, attempts: int = 8, delay_ms: int = 700) -> tuple[list[str], str]:
+        last_text = ""
+        last_controls: list[str] = []
+        for _ in range(max(1, attempts)):
+            try:
+                last_controls = await self._visible_point_controls(page, point_name)
+            except Exception:
+                last_controls = []
+            if last_controls:
+                return last_controls, last_text
+            try:
+                last_text = await page.locator("body").inner_text()
+            except Exception:
+                last_text = ""
+            await page.wait_for_timeout(delay_ms)
+        return last_controls, last_text
+
     def _contains_report_context(self, text: str) -> bool:
         lowered = self._normalize_text(text)
         report_markers = ["бланк", "перегруз", "отклон", "лимит", "норматив", "красн", "отчет", "отчёт"]
@@ -676,6 +693,12 @@ class ItalianPizzaPortalAdapter:
                         period_hint,
                         diagnostics=self._build_diagnostics(stage, current_url, page_excerpt=self._normalize_text(post_login_text)[:400]),
                     )
+                portal_controls, portal_text = await self._wait_for_portal_ready(page, point_name)
+                logger.info(
+                    "Blanks portal ready controls=%s excerpt=%s",
+                    portal_controls[:8],
+                    self._normalize_text(portal_text)[:160],
+                )
                 stage = "point_selection"
                 point_result = await self._select_point(page, point_name)
                 current_url = page.url
