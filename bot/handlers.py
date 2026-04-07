@@ -404,6 +404,10 @@ async def cmd_start(message: Message):
         reply_keyboard = _build_main_reply_keyboard(webapp_url)
         welcome_message = _build_welcome_message(is_first_auth, len(pending_tasks))
         await message.answer(welcome_message, reply_markup=reply_keyboard, parse_mode="HTML")
+        await message.answer(
+            "Р‘С‹СЃС‚СЂР°СЏ РєРЅРѕРїРєР° РїР°РЅРµР»Рё РѕР±РЅРѕРІР»РµРЅР°.",
+            reply_markup=_build_main_reply_keyboard(webapp_url),
+        )
         return
 
         if is_first_auth and pending_tasks:
