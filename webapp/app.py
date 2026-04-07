@@ -22,6 +22,8 @@ import time
 from urllib import parse as urlparse
 from urllib import request as urlrequest
 
+from config_helpers import derive_internal_api_token
+
 app = FastAPI(title="TaskBridge API")
 
 import logging
@@ -46,8 +48,8 @@ YANDEX_OAUTH_CLIENT_ID = os.getenv("YANDEX_OAUTH_CLIENT_ID", "").strip()
 YANDEX_OAUTH_CLIENT_SECRET = os.getenv("YANDEX_OAUTH_CLIENT_SECRET", "").strip()
 YANDEX_OAUTH_REDIRECT_URI = os.getenv("YANDEX_OAUTH_REDIRECT_URI", "").strip()
 OAUTH_STATE_SECRET = os.getenv("OAUTH_STATE_SECRET", os.getenv("BOT_TOKEN", ""))
-INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "").strip()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+INTERNAL_API_TOKEN = derive_internal_api_token(os.getenv("INTERNAL_API_TOKEN", ""), BOT_TOKEN)
 WEB_APP_DOMAIN = os.getenv("WEB_APP_DOMAIN", "").strip()
 ALLOW_INSECURE_USER_ID_AUTH = os.getenv("ALLOW_INSECURE_USER_ID_AUTH", "false").lower() == "true"
 TELEGRAM_INIT_DATA_TTL_SECONDS = int(os.getenv("TELEGRAM_INIT_DATA_TTL_SECONDS", "86400"))

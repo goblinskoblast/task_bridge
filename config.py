@@ -1,6 +1,8 @@
 import os
 from dotenv import load_dotenv
 
+from config_helpers import derive_internal_api_token, derive_webhook_url
+
 
 load_dotenv()
 
@@ -18,7 +20,11 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 
 USE_WEBHOOK = os.getenv("USE_WEBHOOK", "False").lower() == "true"
 
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-domain.com")
+WEBHOOK_URL = derive_webhook_url(
+    os.getenv("WEBHOOK_URL", "https://your-domain.com"),
+    os.getenv("RAILWAY_PUBLIC_DOMAIN", ""),
+    os.getenv("WEB_APP_DOMAIN", "").strip(),
+)
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
@@ -46,7 +52,7 @@ OPENCLAW_SDD_MAX_CHARS = int(os.getenv("OPENCLAW_SDD_MAX_CHARS", "24000"))
 DATA_AGENT_URL = os.getenv("DATA_AGENT_URL", "http://localhost:8010").strip()
 DATA_AGENT_TIMEOUT = int(os.getenv("DATA_AGENT_TIMEOUT", "45"))
 INTERNAL_API_URL = os.getenv("INTERNAL_API_URL", "http://localhost:8000/api/internal/data-agent").strip().rstrip("/")
-INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "").strip()
+INTERNAL_API_TOKEN = derive_internal_api_token(os.getenv("INTERNAL_API_TOKEN", ""), BOT_TOKEN)
 REVIEWS_SHEET_URL = os.getenv("REVIEWS_SHEET_URL", "").strip()
 
 # Google OAuth (Gmail one-click connect)

@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 import aiohttp
 
-from config import DATA_AGENT_TIMEOUT, DATA_AGENT_URL
+from config import DATA_AGENT_TIMEOUT, DATA_AGENT_URL, INTERNAL_API_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +14,7 @@ class DataAgentClient:
     def __init__(self, base_url: str | None = None, timeout_seconds: int | None = None) -> None:
         self.base_url = (base_url or DATA_AGENT_URL).rstrip("/")
         self.timeout_seconds = timeout_seconds or DATA_AGENT_TIMEOUT
+        self.token = INTERNAL_API_TOKEN
 
     async def health(self) -> Dict[str, Any]:
         return await self._request("GET", "/health")
@@ -41,7 +42,10 @@ class DataAgentClient:
     async def _request(self, method: str, path: str, json: Dict[str, Any] | None = None) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
         timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        headers = {}
+        if self.token:
+            headers["X-Internal-Token"] = self.token
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
             async with session.request(method, url, json=json) as response:
                 data = await response.json(content_type=None)
                 if response.status >= 400:
