@@ -74,5 +74,12 @@ class StoplistAdapterHelpersTest(unittest.TestCase):
         )
 
 
+    def test_resolve_sukhoy_log_uses_current_public_slug(self):
+        point = resolve_italian_pizza_point("Сухой Лог, Белинского 40")
+        self.assertIsNotNone(point)
+        self.assertEqual(point.public_slug, "suxoj-log")
+        self.assertEqual(point.public_url, "https://suxoj-log.italianpizza.ru")
+
+
 if __name__ == "__main__":
     unittest.main()

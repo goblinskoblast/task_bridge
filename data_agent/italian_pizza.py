@@ -25,7 +25,7 @@ class ItalianPizzaPoint:
 ITALIAN_PIZZA_POINTS = [
     ItalianPizzaPoint("Полевской", "Ленина 11", "polevskoi"),
     ItalianPizzaPoint("Асбест", "ТЦ Небо, Ленинградская 26/2", "asbest"),
-    ItalianPizzaPoint("Сухой Лог", "Белинского 40", "slog"),
+    ItalianPizzaPoint("Сухой Лог", "Белинского 40", "suxoj-log"),
     ItalianPizzaPoint("Реж", "Ленина 17", "rezh"),
     ItalianPizzaPoint("Верхний Уфалей", "Ленина 147", "ufaley"),
     ItalianPizzaPoint("Артёмовский", "Гагарина 2а", "artemovsky"),
