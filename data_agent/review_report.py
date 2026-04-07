@@ -272,9 +272,11 @@ class ReviewReportService:
         category_counts: Counter[str] = Counter()
         sentiment_counts: Counter[str] = Counter()
         issue_counts: Counter[str] = Counter()
-        praise_counts: Counter[str] = Counter()
         branch_counts: Counter[str] = Counter()
         by_rating: Counter[str] = Counter()
+        critical_category_counts: Counter[str] = Counter()
+        critical_issue_counts: Counter[str] = Counter()
+        critical_rows_count = 0
 
         for row in rows:
             text = self._extract_text(row)
@@ -282,6 +284,7 @@ class ReviewReportService:
             rating = self._extract_rating(row)
             category = self._classify_category(text)
             sentiment = self._classify_sentiment(text, rating)
+            is_critical = self._is_critical_review(text, rating, sentiment)
 
             category_counts[category] += 1
             sentiment_counts[sentiment] += 1
@@ -290,10 +293,13 @@ class ReviewReportService:
             if rating is not None:
                 by_rating[str(rating)] += 1
 
-            for phrase in self._extract_reasons(text, positive=(sentiment == "positive")):
-                if sentiment == "positive":
-                    praise_counts[phrase] += 1
-                else:
+            if is_critical:
+                critical_rows_count += 1
+                critical_category_counts[category] += 1
+                for phrase in self._extract_reasons(text, positive=False):
+                    critical_issue_counts[phrase] += 1
+            elif sentiment != "positive":
+                for phrase in self._extract_reasons(text, positive=False):
                     issue_counts[phrase] += 1
 
         return {
@@ -302,23 +308,25 @@ class ReviewReportService:
             "window_label": window.label,
             "source_url": source_url,
             "reviews_count": len(rows),
+            "critical_reviews_count": critical_rows_count,
             "category_counts": dict(category_counts),
+            "critical_category_counts": dict(critical_category_counts),
             "sentiment_counts": dict(sentiment_counts),
-            "top_issues": issue_counts.most_common(5),
-            "top_praises": praise_counts.most_common(5),
+            "top_issues": critical_issue_counts.most_common(5) or issue_counts.most_common(5),
             "top_branches": branch_counts.most_common(5),
             "matched_branches": matched_branches or [],
             "requested_point": point_name,
             "ratings": dict(by_rating),
             "report_text": self._render_report(
                 rows_count=len(rows),
+                critical_rows_count=critical_rows_count,
                 window_label=window.label,
                 point_name=point_name,
                 matched_branches=matched_branches or [],
                 category_counts=category_counts,
+                critical_category_counts=critical_category_counts,
                 sentiment_counts=sentiment_counts,
-                issue_counts=issue_counts,
-                praise_counts=praise_counts,
+                issue_counts=critical_issue_counts or issue_counts,
                 branch_counts=branch_counts,
             ),
         }
@@ -395,16 +403,26 @@ class ReviewReportService:
                 phrases.append(marker)
         return phrases[:3]
 
+    def _is_critical_review(self, text: str, rating: int | None, sentiment: str) -> bool:
+        if rating is not None and rating < 4:
+            return True
+        if sentiment == "negative":
+            lowered = text.lower()
+            if any(marker in lowered for marker in NEGATIVE_MARKERS):
+                return True
+        return False
+
     def _render_report(
         self,
         rows_count: int,
+        critical_rows_count: int,
         window_label: str,
         point_name: str | None,
         matched_branches: list[str],
         category_counts: Counter[str],
+        critical_category_counts: Counter[str],
         sentiment_counts: Counter[str],
         issue_counts: Counter[str],
-        praise_counts: Counter[str],
         branch_counts: Counter[str],
     ) -> str:
         lines = [f"Отчёт по отзывам {window_label}", f"Всего отзывов: {rows_count}"]
@@ -417,19 +435,7 @@ class ReviewReportService:
                 lines.append("За выбранный период отзывов не найдено.")
             return "\n".join(lines)
 
-        lines.append(
-            "Тональность: "
-            f"позитивных {sentiment_counts.get('positive', 0)}, "
-            f"нейтральных {sentiment_counts.get('neutral', 0)}, "
-            f"негативных {sentiment_counts.get('negative', 0)}"
-        )
-        lines.append(
-            "Категории: "
-            f"сервис {category_counts.get('service', 0)}, "
-            f"доставка {category_counts.get('delivery', 0)}, "
-            f"кухня {category_counts.get('kitchen', 0)}, "
-            f"прочее {category_counts.get('other', 0)}"
-        )
+        lines.append(f"Критических отзывов (<4 звезды): {critical_rows_count}")
 
         if matched_branches:
             lines.append(f"Совпавшие точки в источнике: {', '.join(matched_branches[:3])}")
@@ -437,13 +443,33 @@ class ReviewReportService:
             top_branches = ", ".join(f"{name} ({count})" for name, count in branch_counts.most_common(3))
             lines.append(f"Точки с наибольшим числом отзывов: {top_branches}")
 
+        if critical_rows_count:
+            lines.append(
+                "Где чаще всего проблемы: "
+                f"сервис {critical_category_counts.get('service', 0)}, "
+                f"доставка {critical_category_counts.get('delivery', 0)}, "
+                f"кухня {critical_category_counts.get('kitchen', 0)}, "
+                f"прочее {critical_category_counts.get('other', 0)}"
+            )
+        else:
+            lines.append("Критических отзывов с оценкой ниже 4 звёзд за этот период не найдено.")
+            lines.append(
+                "Общая тональность: "
+                f"позитивных {sentiment_counts.get('positive', 0)}, "
+                f"нейтральных {sentiment_counts.get('neutral', 0)}, "
+                f"негативных {sentiment_counts.get('negative', 0)}"
+            )
+            lines.append(
+                "Категории: "
+                f"сервис {category_counts.get('service', 0)}, "
+                f"доставка {category_counts.get('delivery', 0)}, "
+                f"кухня {category_counts.get('kitchen', 0)}, "
+                f"прочее {category_counts.get('other', 0)}"
+            )
+
         if issue_counts:
             top_issues = ", ".join(f"{phrase} ({count})" for phrase, count in issue_counts.most_common(5))
             lines.append(f"Основные проблемы: {top_issues}")
-
-        if praise_counts:
-            top_praises = ", ".join(f"{phrase} ({count})" for phrase, count in praise_counts.most_common(5))
-            lines.append(f"Основные похвалы: {top_praises}")
 
         return "\n".join(lines)
 

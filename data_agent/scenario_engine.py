@@ -221,6 +221,11 @@ def _provider_label(provider: str) -> str:
     return "2GIS" if provider == "2gis" else "Яндекс Карты"
 
 
+def _is_access_denied_payload(payload: str) -> bool:
+    lowered = (payload or "").lower()
+    return "ошибка_доступа" in lowered or "access denied" in lowered or "отказ" in lowered
+
+
 async def _run_public_reviews_browser(user_message: str, targets: List[str]) -> dict:
     logger.info("Public reviews resolution message=%s targets=%s", user_message[:300], targets)
     providers = _resolve_public_reviews_providers(user_message)
@@ -235,8 +240,10 @@ async def _run_public_reviews_browser(user_message: str, targets: List[str]) -> 
                 target_label = target
             task_text = (
                 "Собери краткий отчет по отзывам для этой точки. "
-                "Найди свежие отзывы, общую тональность, основные жалобы, основные похвалы "
-                "и если возможно укажи среднюю оценку. Ответ верни кратко и по делу.\n\n"
+                "Главный акцент делай на критических отзывах с оценкой ниже 4 звёзд. "
+                "Похвалы и позитивные детали не перечисляй, если нет риска или явной проблемы. "
+                "Если критических отзывов за нужный период нет, так и напиши. "
+                "Если видна средняя оценка, можешь указать её одной строкой.\n\n"
                 f"Источник: {_provider_label(provider)}\n"
                 f"Точка: {target_label}\n"
                 f"Исходный запрос пользователя: {user_message}"
@@ -257,6 +264,7 @@ async def _run_public_reviews_browser(user_message: str, targets: List[str]) -> 
                         "url": target_url,
                         "status": "ok",
                         "data": data,
+                        "access_denied": _is_access_denied_payload(str(data)),
                     }
                 )
             except Exception as exc:
@@ -270,7 +278,7 @@ async def _run_public_reviews_browser(user_message: str, targets: List[str]) -> 
                         "error": str(exc),
                     }
                 )
-    ok_results = [item for item in results if item["status"] == "ok"]
+    ok_results = [item for item in results if item["status"] == "ok" and not item.get("access_denied")]
     if not ok_results:
         return {"status": "failed", "message": "Не удалось собрать отзывы по переданным точкам.", "targets": results}
     report_lines = ["Отчет по отзывам по точкам:"]
@@ -279,11 +287,21 @@ async def _run_public_reviews_browser(user_message: str, targets: List[str]) -> 
         for item in [candidate for candidate in ok_results if candidate["target"] == target_label]:
             provider_label = _provider_label(item["provider"])
             report_lines.append(f"{provider_label}:\n{item['data']}")
+    failed_providers = [
+        {
+            "target": item["target"],
+            "provider": item["provider"],
+            "reason": item.get("error") or item.get("data") or "",
+        }
+        for item in results
+        if item.get("status") != "ok" or item.get("access_denied")
+    ]
     return {
         "status": "ok",
         "source": "public_maps_multi",
         "providers": providers,
         "targets": results,
+        "failed_providers": failed_providers,
         "report_text": "\n".join(report_lines).strip(),
     }
 

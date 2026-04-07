@@ -106,7 +106,14 @@ class BrowserAgent:
 
         async def _run() -> str:
             async with async_playwright() as playwright:
-                browser = await playwright.chromium.launch(headless=True)
+                browser = await playwright.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--disable-dev-shm-usage",
+                        "--no-sandbox",
+                    ],
+                )
                 context = await browser.new_context(
                     viewport={"width": self.VIEWPORT_W, "height": self.VIEWPORT_H},
                     user_agent=(
@@ -117,6 +124,23 @@ class BrowserAgent:
                     locale="ru-RU",
                     timezone_id="Europe/Moscow",
                     accept_downloads=True,
+                )
+                await context.add_init_script(
+                    """
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+                    Object.defineProperty(navigator, 'language', { get: () => 'ru-RU' });
+                    Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
+                    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                    window.chrome = window.chrome || { runtime: {} };
+                    """
+                )
+                await context.set_extra_http_headers(
+                    {
+                        "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+                        "Upgrade-Insecure-Requests": "1",
+                        "DNT": "1",
+                    }
                 )
                 page = await context.new_page()
                 stage = "page_created"
@@ -452,6 +476,9 @@ class BrowserAgent:
         return None
 
     async def _detect_special_state(self, page: Any) -> Optional[str]:
+        lowered_url = str(getattr(page, "url", "") or "").lower()
+        if "2gis.ru/xpvnsulc" in lowered_url:
+            return "ОШИБКА_ДОСТУПА: 2GIS временно отклонил автоматический запрос"
         text = await page.locator("body").inner_text()
         return self._classify_page_issue_text(text)
 
