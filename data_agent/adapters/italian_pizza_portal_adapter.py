@@ -74,6 +74,10 @@ class ItalianPizzaPortalAdapter:
                 score += 2 if not any(ch.isdigit() for ch in token) else 4
         return score
 
+    def _is_point_menu_control(self, text: str) -> bool:
+        lowered = self._normalize_text(text)
+        return any(marker in lowered for marker in ["выбрать точку продаж", "точка продаж", "выберите точку"])
+
     async def _iter_point_controls(self, page, point_name: str, max_items: int = 220) -> list[tuple[int, str, int]]:
         locator = page.locator("button, [role='button'], [role='option'], [role='tab'], label, span, div, li, option")
         count = min(await locator.count(), max_items)
@@ -186,6 +190,17 @@ class ItalianPizzaPortalAdapter:
         best_idx = None
         best_text = None
         best_score = 0
+        locator = page.locator("button, [role='button'], [role='option'], [role='tab'], label, span, div, li, option")
+        for idx, text, _ in controls:
+            if self._is_point_menu_control(text):
+                try:
+                    await locator.nth(idx).click(timeout=2500, force=True)
+                    await page.wait_for_timeout(1200)
+                    logger.info("Blanks point control clicked via generic scan text=%s idx=%s", text, idx)
+                    controls = await self._iter_point_controls(page, point_name)
+                    break
+                except Exception as exc:
+                    logger.info("Blanks point control click failed text=%s idx=%s error=%s", text, idx, exc)
         for idx, text, score in controls:
             if text not in visible_controls:
                 visible_controls.append(text)
@@ -201,7 +216,6 @@ class ItalianPizzaPortalAdapter:
         )
         if best_idx is None or best_score < 6:
             return None, visible_controls[:12]
-        locator = page.locator("button, [role='button'], [role='option'], [role='tab'], label, span, div, li, option")
         try:
             await locator.nth(best_idx).click(timeout=2500)
             await page.wait_for_timeout(900)
