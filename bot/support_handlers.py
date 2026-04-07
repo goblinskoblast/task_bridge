@@ -23,6 +23,7 @@ import config
 
 logger = logging.getLogger(__name__)
 router = Router()
+SUPPORT_BUTTON_TEXT = "💬 Поддержка"
 
 
 class SupportStates(StatesGroup):
@@ -336,6 +337,11 @@ async def cmd_support(message: Message, state: FSMContext):
         )
 
     logger.info(f"Support chat started for user {user.telegram_id}")
+
+
+@router.message(F.chat.type == "private", F.text == SUPPORT_BUTTON_TEXT)
+async def open_support_from_button(message: Message, state: FSMContext):
+    await cmd_support(message, state)
 
 
 @router.callback_query(F.data == "support_start")

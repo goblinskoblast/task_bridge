@@ -126,6 +126,16 @@ async def notify_assigned_user(
         notification += f"<b>Приоритет:</b> {task.priority}\n"
         notification += f"<b>Статус:</b> {task.status}"
 
+        notification = (
+            "📌 <b>Новая задача</b>\n\n"
+            f"<b>Что сделать:</b> {task.title}\n"
+        )
+        if task.description and task.description != task.title:
+            notification += f"<b>Описание:</b> {task.description}\n"
+        if task.due_date:
+            notification += f"<b>Срок:</b> {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
+        notification += f"<b>Приоритет:</b> {task.priority}\n"
+
         webapp_url = (
             f"{WEB_APP_DOMAIN}/webapp/index.html"
             f"?mode=executor&user_id={assignee.id}&task_id={task.id}"
@@ -135,6 +145,14 @@ async def notify_assigned_user(
                 [InlineKeyboardButton(text="📱 Открыть задачу", web_app=WebAppInfo(url=webapp_url))],
                 [InlineKeyboardButton(text="▶️ Начать выполнение", callback_data=f"task_start:{task.id}")],
                 [InlineKeyboardButton(text="✅ Завершить", callback_data=f"task_complete:{task.id}")],
+            ]
+        )
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📱 Открыть задачу", web_app=WebAppInfo(url=webapp_url))],
+                [InlineKeyboardButton(text="▶️ Взять в работу", callback_data=f"task_start:{task.id}")],
+                [InlineKeyboardButton(text="✅ Отметить выполненной", callback_data=f"task_complete:{task.id}")],
             ]
         )
 

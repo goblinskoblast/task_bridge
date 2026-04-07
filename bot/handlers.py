@@ -30,6 +30,13 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
+PANEL_BUTTON_TEXT = "📱 Панель задач"
+AGENT_MAIN_BUTTON_TEXT = "🤖 Агент"
+QUICK_REPORTS_BUTTON_TEXT = "⚡ Быстрые отчёты"
+MONITORS_BUTTON_TEXT = "📡 Мониторы"
+SUPPORT_BUTTON_TEXT = "💬 Поддержка"
+HELP_BUTTON_TEXT = "❓ Помощь"
+
 
 def init_default_categories(db: Session):
     """Инициализация стандартных категорий задач."""
@@ -282,6 +289,72 @@ def _format_assignee_label(db: Session, assignee_token: str) -> str:
     return f"@{token}"
 
 
+def _build_main_reply_keyboard(webapp_url: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=PANEL_BUTTON_TEXT, web_app=WebAppInfo(url=webapp_url))],
+            [KeyboardButton(text=AGENT_MAIN_BUTTON_TEXT), KeyboardButton(text=QUICK_REPORTS_BUTTON_TEXT)],
+            [KeyboardButton(text=MONITORS_BUTTON_TEXT), KeyboardButton(text=SUPPORT_BUTTON_TEXT)],
+            [KeyboardButton(text=HELP_BUTTON_TEXT)],
+        ],
+        resize_keyboard=True,
+        persistent=True,
+        input_field_placeholder="Напишите задачу или выберите действие ниже",
+    )
+
+
+def _build_welcome_message(is_first_auth: bool, pending_count: int) -> str:
+    if pending_count:
+        intro = (
+            f"👋 <b>С возвращением</b>\n\n"
+            f"Сейчас у вас <b>{pending_count}</b> активных задач."
+        )
+        if is_first_auth:
+            intro = (
+                f"👋 <b>Добро пожаловать в TaskBridge</b>\n\n"
+                f"Для вас уже найдено <b>{pending_count}</b> активных задач."
+            )
+    else:
+        intro = (
+            "👋 <b>TaskBridge готов к работе</b>\n\n"
+            "Я помогу собирать задачи из чатов и быстро открывать отчёты через агента."
+        )
+
+    return (
+        f"{intro}\n\n"
+        "Что можно сделать прямо сейчас:\n"
+        f"• {PANEL_BUTTON_TEXT.lower()}\n"
+        "• запустить агента для отчётов\n"
+        "• открыть поддержку, если нужна помощь"
+    )
+
+
+def _build_pending_task_confirmation_text(db: Session, pending_task: PendingTask) -> str:
+    lines = [
+        "📋 <b>Подтвердите задачу</b>",
+        "",
+        f"<b>Что сделать:</b> {pending_task.title}",
+    ]
+
+    if pending_task.description and pending_task.description != pending_task.title:
+        lines.append(f"<b>Описание:</b> {pending_task.description}")
+
+    assignee_tokens = pending_task.assignee_usernames or []
+    if not assignee_tokens and pending_task.assignee_username:
+        assignee_tokens = [pending_task.assignee_username]
+    if assignee_tokens:
+        assignee_labels = [_format_assignee_label(db, token) for token in assignee_tokens]
+        label = "Исполнитель" if len(assignee_labels) == 1 else "Исполнители"
+        lines.append(f"<b>{label}:</b> {', '.join(assignee_labels)}")
+
+    if pending_task.due_date:
+        lines.append(f"<b>Срок:</b> {pending_task.due_date.strftime('%d.%m.%Y %H:%M')}")
+
+    lines.append(f"<b>Приоритет:</b> {pending_task.priority}")
+    lines.extend(["", "Подтвердить создание задачи?"])
+    return "\n".join(lines)
+
+
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     """Обработчик команды /start."""
@@ -323,6 +396,10 @@ async def cmd_start(message: Message):
                 await message.answer(notification, reply_markup=task_keyboard, parse_mode="HTML")
 
         webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}"
+        reply_keyboard = _build_main_reply_keyboard(webapp_url)
+        welcome_message = _build_welcome_message(is_first_auth, len(pending_tasks))
+        await message.answer(welcome_message, reply_markup=reply_keyboard, parse_mode="HTML")
+        return
 
         if is_first_auth and pending_tasks:
             welcome_message = (
@@ -381,6 +458,15 @@ async def cmd_panel(message: Message):
         )
 
         webapp_url = f"{WEB_APP_DOMAIN}/webapp/index.html?mode=executor&user_id={user.id}"
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="📱 Открыть панель задач", web_app=WebAppInfo(url=webapp_url))]]
+        )
+        await message.answer(
+            "📱 <b>Панель задач</b>\n\nОткройте мини-приложение, чтобы посмотреть задачи, статусы и файлы.",
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
+        return
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
@@ -403,6 +489,26 @@ async def cmd_panel(message: Message):
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     """Показывает краткую справку по боту."""
+    modern_help_text = (
+        "❓ <b>Коротко о возможностях TaskBridge</b>\n\n"
+        "<b>Быстрые действия</b>\n"
+        "• /start — главное меню\n"
+        "• /panel — открыть панель задач\n"
+        "• /agent — открыть меню агента\n"
+        "• /support — написать в поддержку\n\n"
+        "<b>Быстрые отчёты</b>\n"
+        "• /reviews точка за сутки\n"
+        "• /stoplist точка\n"
+        "• /blanks точка текущий бланк\n"
+        "• /monitors — список мониторингов\n\n"
+        "<b>Как это работает</b>\n"
+        "1. Напишите задачу в рабочем чате.\n"
+        "2. Бот пришлёт подтверждение в личку.\n"
+        "3. После подтверждения задача появится у исполнителя и в панели."
+    )
+    await message.answer(modern_help_text, parse_mode="HTML")
+    return
+
     help_text = (
         "📘 <b>TaskBridge</b>\n\n"
         "<b>Команды:</b>\n"
@@ -417,6 +523,11 @@ async def cmd_help(message: Message):
         "Агент запускается кнопкой <b>🤖 Агент</b> в личном чате с ботом."
     )
     await message.answer(help_text, parse_mode="HTML")
+
+
+@router.message(F.chat.type == "private", F.text == HELP_BUTTON_TEXT)
+async def help_from_button(message: Message) -> None:
+    await cmd_help(message)
 
 
 @router.callback_query(F.data.startswith("task_start:"))
@@ -525,6 +636,7 @@ async def handle_assign_user(callback: CallbackQuery):
         confirmation_text += f"<b>Приоритет:</b> {pending_task.priority}\n\nПодтвердить создание задачи?"
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm_task:{pending_task.id}"), InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_task:{pending_task.id}")]])
+        confirmation_text = _build_pending_task_confirmation_text(db, pending_task)
         await callback.message.edit_text(confirmation_text, reply_markup=keyboard, parse_mode="HTML")
         await callback.answer("Исполнитель выбран")
     except TelegramForbiddenError:
@@ -834,6 +946,7 @@ async def handle_group_message(message: Message):
         confirmation_text += f"<b>Приоритет:</b> {pending_task.priority}\n\nПодтвердить создание задачи?"
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"confirm_task:{pending_task.id}"), InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_task:{pending_task.id}")]])
+        confirmation_text = _build_pending_task_confirmation_text(db, pending_task)
         try:
             sent_message = await message.bot.send_message(
                 chat_id=message.from_user.id,
