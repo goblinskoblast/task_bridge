@@ -1244,14 +1244,17 @@ class ItalianPizzaPortalAdapter:
     tableCount += tables.length;
     let fallbackColumns = [];
     for (const table of tables) {
-      const headRows = Array.from(table.querySelectorAll("thead tr"));
+      const headRows = Array.from(table.tHead?.rows || []);
       const headerParts = Array.from(
         table.querySelectorAll("thead h5, thead h4, thead h3, caption, [data-cy*='header'] h5, [data-cy*='header'] h4")
       ).map((node) => clean(node.innerText)).filter(Boolean);
       const cardHeadings = Array.from(card.querySelectorAll("h5, h4, h3")).map((node) => clean(node.innerText)).filter(Boolean);
       const service = headerParts[0] || cardHeadings[0] || "";
       const timeRange = headerParts[1] || cardHeadings[1] || slotId;
-      const parsedColumns = Array.from(headRows[1]?.querySelectorAll("th") || []).slice(1).map((node) => clean(node.innerText));
+      const parsedColumns = Array.from(headRows[1]?.children || [])
+        .filter((node) => String(node.tagName || "").toLowerCase() === "th")
+        .slice(1)
+        .map((node) => clean(node.innerText));
       const hasNamedColumns = parsedColumns.some((item) => item);
       const columns = hasNamedColumns ? parsedColumns : fallbackColumns;
       if (hasNamedColumns) {
@@ -1259,8 +1262,9 @@ class ItalianPizzaPortalAdapter:
       }
       const grouped = new Map();
 
-      for (const tr of Array.from(table.querySelectorAll("tbody tr"))) {
-        const tds = Array.from(tr.querySelectorAll("td"));
+      const bodyRows = Array.from(table.tBodies || []).flatMap((section) => Array.from(section.rows || []));
+      for (const tr of bodyRows) {
+        const tds = Array.from(tr.children || []).filter((node) => String(node.tagName || "").toLowerCase() === "td");
         if (!tds.length) continue;
         const rowLabel = clean(tds[0].innerText);
         tds.slice(1).forEach((td, idx) => {
