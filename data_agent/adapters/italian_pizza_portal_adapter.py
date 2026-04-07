@@ -107,7 +107,16 @@ class ItalianPizzaPortalAdapter:
         return seen[:20]
 
     async def _open_point_menu_if_needed(self, page) -> None:
-        openers = ["Точка", "Выберите точку", "Ресторан", "Подразделение", "Филиал", "Сменить точку"]
+        openers = [
+            "Выбрать точку продаж",
+            "Точка продаж",
+            "Точка",
+            "Выберите точку",
+            "Ресторан",
+            "Подразделение",
+            "Филиал",
+            "Сменить точку",
+        ]
         for candidate in openers:
             locator = page.locator(f"text={candidate}")
             if await locator.count() == 0:
