@@ -129,14 +129,18 @@ class DataAgentRuntime:
         base = llm_decision or rule_decision
         if rule_decision.scenario != "general":
             base = rule_decision
-        merged_slots = dict(session.slots or {})
-        merged_slots.update(base.slots or {})
         source_message = str(base.slots.get("source_message") or "")
-        if not merged_slots.get("point_name") and self._is_followup(source_message, session):
+        same_scenario = bool(base.scenario and base.scenario == session.scenario)
+        followup_request = self._is_followup(source_message, session)
+
+        merged_slots = dict(base.slots or {})
+        if not merged_slots.get("point_name") and followup_request:
             if session.slots.get("point_name"):
                 merged_slots["point_name"] = session.slots.get("point_name")
-        if not merged_slots.get("period_hint") and base.scenario == session.scenario and session.slots.get("period_hint"):
+        if not merged_slots.get("period_hint") and same_scenario and session.slots.get("period_hint"):
             merged_slots["period_hint"] = session.slots.get("period_hint")
+        if not merged_slots.get("monitor_interval_minutes") and same_scenario and session.slots.get("monitor_interval_minutes"):
+            merged_slots["monitor_interval_minutes"] = session.slots.get("monitor_interval_minutes")
         required = self._required_slots(base.scenario)
         missing = [slot for slot in required if not merged_slots.get(slot)]
         return AgentDecision(
@@ -155,7 +159,7 @@ class DataAgentRuntime:
         if any(token in lowered for token in ["стоп-лист", "стоп лист", "недоступн", "нет в наличии"]):
             scenario = "stoplist_report"
             reasoning = "Определен сценарий стоп-листа"
-        elif any(token in lowered for token in ["бланк загрузки", "бланки загрузки", "перегруз", "красн", "лимит", "норматив"]):
+        elif any(token in lowered for token in ["бланк загрузки", "бланки загрузки", "бланк", "бланки", "перегруз", "красн", "лимит", "норматив"]):
             scenario = "blanks_report"
             reasoning = "Определен сценарий бланков"
         elif any(token in lowered for token in ["отзыв", "отзывы", "рейтинг", "2гис", "2gis", "яндекс карты"]):

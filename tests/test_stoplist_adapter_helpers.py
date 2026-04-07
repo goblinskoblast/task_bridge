@@ -22,6 +22,14 @@ class StoplistAdapterHelpersTest(unittest.TestCase):
         self.assertTrue(self.adapter._looks_like_order_action("Добавить в корзину"))
         self.assertFalse(self.adapter._looks_like_order_action("Подробнее"))
 
+    def test_clean_product_name_filters_prices_and_actions(self):
+        self.assertEqual(self.adapter._clean_product_name("1199"), "")
+        self.assertEqual(self.adapter._clean_product_name("Выбрать"), "")
+        self.assertEqual(
+            self.adapter._clean_product_name("Луковые кольца малая порция"),
+            "Луковые кольца малая порция",
+        )
+
     def test_build_failed_result(self):
         result = self.adapter._build_failed_result(
             "Екатеринбург, Сулимова 31А",

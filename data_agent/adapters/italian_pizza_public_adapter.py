@@ -13,6 +13,10 @@ _CATEGORY_STOPWORDS = {
     "заказать доставку", "выберите адрес", "меню", "фильтры", "еще",
 }
 
+_ORDER_ACTION_LABELS = {
+    "выбрать", "в корзину", "добавить", "заказать", "недоступно", "подробнее",
+}
+
 
 class ItalianPizzaPublicAdapter:
     def _build_diagnostics(self, stage: str, url: str, **extra) -> dict:
@@ -67,7 +71,15 @@ class ItalianPizzaPublicAdapter:
             lowered = line.lower()
             if lowered in _CATEGORY_STOPWORDS:
                 continue
+            if lowered in _ORDER_ACTION_LABELS:
+                continue
+            if re.fullmatch(r"[\d\s.,/-]+", line):
+                continue
             if any(marker in lowered for marker in ["₽", "руб", "доставка", "войти", "контакты", "заказать", " г", " кг"]):
+                continue
+            if "***" in line or "скид" in lowered:
+                continue
+            if len(line.split()) > 10 or len(line) > 90:
                 continue
             if len(line) < 3:
                 continue
@@ -280,6 +292,30 @@ class ItalianPizzaPublicAdapter:
         except Exception:
             return False
 
+    async def _extract_card_title(self, card) -> str:
+        title_selectors = [
+            "h1", "h2", "h3", "h4",
+            "[class*='title']", "[class*='Title']",
+            "[class*='name']", "[class*='Name']",
+            "[data-testid*='title']", "[data-testid*='name']",
+            "strong", "b",
+        ]
+        for selector in title_selectors:
+            locator = card.locator(selector)
+            count = min(await locator.count(), 6)
+            for idx in range(count):
+                item = locator.nth(idx)
+                try:
+                    if not await item.is_visible():
+                        continue
+                    text = (await item.inner_text()).strip()
+                except Exception:
+                    continue
+                candidate = self._clean_product_name(text)
+                if candidate:
+                    return candidate
+        return ""
+
     async def _extract_card_text(self, btn) -> str:
         xpaths = [
             "xpath=ancestor::article[1]",
@@ -294,7 +330,11 @@ class ItalianPizzaPublicAdapter:
             try:
                 if await locator.count() == 0:
                     continue
-                text = (await locator.first.inner_text()).strip()
+                card = locator.first
+                title = await self._extract_card_title(card)
+                if title:
+                    return title
+                text = (await card.inner_text()).strip()
                 if text and len(text) > 2:
                     return text
             except Exception:
@@ -388,6 +428,7 @@ class ItalianPizzaPublicAdapter:
                 stage = "scroll"
                 await self._scroll_all(page)
                 await self._dismiss_common_overlays(page)
+                selected = selected or await self._confirm_selected_point(page, point)
                 stage = "collect_products"
                 product_candidates = await self._collect_disabled_products(page)
                 logger.info("Stoplist disabled button candidates point=%s items=%s", point.display_name, product_candidates[:60])
@@ -397,6 +438,20 @@ class ItalianPizzaPublicAdapter:
                     if name and name not in cleaned:
                         cleaned.append(name)
                 if cleaned:
+                    if not selected:
+                        body = (await page.locator("body").inner_text())[:2000]
+                        return self._build_failed_result(
+                            point.display_name,
+                            "Не удалось подтвердить выбор точки на публичном сайте.",
+                            diagnostics=self._build_diagnostics(
+                                stage,
+                                page.url,
+                                address_filled=address_filled,
+                                selected=False,
+                                products_found=len(cleaned),
+                                page_excerpt=self._page_excerpt(body),
+                            ),
+                        )
                     report_text = "Точка: {}\nСтоп-лист:\n{}".format(
                         point.display_name,
                         "\n".join(f"- {item}" for item in cleaned[:60]),
