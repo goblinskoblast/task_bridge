@@ -415,6 +415,9 @@ def _serve_webapp_index(request: Request, signed_token: str | None = None) -> Fi
         raise HTTPException(status_code=404, detail=f"index.html not found at {index_html_path}")
 
     response = FileResponse(str(index_html_path))
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     signed_token = (signed_token or request.query_params.get("tb_auth") or "").strip()
     if signed_token:
         try:
@@ -639,7 +642,11 @@ async def read_root():
         raise HTTPException(status_code=404, detail=f"index.html not found at {index_html_path}")
 
     logger.info(f"Successfully serving index.html from {index_html_path}")
-    return FileResponse(str(index_html_path))
+    response = FileResponse(str(index_html_path))
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @app.get("/webapp/index.html", response_class=HTMLResponse)
