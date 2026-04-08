@@ -16,7 +16,8 @@ from bot.report_delivery import (
 )
 from config import DEVELOPER_TELEGRAM_ID
 from db.database import get_db_session
-from db.models import Chat, DataAgentProfile, Message as MessageModel, User
+from db.models import Chat, DataAgentProfile, Message as MessageModel, SavedPoint, User
+from data_agent.saved_points import POINT_INTERVAL_PRESETS, SavedPointError, saved_point_service
 
 logger = logging.getLogger(__name__)
 
@@ -27,14 +28,19 @@ AGENT_BUTTON_TEXT = "🤖 Агент"
 QUICK_REPORTS_BUTTON_TEXT = "⚡ Быстрые отчёты"
 MONITORS_BUTTON_TEXT = "📡 Мониторы"
 SYSTEMS_BUTTON_TEXT = "🔌 Системы"
+POINTS_BUTTON_TEXT = "📍 Точки"
 HELP_BUTTON_TEXT = "❓ Помощь"
 REPORT_CHAT_CALLBACK_PREFIX = "agent_report_chat_select:"
 QUICK_REPORT_CALLBACK_PREFIX = "agent_quick:"
+POINT_CALLBACK_PREFIX = "agent_point:"
+POINT_REPORT_CALLBACK_PREFIX = "agent_point_report:"
+POINT_INTERVAL_CALLBACK_PREFIX = "agent_point_interval:"
 AGENT_WELCOME = (
     "🤖 <b>Агент TaskBridge</b>\n\n"
     "Чем могу помочь:\n"
     "• отзывы по точкам\n"
     "• стоп-лист и бланки\n"
+    "• сохранённые точки и статистика по ним\n"
     "• мониторинги и отчёты в чат\n"
     "• подключённые веб-системы\n\n"
     "Можно нажать готовую кнопку ниже или просто написать задачу обычным сообщением."
@@ -52,6 +58,9 @@ AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
         [
             InlineKeyboardButton(text="🕒 Бланки 12 часов", callback_data="agent_quick_blanks_12h"),
             InlineKeyboardButton(text="📡 Мониторы", callback_data="agent_show_monitors"),
+        ],
+        [
+            InlineKeyboardButton(text=POINTS_BUTTON_TEXT, callback_data="agent_show_points"),
         ],
         [
             InlineKeyboardButton(text="💬 Чат для отчётов", callback_data="agent_choose_report_chat"),
@@ -111,6 +120,10 @@ class ConnectSystemState(StatesGroup):
 
 class QuickReportState(StatesGroup):
     waiting_for_point = State()
+
+
+class PointManagementState(StatesGroup):
+    waiting_for_new_point = State()
 
 
 class AgentOnboardingState(StatesGroup):
@@ -294,6 +307,121 @@ def _build_quick_report_request(action_key: str, point: str) -> str:
     return action["request_builder"](point.strip())
 
 
+def _format_interval_label(interval_minutes: int) -> str:
+    if interval_minutes % 1440 == 0:
+        days = interval_minutes // 1440
+        return f"{days} д." if days > 1 else "24 ч."
+    if interval_minutes % 60 == 0:
+        hours = interval_minutes // 60
+        return f"{hours} ч."
+    return f"{interval_minutes} мин."
+
+
+def _point_button_label(point: SavedPoint) -> str:
+    label = point.display_name
+    if len(label) > 34:
+        label = label[:31].rstrip() + "..."
+    return label
+
+
+def _build_points_overview_keyboard(points: list[SavedPoint]) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text=_point_button_label(point), callback_data=f"{POINT_CALLBACK_PREFIX}{point.id}")]
+        for point in points[:8]
+    ]
+    if len(points) > 1:
+        buttons.append([InlineKeyboardButton(text="🌐 Все точки", callback_data=f"{POINT_CALLBACK_PREFIX}all")])
+    buttons.append([InlineKeyboardButton(text="➕ Добавить точку", callback_data="agent_point_add")])
+    buttons.append([InlineKeyboardButton(text="↩️ В меню агента", callback_data="agent_open")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _build_point_actions_keyboard(point: SavedPoint) -> InlineKeyboardMarkup:
+    point_id = point.id
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⭐ Отзывы", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}{point_id}:reviews_day"),
+                InlineKeyboardButton(text="🚫 Стоп-лист", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}{point_id}:stoplist"),
+            ],
+            [
+                InlineKeyboardButton(text="🧾 Бланки сейчас", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}{point_id}:blanks_current"),
+                InlineKeyboardButton(text="🕒 Бланки 12 ч", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}{point_id}:blanks_12h"),
+            ],
+            [
+                InlineKeyboardButton(text="⏱ Периодичность", callback_data=f"{POINT_INTERVAL_CALLBACK_PREFIX}menu:{point_id}"),
+                InlineKeyboardButton(text="🗑 Удалить", callback_data=f"{POINT_CALLBACK_PREFIX}delete:{point_id}"),
+            ],
+            [InlineKeyboardButton(text="↩️ К списку точек", callback_data="agent_show_points")],
+        ]
+    )
+
+
+def _build_all_points_actions_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⭐ Отзывы", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}all:reviews_day"),
+                InlineKeyboardButton(text="🚫 Стоп-лист", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}all:stoplist"),
+            ],
+            [
+                InlineKeyboardButton(text="🧾 Бланки сейчас", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}all:blanks_current"),
+                InlineKeyboardButton(text="🕒 Бланки 12 ч", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}all:blanks_12h"),
+            ],
+            [InlineKeyboardButton(text="↩️ К списку точек", callback_data="agent_show_points")],
+        ]
+    )
+
+
+def _build_point_interval_keyboard(point_id: int, current_interval: int) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for interval in POINT_INTERVAL_PRESETS:
+        prefix = "✅ " if interval == current_interval else ""
+        row.append(
+            InlineKeyboardButton(
+                text=f"{prefix}{_format_interval_label(interval)}",
+                callback_data=f"{POINT_INTERVAL_CALLBACK_PREFIX}set:{point_id}:{interval}",
+            )
+        )
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton(text="↩️ К точке", callback_data=f"{POINT_CALLBACK_PREFIX}{point_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _build_points_summary_text(points: list[SavedPoint]) -> str:
+    if not points:
+        return (
+            "📍 <b>Сохранённых точек пока нет</b>\n\n"
+            "Добавьте первую точку, и дальше бот будет предлагать её в кнопках вместо ручного ввода адреса."
+        )
+
+    lines = ["📍 <b>Ваши точки</b>", ""]
+    for point in points:
+        lines.append(
+            f"• <b>#{point.id}</b> {point.display_name} "
+            f"(статистика каждые {_format_interval_label(point.stats_interval_minutes)})"
+        )
+    if len(points) > 1:
+        lines.extend(["", "Можно выбрать одну точку или сразу «Все точки»."])
+    return "\n".join(lines)
+
+
+async def _call_agent(message: Message, text: str) -> dict:
+    return await data_agent_client.chat(
+        {
+            "user_id": message.from_user.id,
+            "message": text,
+            "username": message.from_user.username,
+            "first_name": message.from_user.first_name,
+        }
+    )
+
+
 def _looks_like_long_agent_request(text: str) -> bool:
     lowered = (text or "").lower()
     return any(
@@ -366,6 +494,29 @@ async def _send_quick_report_request(message: Message, command_text: str | None,
 
 
 async def _prompt_quick_report_action(message: Message, state: FSMContext, action_key: str) -> None:
+    db = get_db_session()
+    try:
+        saved_points = saved_point_service.list_points(db, message.from_user.id)
+    finally:
+        db.close()
+
+    if saved_points:
+        await state.clear()
+        lines = [
+            f"⚡ <b>{QUICK_REPORT_ACTIONS[action_key]['title']}</b>",
+            "",
+            "Выберите сохранённую точку кнопкой ниже.",
+        ]
+        if len(saved_points) > 1:
+            lines.append("Можно выбрать и «Все точки».")
+        await message.answer(
+            "\n".join(lines),
+            reply_markup=_build_points_overview_keyboard(saved_points),
+            parse_mode="HTML",
+        )
+        await state.update_data(quick_report_action=action_key)
+        return
+
     await state.set_state(QuickReportState.waiting_for_point)
     await state.update_data(quick_report_action=action_key)
     await message.answer(
@@ -424,6 +575,77 @@ async def _send_monitors_summary(message: Message) -> None:
     await message.answer("\n".join(lines), reply_markup=AGENT_ENTRY_KEYBOARD, parse_mode="HTML")
 
 
+async def _send_points_summary(message: Message) -> None:
+    db = get_db_session()
+    try:
+        points = saved_point_service.list_points(db, message.from_user.id)
+        await message.answer(
+            _build_points_summary_text(points),
+            reply_markup=_build_points_overview_keyboard(points),
+            parse_mode="HTML",
+        )
+    finally:
+        db.close()
+
+
+async def _send_point_details(message: Message, telegram_user_id: int, point_id: int) -> None:
+    db = get_db_session()
+    try:
+        point = saved_point_service.get_point(db, telegram_user_id, point_id)
+        if not point or not point.is_active:
+            await message.answer("Точка не найдена или уже удалена.")
+            return
+        await message.answer(
+            "📍 <b>Точка</b>\n\n"
+            f"<b>{point.display_name}</b>\n"
+            f"Поставщик: {point.provider}\n"
+            f"Периодичность статистики: каждые {_format_interval_label(point.stats_interval_minutes)}",
+            reply_markup=_build_point_actions_keyboard(point),
+            parse_mode="HTML",
+        )
+    finally:
+        db.close()
+
+
+async def _send_all_points_details(message: Message, telegram_user_id: int) -> None:
+    db = get_db_session()
+    try:
+        points = saved_point_service.list_points(db, telegram_user_id)
+        if not points:
+            await message.answer("Сначала добавьте хотя бы одну точку.")
+            return
+        await message.answer(
+            _build_points_summary_text(points),
+            reply_markup=_build_all_points_actions_keyboard(),
+            parse_mode="HTML",
+        )
+    finally:
+        db.close()
+
+
+async def _send_saved_points_report(message: Message, action_key: str, points: list[SavedPoint]) -> None:
+    waiting = await message.answer(
+        f"⏳ Собираю отчёт «{QUICK_REPORT_ACTIONS[action_key]['title']}» по {len(points)} "
+        f"{'точке' if len(points) == 1 else 'точкам'}..."
+    )
+    sections: list[str] = []
+    for point in points:
+        try:
+            result = await _call_agent(message, _build_quick_report_request(action_key, point.display_name))
+            answer = _build_user_safe_agent_answer(result)
+        except DataAgentClientError as exc:
+            answer = exc.user_message
+        except Exception as exc:
+            logger.error("Saved points report failed point=%s error=%s", point.display_name, exc, exc_info=True)
+            answer = "Не удалось получить отчёт по этой точке."
+        sections.append(f"{point.display_name}\n{answer}")
+
+    final_text = "\n\n".join(sections)
+    if len(final_text) > 3900:
+        final_text = final_text[:3890].rstrip() + "…"
+    await waiting.edit_text(final_text, parse_mode=None)
+
+
 async def _dispatch_agent_request(message: Message, text: str) -> None:
     if _looks_like_long_agent_request(text):
         _schedule_background_agent_request(message, text)
@@ -434,14 +656,7 @@ async def _dispatch_agent_request(message: Message, text: str) -> None:
 
 async def _send_agent_request(message: Message, text: str) -> None:
     try:
-        result = await data_agent_client.chat(
-            {
-                "user_id": message.from_user.id,
-                "message": text,
-                "username": message.from_user.username,
-                "first_name": message.from_user.first_name,
-            }
-        )
+        result = await _call_agent(message, text)
     except DataAgentClientError as exc:
         logger.error(
             "Agent chat transport error type=%s user_id=%s message=%s detail=%s",
@@ -533,6 +748,11 @@ async def open_monitors_from_button(message: Message) -> None:
     await _send_monitors_summary(message)
 
 
+@router.message(F.chat.type == "private", F.text == POINTS_BUTTON_TEXT)
+async def open_points_from_button(message: Message) -> None:
+    await _send_points_summary(message)
+
+
 @router.callback_query(F.data == "agent_open")
 async def callback_agent_open(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
@@ -565,6 +785,165 @@ async def callback_agent_show_monitors(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
         await _send_monitors_summary(callback.message)
+
+
+@router.callback_query(F.data == "agent_show_points")
+async def callback_agent_show_points(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.clear()
+    if callback.message:
+        await _send_points_summary(callback.message)
+
+
+@router.callback_query(F.data == "agent_point_add")
+async def callback_agent_point_add(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(PointManagementState.waiting_for_new_point)
+    if callback.message:
+        await callback.message.answer(
+            "📍 <b>Новая точка</b>\n\n"
+            "Пришлите город и адрес одним сообщением.\n"
+            "Например: <code>Сухой Лог, Белинского 40</code>",
+            parse_mode="HTML",
+        )
+
+
+@router.callback_query(F.data.startswith(POINT_CALLBACK_PREFIX))
+async def callback_agent_point(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+
+    payload = callback.data[len(POINT_CALLBACK_PREFIX):]
+    if payload == "all":
+        data = await state.get_data()
+        action_key = data.get("quick_report_action")
+        if action_key in QUICK_REPORT_ACTIONS:
+            db = get_db_session()
+            try:
+                points = saved_point_service.list_points(db, callback.from_user.id)
+            finally:
+                db.close()
+            await state.clear()
+            if not points:
+                await callback.message.answer("Сначала добавьте хотя бы одну точку.")
+                return
+            await _send_saved_points_report(callback.message, action_key, points)
+            return
+
+        await _send_all_points_details(callback.message, callback.from_user.id)
+        return
+
+    if payload.startswith("delete:"):
+        point_id = int(payload.split(":", 1)[1])
+        db = get_db_session()
+        try:
+            point = saved_point_service.deactivate_point(db, callback.from_user.id, point_id)
+        except SavedPointError as exc:
+            await callback.message.answer(str(exc))
+            return
+        finally:
+            db.close()
+        await callback.message.answer(f"🗑 Точка отключена: {point.display_name}")
+        await _send_points_summary(callback.message)
+        return
+
+    if not payload.isdigit():
+        await callback.message.answer("Не удалось определить точку.")
+        return
+
+    point_id = int(payload)
+    data = await state.get_data()
+    action_key = data.get("quick_report_action")
+    if action_key in QUICK_REPORT_ACTIONS:
+        db = get_db_session()
+        try:
+            point = saved_point_service.get_point(db, callback.from_user.id, point_id)
+        finally:
+            db.close()
+        await state.clear()
+        if not point or not point.is_active:
+            await callback.message.answer("Точка не найдена.")
+            return
+        await _send_saved_points_report(callback.message, action_key, [point])
+        return
+
+    await _send_point_details(callback.message, callback.from_user.id, point_id)
+
+
+@router.callback_query(F.data.startswith(POINT_REPORT_CALLBACK_PREFIX))
+async def callback_agent_point_report(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+    payload = callback.data[len(POINT_REPORT_CALLBACK_PREFIX):]
+    point_ref, action_key = payload.split(":", 1)
+    if action_key not in QUICK_REPORT_ACTIONS:
+        await callback.message.answer("Не удалось определить тип отчёта.")
+        return
+
+    db = get_db_session()
+    try:
+        points = (
+            saved_point_service.list_points(db, callback.from_user.id)
+            if point_ref == "all"
+            else [saved_point_service.get_point(db, callback.from_user.id, int(point_ref))]
+        )
+        points = [item for item in points if item and item.is_active]
+    finally:
+        db.close()
+
+    if not points:
+        await callback.message.answer("Точки не найдены.")
+        return
+
+    await _send_saved_points_report(callback.message, action_key, points)
+
+
+@router.callback_query(F.data.startswith(POINT_INTERVAL_CALLBACK_PREFIX))
+async def callback_agent_point_interval(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+
+    payload = callback.data[len(POINT_INTERVAL_CALLBACK_PREFIX):]
+    if payload.startswith("menu:"):
+        point_id = int(payload.split(":", 1)[1])
+        db = get_db_session()
+        try:
+            point = saved_point_service.get_point(db, callback.from_user.id, point_id)
+        finally:
+            db.close()
+        if not point:
+            await callback.message.answer("Точка не найдена.")
+            return
+        await callback.message.answer(
+            f"⏱ <b>Периодичность статистики</b>\n\n"
+            f"{point.display_name}\n"
+            f"Сейчас: каждые {_format_interval_label(point.stats_interval_minutes)}",
+            reply_markup=_build_point_interval_keyboard(point.id, point.stats_interval_minutes),
+            parse_mode="HTML",
+        )
+        return
+
+    if not payload.startswith("set:"):
+        await callback.message.answer("Не удалось обновить периодичность.")
+        return
+
+    _, point_id_raw, interval_raw = payload.split(":", 2)
+    db = get_db_session()
+    try:
+        point = saved_point_service.set_interval(db, callback.from_user.id, int(point_id_raw), int(interval_raw))
+    except SavedPointError as exc:
+        await callback.message.answer(str(exc))
+        return
+    finally:
+        db.close()
+    await callback.message.answer(
+        f"✅ Для точки <b>{point.display_name}</b> периодичность статистики обновлена: "
+        f"каждые {_format_interval_label(point.stats_interval_minutes)}.",
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data == "agent_quick_cancel")
@@ -685,6 +1064,27 @@ async def handle_quick_report_point(message: Message, state: FSMContext) -> None
     await _dispatch_agent_request(message, _build_quick_report_request(action_key, point))
 
 
+@router.message(StateFilter(PointManagementState.waiting_for_new_point), F.text)
+async def handle_new_saved_point(message: Message, state: FSMContext) -> None:
+    db = get_db_session()
+    try:
+        point = saved_point_service.save_point(db, message.from_user.id, (message.text or "").strip())
+    except SavedPointError as exc:
+        await message.answer(str(exc))
+        return
+    finally:
+        db.close()
+
+    await state.clear()
+    await message.answer(
+        "✅ <b>Точка сохранена</b>\n\n"
+        f"{point.display_name}\n"
+        f"Статистика будет собираться каждые {_format_interval_label(point.stats_interval_minutes)}.",
+        parse_mode="HTML",
+    )
+    await _send_points_summary(message)
+
+
 @router.message(StateFilter(AgentOnboardingState.waiting_for_business_context), F.text)
 async def onboarding_business_context(message: Message, state: FSMContext) -> None:
     await state.update_data(business_context=(message.text or "").strip())
@@ -745,6 +1145,40 @@ async def onboarding_reporting_frequency(message: Message, state: FSMContext) ->
 @router.message(Command("systems"))
 async def cmd_systems(message: Message) -> None:
     await _send_systems_summary(message)
+
+
+@router.message(Command("points"))
+async def cmd_points(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await _send_points_summary(message)
+
+
+@router.message(Command("addpoint"))
+async def cmd_addpoint(message: Message, state: FSMContext) -> None:
+    await state.set_state(PointManagementState.waiting_for_new_point)
+    await message.answer(
+        "📍 <b>Новая точка</b>\n\n"
+        "Пришлите город и адрес одним сообщением.\n"
+        "Например: <code>Сухой Лог, Белинского 40</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command("delpoint"))
+async def cmd_delpoint(message: Message) -> None:
+    point_id_raw = _get_command_args(message.text)
+    if not point_id_raw.isdigit():
+        await message.answer("Укажите ID точки, например: <code>/delpoint 3</code>", parse_mode="HTML")
+        return
+    db = get_db_session()
+    try:
+        point = saved_point_service.deactivate_point(db, message.from_user.id, int(point_id_raw))
+    except SavedPointError as exc:
+        await message.answer(str(exc))
+        return
+    finally:
+        db.close()
+    await message.answer(f"🗑 Точка отключена: {point.display_name}")
 
 
 @router.message(Command("reviews"))

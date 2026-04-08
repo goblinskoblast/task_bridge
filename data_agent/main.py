@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from config import INTERNAL_API_TOKEN
 from db.database import init_db
 from .monitor_scheduler import start_data_agent_monitor_scheduler, stop_data_agent_monitor_scheduler
+from .point_stats_scheduler import start_point_statistics_scheduler, stop_point_statistics_scheduler
 from .models import (
     DataAgentChatRequest,
     DataAgentChatResponse,
@@ -41,11 +42,13 @@ def verify_internal_api_access(request: Request) -> None:
 async def startup() -> None:
     init_db()
     start_data_agent_monitor_scheduler()
+    start_point_statistics_scheduler()
 
 
 @app.on_event("shutdown")
 async def shutdown() -> None:
     stop_data_agent_monitor_scheduler()
+    stop_point_statistics_scheduler()
 
 
 @app.get("/health")

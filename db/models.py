@@ -61,6 +61,8 @@ class User(Base):
     data_agent_request_logs = relationship("DataAgentRequestLog", back_populates="user", cascade="all, delete-orphan")
     data_agent_monitor_configs = relationship("DataAgentMonitorConfig", back_populates="user", cascade="all, delete-orphan")
     data_agent_monitor_events = relationship("DataAgentMonitorEvent", back_populates="user", cascade="all, delete-orphan")
+    saved_points = relationship("SavedPoint", back_populates="user", cascade="all, delete-orphan")
+    point_stat_runs = relationship("PointStatRun", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(telegram_id={self.telegram_id}, username={self.username})>"
@@ -521,3 +523,70 @@ class DataAgentSession(Base):
 
     def __repr__(self):
         return f"<DataAgentSession(id={self.id}, user_id={self.user_id}, scenario={self.active_scenario})>"
+
+
+class SavedPoint(Base):
+    """User-owned saved reporting point."""
+    __tablename__ = "saved_points"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False, index=True)
+    provider = Column(String(100), nullable=False, default="italian_pizza", index=True)
+    city = Column(String(255), nullable=False)
+    address = Column(String(500), nullable=False)
+    display_name = Column(String(500), nullable=False)
+    external_point_key = Column(String(255), nullable=True)
+    is_active = Column(Boolean, default=True, index=True)
+    stats_interval_minutes = Column(Integer, nullable=False, default=240)
+    last_stats_collected_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="saved_points")
+    stat_snapshots = relationship("PointStatSnapshot", back_populates="saved_point", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<SavedPoint(id={self.id}, user_id={self.user_id}, display_name={self.display_name})>"
+
+
+class PointStatRun(Base):
+    """Single statistics collection run for one user."""
+    __tablename__ = "point_stat_runs"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False, index=True)
+    run_started_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    run_finished_at = Column(DateTime, nullable=True)
+    status = Column(String(50), nullable=False, default="running", index=True)
+    error_text = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="point_stat_runs")
+    snapshots = relationship("PointStatSnapshot", back_populates="run", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<PointStatRun(id={self.id}, user_id={self.user_id}, status={self.status})>"
+
+
+class PointStatSnapshot(Base):
+    """Collected point metrics snapshot."""
+    __tablename__ = "point_stat_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(Integer, ForeignKey("point_stat_runs.id", ondelete='CASCADE'), nullable=False, index=True)
+    saved_point_id = Column(Integer, ForeignKey("saved_points.id", ondelete='CASCADE'), nullable=False, index=True)
+    snapshot_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    stoplist_count = Column(Integer, nullable=False, default=0)
+    stoplist_items_json = Column(JSON, nullable=True)
+    blanks_total_count = Column(Integer, nullable=False, default=0)
+    blanks_red_count = Column(Integer, nullable=False, default=0)
+    blanks_overload_items_json = Column(JSON, nullable=True)
+    source_ok = Column(Boolean, default=True)
+    source_error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    run = relationship("PointStatRun", back_populates="snapshots")
+    saved_point = relationship("SavedPoint", back_populates="stat_snapshots")
+
+    def __repr__(self):
+        return f"<PointStatSnapshot(id={self.id}, point_id={self.saved_point_id}, stoplist={self.stoplist_count}, red={self.blanks_red_count})>"

@@ -326,7 +326,8 @@ def _build_welcome_message(is_first_auth: bool, pending_count: int) -> str:
         "Что можно сделать прямо сейчас:\n"
         f"• {PANEL_BUTTON_TEXT.lower()}\n"
         "• запустить агента для отчётов\n"
-        "• открыть поддержку, если нужна помощь"
+        "• открыть поддержку, если нужна помощь\n"
+        "• сохранить точки для быстрых отчётов через /addpoint и /points"
     )
 
 
@@ -358,7 +359,7 @@ def _build_pending_task_confirmation_text(db: Session, pending_task: PendingTask
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
-    """Обработчик команды /start."""
+    """Handle /start command."""
     db = get_db_session()
     try:
         user = await get_or_create_user(
@@ -389,13 +390,20 @@ async def cmd_start(message: Message):
                     mode="executor",
                     task_id=task.id,
                 )
-                task_keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="📱 Открыть задачу", web_app=WebAppInfo(url=task_webapp_url))]])
-                notification = (
-                    f"📌 <b>У вас есть активная задача</b>\n\n"
-                    f"<b>{task.title}</b>\n"
-                    f"Статус: {task.status}\n"
-                    f"Приоритет: {task.priority}\n"
+                task_keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[[
+                        InlineKeyboardButton(
+                            text="📱 Открыть задачу",
+                            web_app=WebAppInfo(url=task_webapp_url),
+                        )
+                    ]]
                 )
+                notification = f"""📌 <b>У вас есть активная задача</b>
+
+<b>{task.title}</b>
+Статус: {task.status}
+Приоритет: {task.priority}
+"""
                 if task.due_date:
                     notification += f"Срок: {task.due_date.strftime('%d.%m.%Y %H:%M')}\n"
                 await message.answer(notification, reply_markup=task_keyboard, parse_mode="HTML")
@@ -404,45 +412,6 @@ async def cmd_start(message: Message):
         reply_keyboard = _build_main_reply_keyboard(webapp_url)
         welcome_message = _build_welcome_message(is_first_auth, len(pending_tasks))
         await message.answer(welcome_message, reply_markup=reply_keyboard, parse_mode="HTML")
-        await message.answer(
-            "Р‘С‹СЃС‚СЂР°СЏ РєРЅРѕРїРєР° РїР°РЅРµР»Рё РѕР±РЅРѕРІР»РµРЅР°.",
-            reply_markup=_build_main_reply_keyboard(webapp_url),
-        )
-        return
-
-        if is_first_auth and pending_tasks:
-            welcome_message = (
-                f"Добро пожаловать. У вас уже есть {len(pending_tasks)} активных задач.\n\n"
-                "Откройте панель задач или переходите в карточки выше, чтобы продолжить работу."
-            )
-        elif pending_tasks:
-            welcome_message = (
-                f"С возвращением. У вас {len(pending_tasks)} активных задач.\n\n"
-                "Откройте панель задач или используйте карточки выше, чтобы продолжить работу."
-            )
-        else:
-            welcome_message = (
-                "TaskBridge помогает фиксировать задачи из чатов и работать с ними в мини-приложении.\n\n"
-                "Откройте панель задач, запустите агента или начните общение с поддержкой."
-            )
-
-        inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📱 Открыть панель задач", web_app=WebAppInfo(url=webapp_url))],
-            [InlineKeyboardButton(text="🤖 Агент", callback_data="agent_open")],
-            [InlineKeyboardButton(text="💬 Поддержка", callback_data="support_start")],
-        ])
-
-        reply_keyboard = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="📱 Панель задач", web_app=WebAppInfo(url=webapp_url))],
-                [KeyboardButton(text="🤖 Агент")],
-            ],
-            resize_keyboard=True,
-            persistent=True,
-        )
-
-        await message.answer(welcome_message, reply_markup=inline_keyboard, parse_mode="HTML")
-        await message.answer("Ниже добавил постоянную клавиатуру для быстрого доступа.", reply_markup=reply_keyboard)
     except Exception as e:
         logger.error(f"Error in /start command: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Попробуйте позже.")
@@ -452,7 +421,7 @@ async def cmd_start(message: Message):
 
 @router.message(Command("panel"))
 async def cmd_panel(message: Message):
-    """Обработчик команды /panel."""
+    """Handle /panel command."""
     db = get_db_session()
 
     try:
@@ -468,25 +437,20 @@ async def cmd_panel(message: Message):
 
         webapp_url = build_taskbridge_webapp_url(user_id=user.id, mode="executor")
         keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="📱 Открыть панель задач", web_app=WebAppInfo(url=webapp_url))]]
+            inline_keyboard=[[
+                InlineKeyboardButton(
+                    text="📱 Открыть панель задач",
+                    web_app=WebAppInfo(url=webapp_url),
+                )
+            ]]
         )
         await message.answer(
-            "📱 <b>Панель задач</b>\n\nОткройте мини-приложение, чтобы посмотреть задачи, статусы и файлы.",
+            """📱 <b>Панель задач</b>
+
+Откройте мини-приложение, чтобы посмотреть задачи, статусы и файлы.""",
             reply_markup=keyboard,
             parse_mode="HTML",
         )
-        return
-
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="📱 Открыть панель задач",
-                    web_app=WebAppInfo(url=webapp_url)
-                )
-            ]
-        ])
-
-        await message.answer("Нажмите кнопку ниже для доступа к панели задач:", reply_markup=keyboard)
 
     except Exception as e:
         logger.error(f"Error in /panel command: {e}", exc_info=True)
@@ -497,41 +461,32 @@ async def cmd_panel(message: Message):
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    """Показывает краткую справку по боту."""
-    modern_help_text = (
-        "❓ <b>Коротко о возможностях TaskBridge</b>\n\n"
-        "<b>Быстрые действия</b>\n"
-        "• /start — главное меню\n"
-        "• /panel — открыть панель задач\n"
-        "• /agent — открыть меню агента\n"
-        "• /support — написать в поддержку\n\n"
-        "<b>Быстрые отчёты</b>\n"
-        "• /reviews точка за сутки\n"
-        "• /stoplist точка\n"
-        "• /blanks точка текущий бланк\n"
-        "• /monitors — список мониторингов\n\n"
-        "<b>Как это работает</b>\n"
-        "1. Напишите задачу в рабочем чате.\n"
-        "2. Бот пришлёт подтверждение в личку.\n"
-        "3. После подтверждения задача появится у исполнителя и в панели."
-    )
-    await message.answer(modern_help_text, parse_mode="HTML")
-    return
+    """Show a short help message."""
+    modern_help_text = """❓ <b>Коротко о возможностях TaskBridge</b>
 
-    help_text = (
-        "📘 <b>TaskBridge</b>\n\n"
-        "<b>Команды:</b>\n"
-        "/start — открыть стартовое меню и клавиатуру\n"
-        "/panel — открыть панель задач\n"
-        "/support — открыть чат поддержки\n"
-        "/help — показать эту справку\n\n"
-        "<b>Как это работает:</b>\n"
-        "1. Напишите задачу в групповом чате.\n"
-        "2. Бот распознает задачу и отправит подтверждение постановщику в личку.\n"
-        "3. После подтверждения задача появится у исполнителя и в мини-приложении.\n\n"
-        "Агент запускается кнопкой <b>🤖 Агент</b> в личном чате с ботом."
-    )
-    await message.answer(help_text, parse_mode="HTML")
+<b>Быстрые действия</b>
+• /start — главное меню
+• /panel — открыть панель задач
+• /agent — открыть меню агента
+• /support — написать в поддержку
+
+<b>Точки и отчёты</b>
+• /addpoint — сохранить точку
+• /points — посмотреть сохранённые точки
+• /delpoint ID — убрать точку из списка
+
+<b>Быстрые отчёты</b>
+• /reviews точка за сутки
+• /stoplist точка
+• /blanks точка текущий бланк
+• /monitors — список мониторингов
+
+<b>Как это работает</b>
+1. Напишите задачу в рабочем чате.
+2. Бот пришлёт подтверждение в личку.
+3. После подтверждения задача появится у исполнителя и в панели.
+4. Для отчётов по точкам можно один раз сохранить адрес и дальше выбирать его из списка."""
+    await message.answer(modern_help_text, parse_mode="HTML")
 
 
 @router.message(F.chat.type == "private", F.text == HELP_BUTTON_TEXT)
