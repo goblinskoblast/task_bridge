@@ -186,6 +186,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     init_data = _extract_telegram_init_data(request)
     signed_token = request.cookies.get(WEBAPP_AUTH_COOKIE_NAME) or request.query_params.get("tb_auth")
     fallback_user_id = request.query_params.get("user_id") or request.headers.get("X-TaskBridge-User-Id", "").strip()
+    fallback_telegram_id = request.query_params.get("telegram_user_id") or request.headers.get("X-TaskBridge-Telegram-Id", "").strip()
 
     if ALLOW_INSECURE_USER_ID_AUTH and fallback_user_id:
         try:
@@ -194,10 +195,30 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
             raise HTTPException(status_code=401, detail="Fallback user id is invalid") from exc
 
         user = db.query(User).filter(User.id == fallback_user_id_int).first()
-        if not user:
-            raise HTTPException(status_code=401, detail="Fallback user not found")
-        logger.info("Webapp auth fallback via user_id succeeded user_id=%s", fallback_user_id_int)
-        return user
+        if user:
+            logger.info("Webapp auth fallback via user_id succeeded user_id=%s", fallback_user_id_int)
+            return user
+        user = db.query(User).filter(User.telegram_id == fallback_user_id_int).first()
+        if user:
+            logger.info(
+                "Webapp auth fallback via user_id matched telegram_id=%s user_id=%s",
+                fallback_user_id_int,
+                user.id,
+            )
+            return user
+        logger.warning("Webapp auth fallback via user_id missed user_id=%s", fallback_user_id_int)
+
+    if ALLOW_INSECURE_USER_ID_AUTH and fallback_telegram_id:
+        try:
+            fallback_telegram_id_int = int(fallback_telegram_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail="Fallback telegram user id is invalid") from exc
+
+        user = db.query(User).filter(User.telegram_id == fallback_telegram_id_int).first()
+        if user:
+            logger.info("Webapp auth fallback via telegram_id succeeded telegram_id=%s user_id=%s", fallback_telegram_id_int, user.id)
+            return user
+        logger.warning("Webapp auth fallback via telegram_id missed telegram_id=%s", fallback_telegram_id_int)
 
     if init_data or signed_token:
         try:
@@ -225,6 +246,13 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
         logger.info("Webapp auth succeeded via signed token user_id=%s", user_id)
         return user
 
+    logger.warning(
+        "Webapp auth failed: no valid auth source user_id_present=%s telegram_id_present=%s init_data_present=%s signed_token_present=%s",
+        bool(fallback_user_id),
+        bool(fallback_telegram_id),
+        bool(init_data),
+        bool(signed_token),
+    )
     raise HTTPException(status_code=401, detail="Authentication required")
 
 

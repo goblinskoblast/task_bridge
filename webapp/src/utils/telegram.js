@@ -85,10 +85,18 @@ export function getTelegramParams() {
   const tg = getTelegramWebApp()
   const urlParams = getUrlSearchParams()
   const userIdFromUrl = urlParams.get('user_id')
+  const telegramUserIdFromUrl = urlParams.get('telegram_user_id')
   const storedUserId = window.localStorage.getItem('taskbridge_user_id')
+  const telegramUserIdFromTelegram = tg?.initDataUnsafe?.user?.id?.toString() || null
+  const storedTelegramUserId = window.localStorage.getItem('taskbridge_telegram_user_id')
 
   if (userIdFromUrl) {
     window.localStorage.setItem('taskbridge_user_id', userIdFromUrl)
+  }
+  if (telegramUserIdFromTelegram) {
+    window.localStorage.setItem('taskbridge_telegram_user_id', telegramUserIdFromTelegram)
+  } else if (telegramUserIdFromUrl) {
+    window.localStorage.setItem('taskbridge_telegram_user_id', telegramUserIdFromUrl)
   }
 
   return {
@@ -96,14 +104,14 @@ export function getTelegramParams() {
     user_id: userIdFromUrl || storedUserId,
     task_id: urlParams.get('task_id'),
     tab: urlParams.get('tab'),
-    telegram_user_id: tg?.initDataUnsafe?.user?.id?.toString() || null,
+    telegram_user_id: telegramUserIdFromTelegram || telegramUserIdFromUrl || storedTelegramUserId,
     init_data: getTelegramInitData(),
   }
 }
 
 export function getTelegramAuthHeaders() {
   const initData = getTelegramInitData()
-  const { user_id: userId } = getTelegramParams()
+  const { user_id: userId, telegram_user_id: telegramUserId } = getTelegramParams()
   const headers = {}
 
   if (initData) {
@@ -111,6 +119,9 @@ export function getTelegramAuthHeaders() {
   }
   if (userId) {
     headers['X-TaskBridge-User-Id'] = userId
+  }
+  if (telegramUserId) {
+    headers['X-TaskBridge-Telegram-Id'] = telegramUserId
   }
 
   return headers
@@ -120,7 +131,7 @@ export function getWebappAuthQueryParams() {
   const params = {}
   const initData = getTelegramInitData()
   const webappAuthToken = getWebappAuthToken()
-  const { user_id: userId } = getTelegramParams()
+  const { user_id: userId, telegram_user_id: telegramUserId } = getTelegramParams()
 
   if (initData) {
     params.tg_init_data = initData
@@ -130,6 +141,9 @@ export function getWebappAuthQueryParams() {
   }
   if (userId) {
     params.user_id = userId
+  }
+  if (telegramUserId) {
+    params.telegram_user_id = telegramUserId
   }
 
   return params

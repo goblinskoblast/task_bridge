@@ -63,6 +63,9 @@ api.interceptors.request.use(config => {
   if (authParams.user_id && !config.params.user_id) {
     config.params.user_id = authParams.user_id
   }
+  if (authParams.telegram_user_id && !config.params.telegram_user_id) {
+    config.params.telegram_user_id = authParams.telegram_user_id
+  }
 
   return config
 })
