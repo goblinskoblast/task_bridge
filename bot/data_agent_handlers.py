@@ -126,12 +126,6 @@ class PointManagementState(StatesGroup):
     waiting_for_new_point = State()
 
 
-class AgentOnboardingState(StatesGroup):
-    waiting_for_business_context = State()
-    waiting_for_primary_goal = State()
-    waiting_for_reporting_frequency = State()
-
-
 def _normalize_connect_url(value: str) -> str:
     raw = (value or "").strip()
     if not raw:
@@ -167,8 +161,12 @@ def _get_or_create_user(
 def _get_or_create_profile(db, user_id: int) -> DataAgentProfile:
     profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user_id).first()
     if not profile:
-        profile = DataAgentProfile(user_id=user_id, onboarding_completed=False)
+        profile = DataAgentProfile(user_id=user_id, onboarding_completed=True)
         db.add(profile)
+        db.commit()
+        db.refresh(profile)
+    elif not profile.onboarding_completed:
+        profile.onboarding_completed = True
         db.commit()
         db.refresh(profile)
     return profile
@@ -278,19 +276,6 @@ def _get_command_args(raw_text: str | None) -> str:
     if len(parts) < 2:
         return ""
     return parts[1].strip()
-
-
-def _build_profile_summary(profile: DataAgentProfile) -> str:
-    details: list[str] = []
-    if profile.business_context:
-        details.append(f"• Контекст: {profile.business_context}")
-    if profile.primary_goal:
-        details.append(f"• Фокус: {profile.primary_goal}")
-    if profile.reporting_frequency:
-        details.append(f"• Ритм: {profile.reporting_frequency}")
-    if profile.default_report_chat_title:
-        details.append(f"• Чат отчётов: {profile.default_report_chat_title}")
-    return "\n".join(details)
 
 
 def _build_quick_report_prompt(action_key: str) -> str:
@@ -699,25 +684,9 @@ async def _open_agent_entry(message: Message, state: FSMContext) -> None:
             last_name=message.from_user.last_name,
             is_bot=message.from_user.is_bot,
         )
-        profile = _get_or_create_profile(db, user.id)
-
-        if not profile.onboarding_completed:
-            await state.set_state(AgentOnboardingState.waiting_for_business_context)
-            await message.answer(
-                "🛠 <b>Быстрая настройка агента</b>\n\n"
-                "Шаг 1 из 3. Чем вы занимаетесь?\n"
-                "Например: сеть пиццерий, ресторан, e-commerce, агентство.",
-                reply_markup=AGENT_ENTRY_KEYBOARD,
-                parse_mode="HTML",
-            )
-            return
-
-        summary = AGENT_WELCOME
-        profile_summary = _build_profile_summary(profile)
-        if profile_summary:
-            summary += "\n\n<b>Текущий профиль</b>\n" + profile_summary
-
-        await message.answer(summary, reply_markup=AGENT_ENTRY_KEYBOARD, parse_mode="HTML")
+        _get_or_create_profile(db, user.id)
+        await state.clear()
+        await message.answer(AGENT_WELCOME, reply_markup=AGENT_ENTRY_KEYBOARD, parse_mode="HTML")
     finally:
         db.close()
 
@@ -1085,63 +1054,6 @@ async def handle_new_saved_point(message: Message, state: FSMContext) -> None:
     await _send_points_summary(message)
 
 
-@router.message(StateFilter(AgentOnboardingState.waiting_for_business_context), F.text)
-async def onboarding_business_context(message: Message, state: FSMContext) -> None:
-    await state.update_data(business_context=(message.text or "").strip())
-    await state.set_state(AgentOnboardingState.waiting_for_primary_goal)
-    await message.answer(
-        "🧭 <b>Шаг 2 из 3</b>\n\n"
-        "Какие задачи для вас сейчас самые важные?\n"
-        "Например: отзывы по точкам, стоп-листы, мониторинг бланков.",
-        parse_mode="HTML",
-    )
-
-
-@router.message(StateFilter(AgentOnboardingState.waiting_for_primary_goal), F.text)
-async def onboarding_primary_goal(message: Message, state: FSMContext) -> None:
-    await state.update_data(primary_goal=(message.text or "").strip())
-    await state.set_state(AgentOnboardingState.waiting_for_reporting_frequency)
-    await message.answer(
-        "⏱ <b>Шаг 3 из 3</b>\n\n"
-        "Как часто вам нужны отчёты и сводки?\n"
-        "Например: ежедневно, раз в неделю, по запросу.",
-        parse_mode="HTML",
-    )
-
-
-@router.message(StateFilter(AgentOnboardingState.waiting_for_reporting_frequency), F.text)
-async def onboarding_reporting_frequency(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    await state.clear()
-
-    db = get_db_session()
-    try:
-        user = _get_or_create_user(
-            db=db,
-            telegram_id=message.from_user.id,
-            username=message.from_user.username,
-            first_name=message.from_user.first_name,
-            last_name=message.from_user.last_name,
-            is_bot=message.from_user.is_bot,
-        )
-        profile = _get_or_create_profile(db, user.id)
-        profile.business_context = data.get("business_context")
-        profile.primary_goal = data.get("primary_goal")
-        profile.reporting_frequency = (message.text or "").strip()
-        profile.onboarding_completed = True
-        db.commit()
-
-        await message.answer(
-            "✅ <b>Профиль сохранён</b>\n\n"
-            "Теперь можно просто писать задачу обычным сообщением или пользоваться кнопками ниже.\n\n"
-            f"{_build_profile_summary(profile)}",
-            reply_markup=AGENT_ENTRY_KEYBOARD,
-            parse_mode="HTML",
-        )
-    finally:
-        db.close()
-
-
 @router.message(Command("systems"))
 async def cmd_systems(message: Message) -> None:
     await _send_systems_summary(message)
@@ -1452,23 +1364,4 @@ async def connect_waiting_for_password(message: Message, state: FSMContext) -> N
     F.text != HELP_BUTTON_TEXT,
 )
 async def handle_private_agent_message(message: Message, state: FSMContext) -> None:
-    db = get_db_session()
-    try:
-        user = _get_or_create_user(
-            db=db,
-            telegram_id=message.from_user.id,
-            username=message.from_user.username,
-            first_name=message.from_user.first_name,
-            last_name=message.from_user.last_name,
-            is_bot=message.from_user.is_bot,
-        )
-        profile = _get_or_create_profile(db, user.id)
-        onboarding_completed = profile.onboarding_completed
-    finally:
-        db.close()
-
-    if not onboarding_completed:
-        await _open_agent_entry(message, state)
-        return
-
     await _dispatch_agent_request(message, (message.text or "").strip())
