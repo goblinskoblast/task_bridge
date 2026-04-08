@@ -84,9 +84,16 @@ export async function waitForTelegramInitData(timeoutMs = 5000, pollIntervalMs =
 export function getTelegramParams() {
   const tg = getTelegramWebApp()
   const urlParams = getUrlSearchParams()
+  const userIdFromUrl = urlParams.get('user_id')
+  const storedUserId = window.localStorage.getItem('taskbridge_user_id')
+
+  if (userIdFromUrl) {
+    window.localStorage.setItem('taskbridge_user_id', userIdFromUrl)
+  }
 
   return {
     mode: urlParams.get('mode'),
+    user_id: userIdFromUrl || storedUserId,
     task_id: urlParams.get('task_id'),
     tab: urlParams.get('tab'),
     telegram_user_id: tg?.initDataUnsafe?.user?.id?.toString() || null,
@@ -96,19 +103,33 @@ export function getTelegramParams() {
 
 export function getTelegramAuthHeaders() {
   const initData = getTelegramInitData()
-  return initData ? { 'X-Telegram-Init-Data': initData } : {}
+  const { user_id: userId } = getTelegramParams()
+  const headers = {}
+
+  if (initData) {
+    headers['X-Telegram-Init-Data'] = initData
+  }
+  if (userId) {
+    headers['X-TaskBridge-User-Id'] = userId
+  }
+
+  return headers
 }
 
 export function getWebappAuthQueryParams() {
   const params = {}
   const initData = getTelegramInitData()
   const webappAuthToken = getWebappAuthToken()
+  const { user_id: userId } = getTelegramParams()
 
   if (initData) {
     params.tg_init_data = initData
   }
   if (webappAuthToken) {
     params.tb_auth = webappAuthToken
+  }
+  if (userId) {
+    params.user_id = userId
   }
 
   return params

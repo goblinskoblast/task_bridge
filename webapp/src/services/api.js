@@ -60,6 +60,9 @@ api.interceptors.request.use(config => {
   if (authParams.tb_auth && !config.params.tb_auth) {
     config.params.tb_auth = authParams.tb_auth
   }
+  if (authParams.user_id && !config.params.user_id) {
+    config.params.user_id = authParams.user_id
+  }
 
   return config
 })

@@ -185,6 +185,18 @@ def _get_or_create_user_from_telegram_payload(db: Session, user_data: dict[str, 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     init_data = _extract_telegram_init_data(request)
     signed_token = request.cookies.get(WEBAPP_AUTH_COOKIE_NAME) or request.query_params.get("tb_auth")
+    fallback_user_id = request.query_params.get("user_id") or request.headers.get("X-TaskBridge-User-Id", "").strip()
+
+    if ALLOW_INSECURE_USER_ID_AUTH and fallback_user_id:
+        try:
+            fallback_user_id_int = int(fallback_user_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail="Fallback user id is invalid") from exc
+
+        user = db.query(User).filter(User.id == fallback_user_id_int).first()
+        if not user:
+            raise HTTPException(status_code=401, detail="Fallback user not found")
+        return user
 
     if init_data or signed_token:
         try:
@@ -209,19 +221,6 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
         if not user:
             raise HTTPException(status_code=401, detail="Authenticated user not found")
         return user
-
-    if ALLOW_INSECURE_USER_ID_AUTH:
-        fallback_user_id = request.query_params.get("user_id") or request.headers.get("X-TaskBridge-User-Id", "").strip()
-        if fallback_user_id:
-            try:
-                fallback_user_id_int = int(fallback_user_id)
-            except ValueError as exc:
-                raise HTTPException(status_code=401, detail="Fallback user id is invalid") from exc
-
-            user = db.query(User).filter(User.id == fallback_user_id_int).first()
-            if not user:
-                raise HTTPException(status_code=401, detail="Fallback user not found")
-            return user
 
     raise HTTPException(status_code=401, detail="Authentication required")
 

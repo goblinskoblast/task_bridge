@@ -21,6 +21,7 @@ function App() {
 
     const bootstrap = async () => {
       const params = getTelegramParams()
+      const fallbackUserId = params.user_id ? parseInt(params.user_id, 10) : null
       setTaskId(params.task_id ? parseInt(params.task_id, 10) : null)
 
       const tg = prepareTelegramWebApp()
@@ -34,7 +35,9 @@ function App() {
             await new Promise(resolve => window.setTimeout(resolve, delayMs))
           }
 
-          await waitForTelegramInitData()
+          if (!fallbackUserId) {
+            await waitForTelegramInitData()
+          }
 
           try {
             user = await getCurrentUser()
