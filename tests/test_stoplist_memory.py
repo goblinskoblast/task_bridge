@@ -39,19 +39,31 @@ class StoplistMemoryTest(unittest.TestCase):
                 "stayed": ["Маргарита"],
             },
             has_history=True,
+            is_saved_point=True,
         )
         self.assertIn("🆕 Добавились", text)
         self.assertIn("✅ Ушли из стоп-листа", text)
         self.assertIn("🔁 Остались с прошлой проверки", text)
 
-    def test_render_stoplist_report_without_history(self):
+    def test_render_stoplist_report_without_history_for_saved_point(self):
         text = point_statistics_service._render_stoplist_report(
             "Сухой Лог, Белинского 40",
             ["Маргарита"],
             {"added": ["Маргарита"], "removed": [], "stayed": []},
             has_history=False,
+            is_saved_point=True,
         )
         self.assertIn("🕓 Динамика появится после следующей проверки", text)
+
+    def test_render_stoplist_report_without_saved_point(self):
+        text = point_statistics_service._render_stoplist_report(
+            "Сухой Лог, Белинского 40",
+            ["Маргарита"],
+            {"added": ["Маргарита"], "removed": [], "stayed": []},
+            has_history=False,
+            is_saved_point=False,
+        )
+        self.assertIn("ℹ️ Чтобы видеть динамику изменений, сохраните эту точку", text)
 
 
 if __name__ == "__main__":

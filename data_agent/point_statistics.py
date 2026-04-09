@@ -164,6 +164,14 @@ class PointStatisticsService:
         try:
             point = self._find_saved_point_by_name(db, user_id, point_name)
             if not point:
+                enriched["delta"] = {"added": current_items, "removed": [], "stayed": []}
+                enriched["report_text"] = self._render_stoplist_report(
+                    point_name=point_name,
+                    current_items=current_items,
+                    delta=enriched["delta"],
+                    has_history=False,
+                    is_saved_point=False,
+                )
                 return enriched
 
             previous_snapshot = self._get_latest_snapshot(db, point.id)
@@ -172,10 +180,11 @@ class PointStatisticsService:
 
             enriched["delta"] = delta
             enriched["report_text"] = self._render_stoplist_report(
-                point.display_name,
-                current_items,
-                delta,
+                point_name=point.display_name,
+                current_items=current_items,
+                delta=delta,
                 has_history=previous_snapshot is not None,
+                is_saved_point=True,
             )
 
             self._store_stoplist_snapshot(db, point, current_items)
@@ -187,6 +196,13 @@ class PointStatisticsService:
                 point_name,
                 exc,
                 exc_info=True,
+            )
+            enriched["report_text"] = self._render_stoplist_report(
+                point_name=point_name,
+                current_items=current_items,
+                delta={"added": current_items, "removed": [], "stayed": []},
+                has_history=False,
+                is_saved_point=False,
             )
             return enriched
         finally:
@@ -315,10 +331,9 @@ class PointStatisticsService:
 
     def _compute_stoplist_delta(self, previous_items: list[str], current_items: list[str]) -> dict[str, list[str]]:
         previous_set = set(previous_items)
-        current_set = set(current_items)
         return {
             "added": [item for item in current_items if item not in previous_set],
-            "removed": [item for item in previous_items if item not in current_set],
+            "removed": [item for item in previous_items if item not in set(current_items)],
             "stayed": [item for item in current_items if item in previous_set],
         }
 
@@ -329,8 +344,10 @@ class PointStatisticsService:
         delta: dict[str, list[str]],
         *,
         has_history: bool,
+        is_saved_point: bool,
     ) -> str:
         lines = [f"📍 Точка: {point_name}"]
+
         if current_items:
             lines.append(f"🚫 Сейчас в стоп-листе: {len(current_items)}")
             lines.extend(f"• {item}" for item in current_items[:25])
@@ -339,41 +356,41 @@ class PointStatisticsService:
         else:
             lines.append("✅ Сейчас в стоп-листе недоступных позиций нет.")
 
-        if not has_history:
-            lines.extend(
-                [
-                    "",
-                    "🕓 Динамика появится после следующей проверки этой точки.",
-                ]
-            )
+        lines.append("")
+        if not is_saved_point:
+            lines.append("ℹ️ Чтобы видеть динамику изменений, сохраните эту точку в боте.")
             return "\n".join(lines)
 
-        lines.append("")
+        if not has_history:
+            lines.append("🕓 Динамика появится после следующей проверки этой точки.")
+            return "\n".join(lines)
+
         if delta["added"]:
             lines.append(f"🆕 Добавились: {len(delta['added'])}")
             lines.extend(f"• {item}" for item in delta["added"][:20])
             if len(delta["added"]) > 20:
                 lines.append(f"… и ещё {len(delta['added']) - 20}")
+            lines.append("")
 
         if delta["removed"]:
-            if lines[-1] != "":
-                lines.append("")
             lines.append(f"✅ Ушли из стоп-листа: {len(delta['removed'])}")
             lines.extend(f"• {item}" for item in delta["removed"][:20])
             if len(delta["removed"]) > 20:
                 lines.append(f"… и ещё {len(delta['removed']) - 20}")
+            lines.append("")
 
         if delta["stayed"]:
-            if lines[-1] != "":
-                lines.append("")
             lines.append(f"🔁 Остались с прошлой проверки: {len(delta['stayed'])}")
             lines.extend(f"• {item}" for item in delta["stayed"][:20])
             if len(delta["stayed"]) > 20:
                 lines.append(f"… и ещё {len(delta['stayed']) - 20}")
+            lines.append("")
 
         if not delta["added"] and not delta["removed"]:
             lines.append("🟰 По сравнению с прошлой проверкой изменений нет.")
 
+        while lines and lines[-1] == "":
+            lines.pop()
         return "\n".join(lines)
 
 
