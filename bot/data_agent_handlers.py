@@ -6,7 +6,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, User as TelegramUser
 
 from bot.data_agent_client import DataAgentClientError, data_agent_client
 from bot.report_delivery import (
@@ -214,6 +214,14 @@ def _get_requester_name(message: Message) -> str:
     return message.from_user.first_name or "Пользователь"
 
 
+def _get_requester_name_from_actor(actor_user: TelegramUser | None, fallback_message: Message) -> str:
+    if actor_user:
+        if actor_user.username:
+            return f"@{actor_user.username}"
+        return actor_user.first_name or "Пользователь"
+    return _get_requester_name(fallback_message)
+
+
 def _is_developer_telegram_id(telegram_user_id: int | None) -> bool:
     return bool(DEVELOPER_TELEGRAM_ID and telegram_user_id == DEVELOPER_TELEGRAM_ID)
 
@@ -227,10 +235,18 @@ def _build_user_safe_agent_answer(result: dict) -> str:
     return answer or "Не удалось получить ответ от агента."
 
 
-async def _deliver_report_to_selected_chat(message: Message, user_message: str, answer: str) -> str | None:
+async def _deliver_report_to_selected_chat(
+    message: Message,
+    user_message: str,
+    answer: str,
+    *,
+    telegram_user_id: int | None = None,
+    requester_name: str | None = None,
+) -> str | None:
     db = get_db_session()
     try:
-        user = db.query(User).filter(User.telegram_id == message.from_user.id).first()
+        effective_telegram_user_id = telegram_user_id or message.from_user.id
+        user = db.query(User).filter(User.telegram_id == effective_telegram_user_id).first()
         if not user:
             return None
 
@@ -250,7 +266,7 @@ async def _deliver_report_to_selected_chat(message: Message, user_message: str, 
             return None
 
         delivery_text = build_report_delivery_message(
-            requester_name=_get_requester_name(message),
+            requester_name=requester_name or _get_requester_name(message),
             user_message=user_message,
             answer=answer,
         )
@@ -387,13 +403,14 @@ async def _user_has_connected_italian_pizza_system(telegram_user_id: int) -> boo
         db.close()
 
 
-async def _call_agent(message: Message, text: str) -> dict:
+async def _call_agent(message: Message, text: str, *, actor_user: TelegramUser | None = None) -> dict:
+    effective_user = actor_user or message.from_user
     return await data_agent_client.chat(
         {
-            "user_id": message.from_user.id,
+            "user_id": effective_user.id,
             "message": text,
-            "username": message.from_user.username,
-            "first_name": message.from_user.first_name,
+            "username": effective_user.username,
+            "first_name": effective_user.first_name,
         }
     )
 
@@ -469,11 +486,18 @@ async def _send_quick_report_request(message: Message, command_text: str | None,
     await _dispatch_agent_request(message, payload)
 
 
-async def _prompt_quick_report_action(message: Message, state: FSMContext, action_key: str) -> None:
-    has_system = await _user_has_connected_italian_pizza_system(message.from_user.id)
+async def _prompt_quick_report_action(
+    message: Message,
+    state: FSMContext,
+    action_key: str,
+    *,
+    telegram_user_id: int | None = None,
+) -> None:
+    effective_user_id = telegram_user_id or message.from_user.id
+    has_system = await _user_has_connected_italian_pizza_system(effective_user_id)
     db = get_db_session()
     try:
-        saved_points = saved_point_service.list_points(db, message.from_user.id)
+        saved_points = saved_point_service.list_points(db, effective_user_id)
     finally:
         db.close()
 
@@ -511,9 +535,10 @@ async def _prompt_quick_report_action(message: Message, state: FSMContext, actio
     )
 
 
-async def _send_systems_summary(message: Message) -> None:
+async def _send_systems_summary(message: Message, *, telegram_user_id: int | None = None) -> None:
+    effective_user_id = telegram_user_id or message.from_user.id
     try:
-        systems = await data_agent_client.list_systems(message.from_user.id)
+        systems = await data_agent_client.list_systems(effective_user_id)
     except Exception as exc:
         logger.error("Agent systems error: %s", exc, exc_info=True)
         await message.answer("Не удалось получить список подключённых систем.")
@@ -533,9 +558,10 @@ async def _send_systems_summary(message: Message) -> None:
     await message.answer("\n".join(lines), reply_markup=AGENT_ENTRY_KEYBOARD, parse_mode="HTML")
 
 
-async def _send_monitors_summary(message: Message) -> None:
+async def _send_monitors_summary(message: Message, *, telegram_user_id: int | None = None) -> None:
+    effective_user_id = telegram_user_id or message.from_user.id
     try:
-        monitors = await data_agent_client.list_monitors(message.from_user.id)
+        monitors = await data_agent_client.list_monitors(effective_user_id)
     except Exception as exc:
         logger.error("Agent monitors error: %s", exc, exc_info=True)
         await message.answer("Не удалось получить список мониторингов.")
@@ -560,11 +586,12 @@ async def _send_monitors_summary(message: Message) -> None:
     await message.answer("\n".join(lines), reply_markup=AGENT_ENTRY_KEYBOARD, parse_mode="HTML")
 
 
-async def _send_points_summary(message: Message) -> None:
-    has_system = await _user_has_connected_italian_pizza_system(message.from_user.id)
+async def _send_points_summary(message: Message, *, telegram_user_id: int | None = None) -> None:
+    effective_user_id = telegram_user_id or message.from_user.id
+    has_system = await _user_has_connected_italian_pizza_system(effective_user_id)
     db = get_db_session()
     try:
-        points = saved_point_service.list_points(db, message.from_user.id)
+        points = saved_point_service.list_points(db, effective_user_id)
         if not points and not has_system:
             await message.answer(
                 "📍 <b>Точки пока недоступны</b>\n\n"
@@ -625,16 +652,27 @@ async def _send_all_points_details(message: Message, telegram_user_id: int) -> N
         db.close()
 
 
-async def _send_saved_points_report(message: Message, action_key: str, points: list[SavedPoint]) -> None:
+async def _send_saved_points_report(
+    message: Message,
+    action_key: str,
+    points: list[SavedPoint],
+    *,
+    actor_user: TelegramUser | None = None,
+) -> None:
     waiting = await message.answer(
         f"⏳ Собираю отчёт «{QUICK_REPORT_ACTIONS[action_key]['title']}» по {len(points)} "
         f"{'точке' if len(points) == 1 else 'точкам'}..."
     )
     sections: list[str] = []
     delivered_to_chat: str | None = None
+    requester_name = _get_requester_name_from_actor(actor_user, message)
     for point in points:
         try:
-            result = await _call_agent(message, _build_quick_report_request(action_key, point.display_name))
+            result = await _call_agent(
+                message,
+                _build_quick_report_request(action_key, point.display_name),
+                actor_user=actor_user,
+            )
             answer = _build_user_safe_agent_answer(result)
         except DataAgentClientError as exc:
             answer = exc.user_message
@@ -647,6 +685,8 @@ async def _send_saved_points_report(message: Message, action_key: str, points: l
                 message,
                 _build_quick_report_request(action_key, point.display_name),
                 answer,
+                telegram_user_id=actor_user.id if actor_user else message.from_user.id,
+                requester_name=requester_name,
             )
             if current_chat and delivered_to_chat is None:
                 delivered_to_chat = current_chat
@@ -696,16 +736,17 @@ async def _send_agent_request(message: Message, text: str) -> None:
     await message.answer(answer)
 
 
-async def _open_agent_entry(message: Message, state: FSMContext) -> None:
+async def _open_agent_entry(message: Message, state: FSMContext, *, actor_user: TelegramUser | None = None) -> None:
+    effective_user = actor_user or message.from_user
     db = get_db_session()
     try:
         user = _get_or_create_user(
             db=db,
-            telegram_id=message.from_user.id,
-            username=message.from_user.username,
-            first_name=message.from_user.first_name,
-            last_name=message.from_user.last_name,
-            is_bot=message.from_user.is_bot,
+            telegram_id=effective_user.id,
+            username=effective_user.username,
+            first_name=effective_user.first_name,
+            last_name=effective_user.last_name,
+            is_bot=effective_user.is_bot,
         )
         _get_or_create_profile(db, user.id)
         await state.clear()
@@ -749,7 +790,7 @@ async def open_points_from_button(message: Message) -> None:
 async def callback_agent_open(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if callback.message:
-        await _open_agent_entry(callback.message, state)
+        await _open_agent_entry(callback.message, state, actor_user=callback.from_user)
 
 
 @router.callback_query(F.data == "agent_connect_system")
@@ -769,14 +810,14 @@ async def callback_agent_connect_system(callback: CallbackQuery, state: FSMConte
 async def callback_agent_show_systems(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
-        await _send_systems_summary(callback.message)
+        await _send_systems_summary(callback.message, telegram_user_id=callback.from_user.id)
 
 
 @router.callback_query(F.data == "agent_show_monitors")
 async def callback_agent_show_monitors(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
-        await _send_monitors_summary(callback.message)
+        await _send_monitors_summary(callback.message, telegram_user_id=callback.from_user.id)
 
 
 @router.callback_query(F.data == "agent_show_points")
@@ -784,7 +825,7 @@ async def callback_agent_show_points(callback: CallbackQuery, state: FSMContext)
     await callback.answer()
     await state.clear()
     if callback.message:
-        await _send_points_summary(callback.message)
+        await _send_points_summary(callback.message, telegram_user_id=callback.from_user.id)
 
 
 @router.callback_query(F.data == "agent_point_add")
@@ -828,7 +869,7 @@ async def callback_agent_point(callback: CallbackQuery, state: FSMContext) -> No
             if not points:
                 await callback.message.answer("Сначала добавьте хотя бы одну точку.")
                 return
-            await _send_saved_points_report(callback.message, action_key, points)
+            await _send_saved_points_report(callback.message, action_key, points, actor_user=callback.from_user)
             return
 
         await _send_all_points_details(callback.message, callback.from_user.id)
@@ -845,7 +886,7 @@ async def callback_agent_point(callback: CallbackQuery, state: FSMContext) -> No
         finally:
             db.close()
         await callback.message.answer(f"🗑 Точка отключена: {point.display_name}")
-        await _send_points_summary(callback.message)
+        await _send_points_summary(callback.message, telegram_user_id=callback.from_user.id)
         return
 
     if not payload.isdigit():
@@ -865,7 +906,7 @@ async def callback_agent_point(callback: CallbackQuery, state: FSMContext) -> No
         if not point or not point.is_active:
             await callback.message.answer("Точка не найдена.")
             return
-        await _send_saved_points_report(callback.message, action_key, [point])
+        await _send_saved_points_report(callback.message, action_key, [point], actor_user=callback.from_user)
         return
 
     await _send_point_details(callback.message, callback.from_user.id, point_id)
@@ -897,7 +938,7 @@ async def callback_agent_point_report(callback: CallbackQuery) -> None:
         await callback.message.answer("Точки не найдены.")
         return
 
-    await _send_saved_points_report(callback.message, action_key, points)
+    await _send_saved_points_report(callback.message, action_key, points, actor_user=callback.from_user)
 
 
 @router.callback_query(F.data.startswith(POINT_DELIVERY_CALLBACK_PREFIX))
@@ -939,42 +980,42 @@ async def callback_agent_quick_cancel(callback: CallbackQuery, state: FSMContext
     await callback.answer("Отменено")
     await state.clear()
     if callback.message:
-        await _open_agent_entry(callback.message, state)
+        await _open_agent_entry(callback.message, state, actor_user=callback.from_user)
 
 
 @router.callback_query(F.data == "agent_quick_reviews_day")
 async def callback_agent_quick_reviews_day(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if callback.message:
-        await _prompt_quick_report_action(callback.message, state, "reviews_day")
+        await _prompt_quick_report_action(callback.message, state, "reviews_day", telegram_user_id=callback.from_user.id)
 
 
 @router.callback_query(F.data == "agent_quick_reviews_week")
 async def callback_agent_quick_reviews_week(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if callback.message:
-        await _prompt_quick_report_action(callback.message, state, "reviews_week")
+        await _prompt_quick_report_action(callback.message, state, "reviews_week", telegram_user_id=callback.from_user.id)
 
 
 @router.callback_query(F.data == "agent_quick_stoplist")
 async def callback_agent_quick_stoplist(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if callback.message:
-        await _prompt_quick_report_action(callback.message, state, "stoplist")
+        await _prompt_quick_report_action(callback.message, state, "stoplist", telegram_user_id=callback.from_user.id)
 
 
 @router.callback_query(F.data == "agent_quick_blanks_current")
 async def callback_agent_quick_blanks_current(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if callback.message:
-        await _prompt_quick_report_action(callback.message, state, "blanks_current")
+        await _prompt_quick_report_action(callback.message, state, "blanks_current", telegram_user_id=callback.from_user.id)
 
 
 @router.callback_query(F.data == "agent_quick_blanks_12h")
 async def callback_agent_quick_blanks_12h(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     if callback.message:
-        await _prompt_quick_report_action(callback.message, state, "blanks_12h")
+        await _prompt_quick_report_action(callback.message, state, "blanks_12h", telegram_user_id=callback.from_user.id)
 
 
 @router.callback_query(F.data == "agent_hint_reviews")
