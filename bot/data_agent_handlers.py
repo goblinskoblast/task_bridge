@@ -360,6 +360,33 @@ def _build_points_summary_text(points: list[SavedPoint]) -> str:
     return "\n".join(lines)
 
 
+def _is_italian_pizza_system(item: dict | None) -> bool:
+    payload = item or {}
+    system_name = str(payload.get("system_name") or "").strip().lower()
+    url = str(payload.get("url") or "").strip().lower()
+    return (
+        system_name == "italian_pizza"
+        or "italianpizza" in url
+        or "tochka.italianpizza" in url
+        or ("tochka" in url and "pizza" in url)
+    )
+
+
+async def _user_has_connected_italian_pizza_system(telegram_user_id: int) -> bool:
+    try:
+        systems = await data_agent_client.list_systems(telegram_user_id)
+        if any(_is_italian_pizza_system(item) for item in systems):
+            return True
+    except Exception as exc:
+        logger.error("Italian Pizza system lookup via data-agent failed: %s", exc, exc_info=True)
+
+    db = get_db_session()
+    try:
+        return saved_point_service.get_system_for_user(db, telegram_user_id) is not None
+    finally:
+        db.close()
+
+
 async def _call_agent(message: Message, text: str) -> dict:
     return await data_agent_client.chat(
         {
@@ -443,14 +470,14 @@ async def _send_quick_report_request(message: Message, command_text: str | None,
 
 
 async def _prompt_quick_report_action(message: Message, state: FSMContext, action_key: str) -> None:
+    has_system = await _user_has_connected_italian_pizza_system(message.from_user.id)
     db = get_db_session()
     try:
-        system = saved_point_service.get_system_for_user(db, message.from_user.id)
         saved_points = saved_point_service.list_points(db, message.from_user.id)
     finally:
         db.close()
 
-    if action_key in {"blanks_current", "blanks_12h"} and not system:
+    if action_key in {"blanks_current", "blanks_12h"} and not has_system:
         await state.clear()
         await message.answer(
             "Для бланков сначала нужно подключить систему Italian Pizza.\n\n"
@@ -534,11 +561,11 @@ async def _send_monitors_summary(message: Message) -> None:
 
 
 async def _send_points_summary(message: Message) -> None:
+    has_system = await _user_has_connected_italian_pizza_system(message.from_user.id)
     db = get_db_session()
     try:
-        system = saved_point_service.get_system_for_user(db, message.from_user.id)
         points = saved_point_service.list_points(db, message.from_user.id)
-        if not points and not system:
+        if not points and not has_system:
             await message.answer(
                 "📍 <b>Точки пока недоступны</b>\n\n"
                 "Сначала подключите систему Italian Pizza, а затем добавьте точки к этой системе.",
@@ -763,12 +790,8 @@ async def callback_agent_show_points(callback: CallbackQuery, state: FSMContext)
 @router.callback_query(F.data == "agent_point_add")
 async def callback_agent_point_add(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    db = get_db_session()
-    try:
-        system = saved_point_service.get_system_for_user(db, callback.from_user.id)
-    finally:
-        db.close()
-    if not system:
+    has_system = await _user_has_connected_italian_pizza_system(callback.from_user.id)
+    if not has_system:
         if callback.message:
             await callback.message.answer(
                 "Сначала подключите систему Italian Pizza. После этого можно будет добавлять точки."
@@ -1063,12 +1086,8 @@ async def cmd_points(message: Message, state: FSMContext) -> None:
 
 @router.message(Command("addpoint"))
 async def cmd_addpoint(message: Message, state: FSMContext) -> None:
-    db = get_db_session()
-    try:
-        system = saved_point_service.get_system_for_user(db, message.from_user.id)
-    finally:
-        db.close()
-    if not system:
+    has_system = await _user_has_connected_italian_pizza_system(message.from_user.id)
+    if not has_system:
         await message.answer(
             "Сначала подключите систему Italian Pizza. После этого можно будет добавлять точки."
         )

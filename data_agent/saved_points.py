@@ -52,7 +52,7 @@ class SavedPointService:
         if not user:
             return None
 
-        query = (
+        base_query = (
             db.query(DataAgentSystem)
             .filter(
                 DataAgentSystem.user_id == user.id,
@@ -61,11 +61,14 @@ class SavedPointService:
             .order_by(DataAgentSystem.last_connected_at.desc().nullslast(), DataAgentSystem.created_at.desc())
         )
         if provider == "italian_pizza":
-            query = query.filter(
+            matched = base_query.filter(
                 (DataAgentSystem.system_name == "italian_pizza")
                 | (DataAgentSystem.url.contains("italianpizza"))
-            )
-        return query.first()
+                | (DataAgentSystem.url.contains("tochka"))
+            ).first()
+            if matched:
+                return matched
+        return base_query.first()
 
     def get_point(self, db: Session, telegram_user_id: int, point_id: int) -> SavedPoint | None:
         user = self.get_user_by_telegram_id(db, telegram_user_id)
