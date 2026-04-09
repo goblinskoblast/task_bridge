@@ -71,6 +71,7 @@ class ReviewReportPointFilteringTest(unittest.IsolatedAsyncioTestCase):
         mocked_build_report.assert_awaited_once_with(
             "собери отзывы по Верхний Уфалей, Ленина 147 за неделю",
             point_name="Верхний Уфалей, Ленина 147",
+            user_id=17,
         )
         mocked_browser.assert_not_awaited()
 
@@ -137,7 +138,7 @@ class ReviewReportPointFilteringTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(execution.tool_results["review_tool"]["status"], "needs_point")
         self.assertIn("укажите конкретную точку", execution.tool_results["review_tool"]["message"])
-        mocked_build_report.assert_awaited_once_with("собери отзывы за сегодня", point_name=None)
+        mocked_build_report.assert_awaited_once_with("собери отзывы за сегодня", point_name=None, user_id=17)
         mocked_browser.assert_not_awaited()
 
 

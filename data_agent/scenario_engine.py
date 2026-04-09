@@ -48,15 +48,12 @@ class ReviewsReportScenario(BaseScenario):
         if point_name and _should_use_public_reviews_browser(user_message):
             tool_result = await _run_public_reviews_browser(user_message, targets=[point_name])
         else:
-            tool_result = await review_report_service.build_report(user_message, point_name=point_name)
-            if tool_result.get("status") == "not_configured":
-                if point_name:
-                    tool_result = await _run_public_reviews_browser(user_message, targets=[point_name])
-                else:
-                    tool_result = {
-                        "status": "needs_point",
-                        "message": "Чтобы собрать отзывы без подключённой таблицы, укажите конкретную точку.",
-                    }
+            tool_result = await review_report_service.build_report(user_message, point_name=point_name, user_id=user_id)
+            if tool_result.get("status") == "not_configured" and not point_name:
+                tool_result = {
+                    "status": "needs_point",
+                    "message": "Чтобы собрать отзывы, укажите конкретную точку.",
+                }
         return ScenarioExecution(selected_tools=list(self.selected_tools), tool_results={"review_tool": tool_result})
 
 

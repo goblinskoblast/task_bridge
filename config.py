@@ -55,6 +55,14 @@ DATA_AGENT_CHAT_TIMEOUT = int(os.getenv("DATA_AGENT_CHAT_TIMEOUT", str(max(DATA_
 INTERNAL_API_URL = os.getenv("INTERNAL_API_URL", "http://localhost:8000/api/internal/data-agent").strip().rstrip("/")
 INTERNAL_API_TOKEN = derive_internal_api_token(os.getenv("INTERNAL_API_TOKEN", ""), BOT_TOKEN)
 REVIEWS_SHEET_URL = os.getenv("REVIEWS_SHEET_URL", "").strip()
+ITALIAN_PIZZA_REVIEWS_SHEET_URLS = [
+    item.strip()
+    for item in os.getenv(
+        "ITALIAN_PIZZA_REVIEWS_SHEET_URLS",
+        "https://docs.google.com/spreadsheets/d/1ChJToABy-C2FvWsqRzyYMTODXgj7W7psOBE2hAxijjw/edit?gid=990885803#gid=990885803",
+    ).split(",")
+    if item.strip()
+]
 
 # Google OAuth (Gmail one-click connect)
 GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()

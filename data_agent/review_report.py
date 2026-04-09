@@ -14,6 +14,7 @@ from dateutil import parser as date_parser
 
 from config import REVIEWS_SHEET_URL
 from .italian_pizza import resolve_italian_pizza_point
+from .review_analytics import review_analytics_coordinator
 
 
 KEYWORD_CATEGORIES = {
@@ -34,7 +35,21 @@ class ReviewWindow:
 
 
 class ReviewReportService:
-    async def build_report(self, user_message: str, point_name: str | None = None) -> dict[str, Any]:
+    def supports_analytics_request(self, user_message: str) -> bool:
+        return review_analytics_coordinator.supports_request(user_message)
+
+    async def build_report(self, user_message: str, point_name: str | None = None, user_id: int | None = None) -> dict[str, Any]:
+        if self.supports_analytics_request(user_message):
+            if not point_name:
+                return {
+                    "status": "needs_point",
+                    "source": "reviews_multi_source",
+                    "message": "Для недельного или месячного отчёта по отзывам укажите конкретную точку.",
+                }
+            return await review_analytics_coordinator.build_report(user_message=user_message, point_name=point_name, user_id=user_id)
+        return await self._build_legacy_report(user_message, point_name=point_name)
+
+    async def _build_legacy_report(self, user_message: str, point_name: str | None = None) -> dict[str, Any]:
         if not REVIEWS_SHEET_URL:
             return {
                 "status": "not_configured",
@@ -53,7 +68,7 @@ class ReviewReportService:
 
     async def build_report_for_window_label(self, window_label: str) -> dict[str, Any]:
         synthetic_request = f"отзывы {window_label}".strip()
-        return await self.build_report(synthetic_request)
+        return await self._build_legacy_report(synthetic_request)
 
     def _normalize_google_sheet_url(self, source_url: str) -> str:
         if "/export?" in source_url and "format=csv" in source_url:
