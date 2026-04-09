@@ -13,6 +13,7 @@ from .browser_agent import browser_agent
 from .italian_pizza import ITALIAN_PIZZA_PORTAL_URL
 from .models import ConnectedSystem
 from .orchestrator import orchestrator
+from .point_statistics import point_statistics_service
 from .review_report import review_report_service
 from .stoplist_tool import stoplist_tool
 
@@ -69,6 +70,7 @@ class StoplistReportScenario(BaseScenario):
         if not point_name:
             return ScenarioExecution(selected_tools=list(self.selected_tools), tool_results={"stoplist_tool": {"status": "needs_point", "message": "Не удалось определить точку. Укажите город и адрес пиццерии."}})
         tool_result = await stoplist_tool.collect_for_point(url="", username="", encrypted_password="", point_name=point_name)
+        tool_result = point_statistics_service.enrich_stoplist_report(user_id, point_name, tool_result)
         return ScenarioExecution(selected_tools=list(self.selected_tools), tool_results={"stoplist_tool": tool_result})
 
 

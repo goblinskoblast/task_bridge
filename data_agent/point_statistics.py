@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -150,6 +151,47 @@ class PointStatisticsService:
         )
         return snapshot
 
+    def enrich_stoplist_report(self, user_id: int, point_name: str, result: dict) -> dict:
+        status = str(result.get("status") or "").lower()
+        if status not in {"ok", "completed"}:
+            return result
+
+        current_items = self._extract_stoplist_items(result)
+        enriched = dict(result)
+        enriched["items"] = current_items
+
+        db = get_db_session()
+        try:
+            point = self._find_saved_point_by_name(db, user_id, point_name)
+            if not point:
+                return enriched
+
+            previous_snapshot = self._get_latest_snapshot(db, point.id)
+            previous_items = self._normalize_items(previous_snapshot.stoplist_items_json if previous_snapshot else [])
+            delta = self._compute_stoplist_delta(previous_items, current_items)
+
+            enriched["delta"] = delta
+            enriched["report_text"] = self._render_stoplist_report(
+                point.display_name,
+                current_items,
+                delta,
+                has_history=previous_snapshot is not None,
+            )
+
+            self._store_stoplist_snapshot(db, point, current_items)
+            return enriched
+        except Exception as exc:
+            logger.error(
+                "Stoplist history enrich failed user_id=%s point=%s error=%s",
+                user_id,
+                point_name,
+                exc,
+                exc_info=True,
+            )
+            return enriched
+        finally:
+            db.close()
+
     def _find_italian_pizza_system(self, db: Session, user_id: int) -> DataAgentSystem | None:
         return (
             db.query(DataAgentSystem)
@@ -178,6 +220,12 @@ class PointStatisticsService:
         return self._find_italian_pizza_system(db, point.user_id)
 
     def _extract_stoplist_items(self, result: dict) -> list[str]:
+        explicit_items = result.get("items")
+        if isinstance(explicit_items, list):
+            normalized = self._normalize_items(explicit_items)
+            if normalized:
+                return normalized
+
         report_text = str(result.get("report_text") or "")
         items: list[str] = []
         for line in report_text.splitlines():
@@ -199,6 +247,134 @@ class PointStatisticsService:
                     if normalized and normalized not in values:
                         values.append(normalized)
         return values[:30]
+
+    def _find_saved_point_by_name(self, db: Session, user_id: int, point_name: str) -> SavedPoint | None:
+        normalized_target = self._normalize_point_name(point_name)
+        if not normalized_target:
+            return None
+        points = (
+            db.query(SavedPoint)
+            .filter(
+                SavedPoint.user_id == user_id,
+                SavedPoint.is_active.is_(True),
+                SavedPoint.provider == "italian_pizza",
+            )
+            .all()
+        )
+        for point in points:
+            if self._normalize_point_name(point.display_name) == normalized_target:
+                return point
+        return None
+
+    def _get_latest_snapshot(self, db: Session, saved_point_id: int) -> PointStatSnapshot | None:
+        return (
+            db.query(PointStatSnapshot)
+            .filter(PointStatSnapshot.saved_point_id == saved_point_id)
+            .order_by(PointStatSnapshot.snapshot_at.desc(), PointStatSnapshot.id.desc())
+            .first()
+        )
+
+    def _store_stoplist_snapshot(self, db: Session, point: SavedPoint, current_items: list[str]) -> None:
+        now = datetime.utcnow()
+        run = PointStatRun(
+            user_id=point.user_id,
+            status="completed",
+            run_started_at=now,
+            run_finished_at=now,
+        )
+        db.add(run)
+        db.flush()
+
+        snapshot = PointStatSnapshot(
+            run_id=run.id,
+            saved_point_id=point.id,
+            snapshot_at=now,
+            stoplist_count=len(current_items),
+            stoplist_items_json=current_items,
+            blanks_total_count=0,
+            blanks_red_count=0,
+            blanks_overload_items_json=[],
+            source_ok=True,
+            source_error=None,
+        )
+        db.add(snapshot)
+        point.last_stats_collected_at = now
+        db.commit()
+
+    def _normalize_point_name(self, value: str) -> str:
+        normalized = (value or "").lower().replace("ё", "е")
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _normalize_items(self, items: list[str] | tuple[str, ...] | None) -> list[str]:
+        normalized: list[str] = []
+        for item in items or []:
+            cleaned = re.sub(r"\s+", " ", str(item or "").strip())
+            if cleaned and cleaned not in normalized:
+                normalized.append(cleaned)
+        return normalized
+
+    def _compute_stoplist_delta(self, previous_items: list[str], current_items: list[str]) -> dict[str, list[str]]:
+        previous_set = set(previous_items)
+        current_set = set(current_items)
+        return {
+            "added": [item for item in current_items if item not in previous_set],
+            "removed": [item for item in previous_items if item not in current_set],
+            "stayed": [item for item in current_items if item in previous_set],
+        }
+
+    def _render_stoplist_report(
+        self,
+        point_name: str,
+        current_items: list[str],
+        delta: dict[str, list[str]],
+        *,
+        has_history: bool,
+    ) -> str:
+        lines = [f"📍 Точка: {point_name}"]
+        if current_items:
+            lines.append(f"🚫 Сейчас в стоп-листе: {len(current_items)}")
+            lines.extend(f"• {item}" for item in current_items[:25])
+            if len(current_items) > 25:
+                lines.append(f"… и ещё {len(current_items) - 25}")
+        else:
+            lines.append("✅ Сейчас в стоп-листе недоступных позиций нет.")
+
+        if not has_history:
+            lines.extend(
+                [
+                    "",
+                    "🕓 Динамика появится после следующей проверки этой точки.",
+                ]
+            )
+            return "\n".join(lines)
+
+        lines.append("")
+        if delta["added"]:
+            lines.append(f"🆕 Добавились: {len(delta['added'])}")
+            lines.extend(f"• {item}" for item in delta["added"][:20])
+            if len(delta["added"]) > 20:
+                lines.append(f"… и ещё {len(delta['added']) - 20}")
+
+        if delta["removed"]:
+            if lines[-1] != "":
+                lines.append("")
+            lines.append(f"✅ Ушли из стоп-листа: {len(delta['removed'])}")
+            lines.extend(f"• {item}" for item in delta["removed"][:20])
+            if len(delta["removed"]) > 20:
+                lines.append(f"… и ещё {len(delta['removed']) - 20}")
+
+        if delta["stayed"]:
+            if lines[-1] != "":
+                lines.append("")
+            lines.append(f"🔁 Остались с прошлой проверки: {len(delta['stayed'])}")
+            lines.extend(f"• {item}" for item in delta["stayed"][:20])
+            if len(delta["stayed"]) > 20:
+                lines.append(f"… и ещё {len(delta['stayed']) - 20}")
+
+        if not delta["added"] and not delta["removed"]:
+            lines.append("🟰 По сравнению с прошлой проверкой изменений нет.")
+
+        return "\n".join(lines)
 
 
 point_statistics_service = PointStatisticsService()

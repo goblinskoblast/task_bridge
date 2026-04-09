@@ -55,6 +55,8 @@ class DataAgentService:
                 system_name = "iiko"
             elif "italianpizza" in domain or "tochka.italianpizza" in domain:
                 system_name = "italian_pizza"
+            elif "rocketdata" in domain:
+                system_name = "rocketdata"
             elif "1c" in domain or "1С" in domain:
                 system_name = "1C"
             elif "crm" in domain:

@@ -485,6 +485,7 @@ class ItalianPizzaPublicAdapter:
                     "status": "ok",
                     "point_name": point.display_name,
                     "selected": True,
+                    "items": cleaned,
                     "report_text": report_text,
                     "alert_hash": None,
                     "diagnostics": self._build_diagnostics(
@@ -619,6 +620,7 @@ class ItalianPizzaPublicAdapter:
                     "status": "ok",
                     "point_name": point.display_name,
                     "selected": selected,
+                    "items": cleaned,
                     "report_text": report_text,
                     "alert_hash": None,
                     "diagnostics": self._build_diagnostics(
