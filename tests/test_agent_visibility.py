@@ -7,7 +7,7 @@ os.environ.setdefault("BOT_TOKEN", "test-bot-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 
-from bot.data_agent_handlers import cmd_agentdebug, _send_agent_request
+from bot.data_agent_handlers import _send_agent_request, cmd_agentdebug
 
 
 class _DummyMessage:

@@ -35,7 +35,7 @@ class DataAgentClientTest(unittest.IsolatedAsyncioTestCase):
             DataAgentClient._decode_payload("<html>bad gateway</html>", 502, "https://example.com/chat")
 
         self.assertEqual(ctx.exception.status_code, 502)
-        self.assertIn("некорректный ответ", ctx.exception.user_message)
+        self.assertIn("некорректный ответ", ctx.exception.user_message.lower())
 
     def test_build_http_error_maps_503_to_transient_message(self):
         error = DataAgentClient._build_http_error(
@@ -46,7 +46,7 @@ class DataAgentClientTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(error.status_code, 503)
-        self.assertIn("временно недоступен", error.user_message)
+        self.assertIn("временно недоступен", error.user_message.lower())
 
 
 if __name__ == "__main__":

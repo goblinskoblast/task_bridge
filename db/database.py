@@ -66,6 +66,7 @@ def init_db():
     _ensure_task_columns()
     _ensure_data_agent_profile_columns()
     _ensure_data_agent_session_columns()
+    _ensure_saved_point_columns()
 
 
 def _ensure_task_columns():
@@ -138,6 +139,34 @@ def _ensure_data_agent_session_columns():
     if "last_debug_payload" not in column_names:
         alter_statements.append(
             "ALTER TABLE data_agent_sessions ADD COLUMN last_debug_payload JSON"
+        )
+
+    if not alter_statements:
+        return
+
+    with sync_engine.begin() as connection:
+        for statement in alter_statements:
+            connection.execute(text(statement))
+
+
+def _ensure_saved_point_columns():
+    inspector = inspect(sync_engine)
+    if "saved_points" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("saved_points")}
+    integer_type = "INTEGER"
+    boolean_type = "BOOLEAN" if sync_engine.dialect.name == "postgresql" else "INTEGER"
+    alter_statements = []
+
+    if "system_id" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE saved_points ADD COLUMN system_id {integer_type}"
+        )
+    if "report_delivery_enabled" not in column_names:
+        default_literal = "FALSE" if sync_engine.dialect.name == "postgresql" else "0"
+        alter_statements.append(
+            f"ALTER TABLE saved_points ADD COLUMN report_delivery_enabled {boolean_type} DEFAULT {default_literal}"
         )
 
     if not alter_statements:

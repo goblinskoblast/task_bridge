@@ -405,6 +405,7 @@ class DataAgentSystem(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="data_agent_systems")
+    saved_points = relationship("SavedPoint", back_populates="system")
 
     def __repr__(self):
         return f"<DataAgentSystem(id={self.id}, user_id={self.user_id}, system_name={self.system_name})>"
@@ -431,7 +432,7 @@ class DataAgentRequestLog(Base):
 
 
 class DataAgentProfile(Base):
-    """Basic onboarding profile for the agent."""
+    """User preferences for the agent."""
     __tablename__ = "data_agent_profiles"
 
     id = Column(Integer, primary_key=True)
@@ -448,7 +449,7 @@ class DataAgentProfile(Base):
     user = relationship("User", backref="data_agent_profile", uselist=False)
 
     def __repr__(self):
-        return f"<DataAgentProfile(id={self.id}, user_id={self.user_id}, onboarding_completed={self.onboarding_completed})>"
+        return f"<DataAgentProfile(id={self.id}, user_id={self.user_id})>"
 
 
 class DataAgentMonitorConfig(Base):
@@ -531,18 +532,21 @@ class SavedPoint(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False, index=True)
+    system_id = Column(Integer, ForeignKey("data_agent_systems.id", ondelete='SET NULL'), nullable=True, index=True)
     provider = Column(String(100), nullable=False, default="italian_pizza", index=True)
     city = Column(String(255), nullable=False)
     address = Column(String(500), nullable=False)
     display_name = Column(String(500), nullable=False)
     external_point_key = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True, index=True)
+    report_delivery_enabled = Column(Boolean, default=False)
     stats_interval_minutes = Column(Integer, nullable=False, default=240)
     last_stats_collected_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="saved_points")
+    system = relationship("DataAgentSystem", back_populates="saved_points")
     stat_snapshots = relationship("PointStatSnapshot", back_populates="saved_point", cascade="all, delete-orphan")
 
     def __repr__(self):

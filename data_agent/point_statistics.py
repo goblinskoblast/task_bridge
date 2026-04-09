@@ -47,6 +47,7 @@ class PointStatisticsService:
             .order_by(SavedPoint.user_id.asc(), SavedPoint.id.asc())
             .all()
         )
+
         due: list[SavedPoint] = []
         for point in active_points:
             interval = max(int(point.stats_interval_minutes or 240), 1)
@@ -58,7 +59,7 @@ class PointStatisticsService:
         return due
 
     async def _collect_for_user(self, db: Session, user_id: int, points: list[SavedPoint]) -> int:
-        run = PointStatRun(user_id=user_id, status='running', run_started_at=datetime.utcnow())
+        run = PointStatRun(user_id=user_id, status="running", run_started_at=datetime.utcnow())
         db.add(run)
         db.commit()
         db.refresh(run)
@@ -66,57 +67,62 @@ class PointStatisticsService:
         snapshots_created = 0
         had_errors = False
         try:
-            system = self._find_italian_pizza_system(db, user_id)
             for point in points:
-                snapshot = await self._collect_point_snapshot(db, run, point, system)
+                snapshot = await self._collect_point_snapshot(db, run, point)
                 if snapshot.source_error:
                     had_errors = True
                 snapshots_created += 1
-            run.status = 'completed_with_errors' if had_errors else 'completed'
+
+            run.status = "completed_with_errors" if had_errors else "completed"
             run.run_finished_at = datetime.utcnow()
             db.commit()
             return snapshots_created
         except Exception as exc:
             db.rollback()
-            logger.error('Point statistics run failed user_id=%s error=%s', user_id, exc, exc_info=True)
-            run.status = 'failed'
+            logger.error("Point statistics run failed user_id=%s error=%s", user_id, exc, exc_info=True)
+            run.status = "failed"
             run.error_text = str(exc)
             run.run_finished_at = datetime.utcnow()
             db.add(run)
             db.commit()
             return snapshots_created
 
-    async def _collect_point_snapshot(self, db: Session, run: PointStatRun, point: SavedPoint, system: DataAgentSystem | None) -> PointStatSnapshot:
+    async def _collect_point_snapshot(self, db: Session, run: PointStatRun, point: SavedPoint) -> PointStatSnapshot:
         stoplist_result = await stoplist_tool.collect_for_point(
-            url='',
-            username='',
-            encrypted_password='',
+            url="",
+            username="",
+            encrypted_password="",
             point_name=point.display_name,
         )
         stoplist_items = self._extract_stoplist_items(stoplist_result)
         source_errors: list[str] = []
-        if (stoplist_result.get('status') or '').lower() not in {'ok', 'completed'}:
-            source_errors.append(str(stoplist_result.get('message') or stoplist_result.get('report_text') or 'stoplist_failed'))
+        if (stoplist_result.get("status") or "").lower() not in {"ok", "completed"}:
+            source_errors.append(
+                str(stoplist_result.get("message") or stoplist_result.get("report_text") or "stoplist_failed")
+            )
 
         blanks_total_count = 0
         blanks_red_count = 0
         blanks_items: list[str] = []
+        system = self._resolve_system_for_point(db, point)
         if system:
             blanks_result = await blanks_tool.inspect_point(
                 url=system.url,
                 username=system.login,
                 encrypted_password=system.encrypted_password,
                 point_name=point.display_name,
-                period_hint='предыдущие 12 часов',
+                period_hint="предыдущие 12 часов",
             )
-            diagnostics = blanks_result.get('diagnostics') or {}
-            blanks_total_count = int(diagnostics.get('slot_count') or diagnostics.get('table_count') or 0)
-            blanks_red_count = int(diagnostics.get('red_signal_count') or 0)
+            diagnostics = blanks_result.get("diagnostics") or {}
+            blanks_total_count = int(diagnostics.get("slot_count") or diagnostics.get("table_count") or 0)
+            blanks_red_count = int(diagnostics.get("red_signal_count") or 0)
             blanks_items = self._extract_blanks_items(blanks_result)
-            if (blanks_result.get('status') or '').lower() not in {'ok', 'completed'}:
-                source_errors.append(str(blanks_result.get('message') or blanks_result.get('report_text') or 'blanks_failed'))
+            if (blanks_result.get("status") or "").lower() not in {"ok", "completed"}:
+                source_errors.append(
+                    str(blanks_result.get("message") or blanks_result.get("report_text") or "blanks_failed")
+                )
         else:
-            source_errors.append('italian_pizza_system_not_connected')
+            source_errors.append("italian_pizza_system_not_connected")
 
         snapshot = PointStatSnapshot(
             run_id=run.id,
@@ -128,14 +134,14 @@ class PointStatisticsService:
             blanks_red_count=blanks_red_count,
             blanks_overload_items_json=blanks_items,
             source_ok=not source_errors,
-            source_error='; '.join(source_errors) if source_errors else None,
+            source_error="; ".join(source_errors) if source_errors else None,
         )
         db.add(snapshot)
         point.last_stats_collected_at = snapshot.snapshot_at
         db.commit()
         db.refresh(snapshot)
         logger.info(
-            'Point statistics snapshot saved user_id=%s point=%s stoplist=%s blanks_red=%s source_ok=%s',
+            "Point statistics snapshot saved user_id=%s point=%s stoplist=%s blanks_red=%s source_ok=%s",
             run.user_id,
             point.display_name,
             snapshot.stoplist_count,
@@ -150,27 +156,42 @@ class PointStatisticsService:
             .filter(
                 DataAgentSystem.user_id == user_id,
                 DataAgentSystem.is_active.is_(True),
-                (DataAgentSystem.system_name == 'italian_pizza') | (DataAgentSystem.url.contains('italianpizza')),
+                (DataAgentSystem.system_name == "italian_pizza") | (DataAgentSystem.url.contains("italianpizza")),
             )
             .order_by(DataAgentSystem.last_connected_at.desc().nullslast(), DataAgentSystem.created_at.desc())
             .first()
         )
 
+    def _resolve_system_for_point(self, db: Session, point: SavedPoint) -> DataAgentSystem | None:
+        if point.system_id:
+            system = (
+                db.query(DataAgentSystem)
+                .filter(
+                    DataAgentSystem.id == point.system_id,
+                    DataAgentSystem.user_id == point.user_id,
+                    DataAgentSystem.is_active.is_(True),
+                )
+                .first()
+            )
+            if system:
+                return system
+        return self._find_italian_pizza_system(db, point.user_id)
+
     def _extract_stoplist_items(self, result: dict) -> list[str]:
-        report_text = str(result.get('report_text') or '')
+        report_text = str(result.get("report_text") or "")
         items: list[str] = []
         for line in report_text.splitlines():
             stripped = line.strip()
-            if stripped.startswith('- '):
+            if stripped.startswith("- "):
                 item = stripped[2:].strip()
                 if item and item not in items:
                     items.append(item)
         return items
 
     def _extract_blanks_items(self, result: dict) -> list[str]:
-        diagnostics = result.get('diagnostics') or {}
+        diagnostics = result.get("diagnostics") or {}
         values: list[str] = []
-        for key in ('styled_cell_samples', 'table_samples', 'inspected_slots'):
+        for key in ("styled_cell_samples", "table_samples", "inspected_slots"):
             data = diagnostics.get(key) or []
             if isinstance(data, list):
                 for item in data:

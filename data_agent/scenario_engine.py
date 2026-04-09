@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 from urllib.parse import quote
 
 from db.database import get_db_session
-from db.models import DataAgentSystem, User
+from db.models import DataAgentSystem, SavedPoint, User
 
 from .blanks_tool import blanks_tool
 from .browser_agent import browser_agent
@@ -84,9 +84,12 @@ class BlanksReportScenario(BaseScenario):
             return ScenarioExecution(selected_tools=list(self.selected_tools), tool_results={"blanks_tool": {"status": "needs_point", "message": "Не удалось определить точку. Укажите город и адрес пиццерии."}})
         db = get_db_session()
         try:
-            system = _find_italian_pizza_system(db, user_id)
+            system = _find_italian_pizza_system(db, user_id, point_name=point_name)
             if not system:
-                result = {"status": "system_not_connected", "message": "Italian Pizza портал ещё не подключён. Используйте /connect для tochka.italianpizza.ru."}
+                result = {
+                    "status": "system_not_connected",
+                    "message": "Для этой точки не подключена система Italian Pizza. Сначала подключите панель управления, затем добавьте точку.",
+                }
             else:
                 result = await blanks_tool.inspect_point(
                     url=system.url or ITALIAN_PIZZA_PORTAL_URL,
@@ -177,10 +180,41 @@ class DataAgentScenarioEngine:
         return execution
 
 
-def _find_italian_pizza_system(db, user_id: int) -> Optional[DataAgentSystem]:
+def _find_italian_pizza_system(db, user_id: int, *, point_name: str | None = None) -> Optional[DataAgentSystem]:
     user = db.query(User).filter(User.telegram_id == user_id).first()
     if not user:
         return None
+    if point_name:
+        normalized_point_name = " ".join((point_name or "").lower().split())
+        saved_points = (
+            db.query(SavedPoint)
+            .filter(
+                SavedPoint.user_id == user.id,
+                SavedPoint.is_active == True,
+                SavedPoint.provider == "italian_pizza",
+            )
+            .all()
+        )
+        matched_point = next(
+            (
+                point
+                for point in saved_points
+                if " ".join((point.display_name or "").lower().split()) == normalized_point_name
+            ),
+            None,
+        )
+        if matched_point and matched_point.system_id:
+            system = (
+                db.query(DataAgentSystem)
+                .filter(
+                    DataAgentSystem.id == matched_point.system_id,
+                    DataAgentSystem.user_id == user.id,
+                    DataAgentSystem.is_active == True,
+                )
+                .first()
+            )
+            if system:
+                return system
     return (
         db.query(DataAgentSystem)
         .filter(
