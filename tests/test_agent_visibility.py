@@ -34,7 +34,7 @@ class AgentVisibilityTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             message.answers,
-            ["Не удалось получить отчет по стоп-листу. Попробуйте позже."],
+            ["Стоп-лист сейчас не удалось собрать. Причина: Не удалось подтвердить выбор точки."],
         )
 
     async def test_non_developer_cannot_use_agentdebug(self):

@@ -81,6 +81,27 @@ class ReviewAnalyticsCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("📊 Italian Pizza", result["report_text"])
         self.assertIn("⭐ RocketData", result["report_text"])
 
+    async def test_build_report_returns_reasons_when_sources_unavailable(self):
+        with patch.object(
+            review_analytics_coordinator._italian_pizza,
+            "build_report",
+            AsyncMock(return_value={"status": "not_relevant", "source": "italian_pizza_sheet", "message": "Подходящий лист Italian Pizza для этой точки не найден."}),
+        ), patch.object(
+            review_analytics_coordinator._rocketdata,
+            "build_report",
+            AsyncMock(return_value={"status": "failed", "source": "rocketdata", "message": "Не удалось собрать отчёт из RocketData: timeout"}),
+        ):
+            result = await review_analytics_coordinator.build_report(
+                user_message="покажи отзывы по Верхний Уфалей, Ленина 147 за неделю",
+                point_name="Верхний Уфалей, Ленина 147",
+                user_id=17,
+            )
+
+        self.assertEqual(result["status"], "not_configured")
+        self.assertIn("Верхний Уфалей, Ленина 147", result["message"])
+        self.assertIn("Italian Pizza", result["message"])
+        self.assertIn("RocketData", result["message"])
+
 
 class ReviewReportServiceAnalyticsTest(unittest.IsolatedAsyncioTestCase):
     async def test_build_report_requests_point_for_weekly_analytics(self):

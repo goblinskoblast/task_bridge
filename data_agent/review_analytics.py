@@ -419,9 +419,9 @@ class ReviewAnalyticsCoordinator:
 
         failed_results = [item for item in provider_results if item.get("status") == "failed"]
         if failed_results:
-            message = "; ".join(item.get("message", "Источник недоступен.") for item in failed_results)
+            message = self._build_unavailable_message(provider_results, point_name=point_name, period=period)
             return {
-                "status": "failed",
+                "status": "not_configured",
                 "source": "reviews_multi_source",
                 "message": message,
             }
@@ -429,8 +429,31 @@ class ReviewAnalyticsCoordinator:
         return {
             "status": "not_configured",
             "source": "reviews_multi_source",
-            "message": "Для этой точки пока нет доступных источников недельного или месячного отчёта по отзывам.",
+            "message": self._build_unavailable_message(provider_results, point_name=point_name, period=period),
         }
+
+    def _build_unavailable_message(
+        self,
+        provider_results: list[dict[str, Any]],
+        *,
+        point_name: str,
+        period: ReviewAnalyticsPeriod,
+    ) -> str:
+        reasons: list[str] = []
+        for item in provider_results:
+            source = item.get("source")
+            source_label = "RocketData" if source == "rocketdata" else "Italian Pizza"
+            message = (item.get("message") or "").strip()
+            if message:
+                reasons.append(f"{source_label}: {message}")
+
+        if not reasons:
+            reasons.append("Для этой точки ещё не подключён источник weekly/monthly аналитики.")
+
+        return (
+            f"Для точки {point_name} пока не удалось собрать отчёт по отзывам {period.label}.\n"
+            f"Причины: {'; '.join(reasons)}"
+        )
 
 
 review_analytics_coordinator = ReviewAnalyticsCoordinator()

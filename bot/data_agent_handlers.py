@@ -229,9 +229,11 @@ def _is_developer_telegram_id(telegram_user_id: int | None) -> bool:
 def _build_user_safe_agent_answer(result: dict) -> str:
     scenario = (result.get("scenario") or "").strip()
     status = (result.get("status") or "").strip()
-    if status == "failed" and scenario in _REPORT_FAILURE_MESSAGES:
-        return _REPORT_FAILURE_MESSAGES[scenario]
     answer = (result.get("answer") or "").strip()
+    if status == "failed" and scenario in _REPORT_FAILURE_MESSAGES:
+        if answer and not answer.startswith("DataAgent не смог обработать запрос:"):
+            return answer
+        return _REPORT_FAILURE_MESSAGES[scenario]
     return answer or "Не удалось получить ответ от агента."
 
 
