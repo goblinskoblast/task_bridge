@@ -392,7 +392,18 @@ class PointStatisticsService:
 
         if current_items:
             lines.append(f"🚫 Сейчас в стоп-листе: {len(current_items)}")
-            lines.extend(f"• {item}" for item in current_items[:25])
+            if has_history and is_saved_point:
+                added_set = set(delta["added"])
+                stayed_set = set(delta["stayed"])
+                for item in current_items[:25]:
+                    if item in added_set:
+                        lines.append(f"🆕 {item}")
+                    elif item in stayed_set:
+                        lines.append(f"🔁 {item}")
+                    else:
+                        lines.append(f"• {item}")
+            else:
+                lines.extend(f"• {item}" for item in current_items[:25])
             if len(current_items) > 25:
                 lines.append(f"… и ещё {len(current_items) - 25}")
         else:
@@ -407,25 +418,11 @@ class PointStatisticsService:
             lines.append("🕓 Динамика появится после следующей проверки этой точки.")
             return "\n".join(lines)
 
-        if delta["added"]:
-            lines.append(f"🆕 Добавились: {len(delta['added'])}")
-            lines.extend(f"• {item}" for item in delta["added"][:20])
-            if len(delta["added"]) > 20:
-                lines.append(f"… и ещё {len(delta['added']) - 20}")
-            lines.append("")
-
         if delta["removed"]:
             lines.append(f"✅ Ушли из стоп-листа: {len(delta['removed'])}")
             lines.extend(f"• {item}" for item in delta["removed"][:20])
             if len(delta["removed"]) > 20:
                 lines.append(f"… и ещё {len(delta['removed']) - 20}")
-            lines.append("")
-
-        if delta["stayed"]:
-            lines.append(f"🔁 Остались с прошлой проверки: {len(delta['stayed'])}")
-            lines.extend(f"• {item}" for item in delta["stayed"][:20])
-            if len(delta["stayed"]) > 20:
-                lines.append(f"… и ещё {len(delta['stayed']) - 20}")
             lines.append("")
 
         if not delta["added"] and not delta["removed"]:

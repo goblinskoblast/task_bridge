@@ -1,6 +1,7 @@
 ﻿import logging
 
 import asyncio
+import re
 
 from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
@@ -13,12 +14,14 @@ from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from bot.data_agent_client import DataAgentClientError, data_agent_client
 from bot.report_delivery import (
     build_report_delivery_message,
+    is_report_delivery_candidate,
     trim_telegram_text,
 )
 from bot.webapp_links import build_taskbridge_webapp_url
 from config import DEVELOPER_TELEGRAM_ID
 from db.database import get_db_session
 from db.models import Chat, DataAgentProfile, Message as MessageModel, SavedPoint, User
+from data_agent.italian_pizza import resolve_italian_pizza_point
 from data_agent.saved_points import SavedPointError, saved_point_service
 
 logger = logging.getLogger(__name__)
@@ -322,6 +325,51 @@ def _build_user_safe_agent_answer(result: dict) -> str:
     return answer or "Не удалось получить ответ от агента."
 
 
+def _normalize_delivery_text(value: str) -> str:
+    normalized = (value or "").lower().replace("ё", "е")
+    normalized = re.sub(r"[^a-zа-я0-9]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _build_delivery_point_aliases(point: SavedPoint) -> set[str]:
+    aliases = {
+        _normalize_delivery_text(point.display_name),
+        _normalize_delivery_text(f"{point.city} {point.address}"),
+    }
+    if point.external_point_key:
+        aliases.add(_normalize_delivery_text(point.external_point_key))
+    return {alias for alias in aliases if alias}
+
+
+def _find_delivery_points_for_message(db, telegram_user_id: int, user_message: str) -> list[SavedPoint]:
+    enabled_points = [
+        item
+        for item in saved_point_service.list_points(db, telegram_user_id)
+        if item.report_delivery_enabled
+    ]
+    if not enabled_points:
+        return []
+
+    normalized_message = _normalize_delivery_text(user_message)
+    message_aliases = {normalized_message} if normalized_message else set()
+
+    resolved = resolve_italian_pizza_point(user_message or "")
+    if resolved:
+        message_aliases.add(_normalize_delivery_text(f"{resolved.city} {resolved.address}"))
+        if resolved.public_slug:
+            message_aliases.add(_normalize_delivery_text(resolved.public_slug))
+
+    matched: list[SavedPoint] = []
+    for point in enabled_points:
+        aliases = _build_delivery_point_aliases(point)
+        if any(
+            alias and any(alias in candidate or candidate in alias for candidate in message_aliases if candidate)
+            for alias in aliases
+        ):
+            matched.append(point)
+    return matched
+
+
 async def _deliver_report_to_selected_chat(
     message: Message,
     user_message: str,
@@ -357,6 +405,13 @@ async def _deliver_report_to_selected_chat(
             or profile.default_report_chat_title
             or str(target_chat_id)
         )
+        logger.info(
+            "Report delivery attempt telegram_user_id=%s user_id=%s target_chat_id=%s title=%s",
+            effective_telegram_user_id,
+            user.id,
+            target_chat_id,
+            chat_title,
+        )
 
         delivery_text = build_report_delivery_message(
             requester_name=requester_name or _get_requester_name(message),
@@ -366,6 +421,12 @@ async def _deliver_report_to_selected_chat(
         await message.bot.send_message(
             chat_id=target_chat_id,
             text=trim_telegram_text(delivery_text),
+        )
+        logger.info(
+            "Report delivery success telegram_user_id=%s user_id=%s target_chat_id=%s",
+            effective_telegram_user_id,
+            user.id,
+            target_chat_id,
         )
         return chat_title
     except Exception as exc:
@@ -836,6 +897,32 @@ async def _send_agent_request(message: Message, text: str) -> None:
 
     answer = _build_user_safe_agent_answer(result)
     await message.answer(answer, reply_markup=AGENT_HOME_KEYBOARD)
+
+    if is_report_delivery_candidate(result):
+        db = get_db_session()
+        try:
+            delivery_points = _find_delivery_points_for_message(db, message.from_user.id, text)
+        finally:
+            db.close()
+
+        if delivery_points:
+            delivered_to_chat = await _deliver_report_to_selected_chat(
+                message,
+                text,
+                answer,
+                telegram_user_id=message.from_user.id,
+                requester_name=_get_requester_name(message),
+            )
+            if delivered_to_chat:
+                await message.answer(
+                    f"Отчёт также отправлен в чат: {delivered_to_chat}",
+                    reply_markup=AGENT_HOME_KEYBOARD,
+                )
+            else:
+                await message.answer(
+                    "Не удалось продублировать отчёт в выбранный чат.",
+                    reply_markup=AGENT_HOME_KEYBOARD,
+                )
 
 
 async def _open_agent_entry(message: Message, state: FSMContext, *, actor_user: TelegramUser | None = None) -> None:

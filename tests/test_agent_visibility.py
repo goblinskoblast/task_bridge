@@ -37,6 +37,27 @@ class AgentVisibilityTest(unittest.IsolatedAsyncioTestCase):
             ["Стоп-лист сейчас не удалось собрать."],
         )
 
+    async def test_completed_report_response_is_duplicated_to_selected_chat(self):
+        message = _DummyMessage()
+        result = {
+            "status": "completed",
+            "scenario": "stoplist_report",
+            "answer": "📍 Точка: Верхний Уфалей, Ленина 147\n🚫 Сейчас в стоп-листе: 1\n🆕 Соус Соевый 1 шт",
+        }
+
+        with patch("bot.data_agent_handlers.data_agent_client.chat", AsyncMock(return_value=result)), patch(
+            "bot.data_agent_handlers._find_delivery_points_for_message",
+            return_value=[SimpleNamespace(id=1, display_name="Верхний Уфалей, Ленина 147")],
+        ), patch(
+            "bot.data_agent_handlers._deliver_report_to_selected_chat",
+            AsyncMock(return_value="Таскбридж"),
+        ) as mocked_delivery:
+            await _send_agent_request(message, "собери стоп-лист по точке Верхний Уфалей, Ленина 147")
+
+        self.assertEqual(message.answers[0], result["answer"])
+        self.assertEqual(message.answers[1], "Отчёт также отправлен в чат: Таскбридж")
+        mocked_delivery.assert_awaited_once()
+
     async def test_non_developer_cannot_use_agentdebug(self):
         message = _DummyMessage(user_id=17)
 

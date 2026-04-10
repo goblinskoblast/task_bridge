@@ -59,9 +59,10 @@ class StoplistMemoryTest(unittest.TestCase):
             has_history=True,
             is_saved_point=True,
         )
-        self.assertIn("🆕 Добавились", text)
+        self.assertIn("🔁 Маргарита", text)
+        self.assertIn("🆕 Четыре сыра", text)
         self.assertIn("✅ Ушли из стоп-листа", text)
-        self.assertIn("🔁 Остались с прошлой проверки", text)
+        self.assertNotIn("🔁 Остались с прошлой проверки", text)
 
     def test_render_stoplist_report_without_history_for_saved_point(self):
         text = point_statistics_service._render_stoplist_report(
