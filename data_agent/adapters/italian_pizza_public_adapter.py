@@ -96,6 +96,34 @@ class ItalianPizzaPublicAdapter:
             candidate = self._clean_product_name(raw_name)
             if candidate and candidate not in results:
                 results.append(candidate)
+        for candidate in self._extract_disabled_products_from_html(html):
+            if candidate not in results:
+                results.append(candidate)
+        return results
+
+    def _extract_disabled_products_from_html(self, html: str) -> list[str]:
+        results: list[str] = []
+        card_pattern = re.compile(
+            r'<a href="/category/[^"]+/product/[^"]+"[^>]*>(.*?)</a>',
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        for match in card_pattern.finditer(html):
+            card_html = match.group(1)
+            if "disabled" not in card_html.lower():
+                continue
+
+            title_match = re.search(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card_html, flags=re.DOTALL | re.IGNORECASE)
+            raw_name = ""
+            if title_match:
+                raw_name = re.sub(r"<[^>]+>", " ", title_match.group(1))
+            else:
+                alt_match = re.search(r'alt="([^"]+)"', card_html, flags=re.DOTALL | re.IGNORECASE)
+                if alt_match:
+                    raw_name = alt_match.group(1)
+
+            candidate = self._clean_product_name(raw_name)
+            if candidate and candidate not in results:
+                results.append(candidate)
         return results
 
     def _page_excerpt(self, text: str, limit: int = 280) -> str:
@@ -146,7 +174,9 @@ class ItalianPizzaPublicAdapter:
                 continue
             if re.fullmatch(r"[\d\s.,/-]+", line):
                 continue
-            if any(marker in lowered for marker in ["₽", "руб", "доставка", "войти", "контакты", "заказать", " г", " кг"]):
+            if re.fullmatch(r"\d+[.,]?\d*\s*(г|кг|мл|л|см)\b", lowered):
+                continue
+            if any(marker in lowered for marker in ["₽", "руб", "доставка", "войти", "контакты", "заказать"]):
                 continue
             if "***" in line or "скид" in lowered:
                 continue
