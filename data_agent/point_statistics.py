@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import re
@@ -395,7 +395,7 @@ class PointStatisticsService:
             if has_history and is_saved_point:
                 added_set = set(delta["added"])
                 stayed_set = set(delta["stayed"])
-                for item in current_items[:25]:
+                for item in current_items:
                     if item in added_set:
                         lines.append(f"🆕 {item}")
                     elif item in stayed_set:
@@ -403,9 +403,7 @@ class PointStatisticsService:
                     else:
                         lines.append(f"• {item}")
             else:
-                lines.extend(f"• {item}" for item in current_items[:25])
-            if len(current_items) > 25:
-                lines.append(f"… и ещё {len(current_items) - 25}")
+                lines.extend(f"• {item}" for item in current_items)
         else:
             lines.append("✅ Сейчас в стоп-листе недоступных позиций нет.")
 
@@ -420,9 +418,7 @@ class PointStatisticsService:
 
         if delta["removed"]:
             lines.append(f"✅ Ушли из стоп-листа: {len(delta['removed'])}")
-            lines.extend(f"• {item}" for item in delta["removed"][:20])
-            if len(delta["removed"]) > 20:
-                lines.append(f"… и ещё {len(delta['removed']) - 20}")
+            lines.extend(f"• {item}" for item in delta["removed"])
             lines.append("")
 
         if not delta["added"] and not delta["removed"]:

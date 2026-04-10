@@ -1,4 +1,4 @@
-﻿import os
+import os
 import unittest
 from types import SimpleNamespace
 
@@ -73,6 +73,24 @@ class StoplistMemoryTest(unittest.TestCase):
             is_saved_point=True,
         )
         self.assertIn("🕓 Динамика появится после следующей проверки", text)
+    def test_render_stoplist_report_does_not_truncate_items(self):
+        current_items = [f"Позиция {index}" for index in range(1, 28)]
+        removed_items = [f"Ушла {index}" for index in range(1, 4)]
+        text = point_statistics_service._render_stoplist_report(
+            "Верхний Уфалей, Ленина 147",
+            current_items,
+            {
+                "added": current_items[20:],
+                "removed": removed_items,
+                "stayed": current_items[:20],
+            },
+            has_history=True,
+            is_saved_point=True,
+        )
+        self.assertIn("🔁 Позиция 1", text)
+        self.assertIn("🆕 Позиция 27", text)
+        self.assertIn("• Ушла 3", text)
+        self.assertNotIn("… и ещё", text)
 
     def test_render_stoplist_report_without_saved_point(self):
         text = point_statistics_service._render_stoplist_report(
