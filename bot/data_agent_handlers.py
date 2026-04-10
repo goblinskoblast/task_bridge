@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 
 import asyncio
 import re
@@ -432,13 +432,17 @@ def _build_delivery_point_aliases(point: SavedPoint) -> set[str]:
     return {alias for alias in aliases if alias}
 
 
-def _find_delivery_points_for_message(db, telegram_user_id: int, user_message: str) -> list[SavedPoint]:
-    enabled_points = [
-        item
-        for item in saved_point_service.list_points(db, telegram_user_id)
-        if item.report_delivery_enabled
-    ]
-    if not enabled_points:
+def _find_delivery_points_for_message(
+    db,
+    telegram_user_id: int,
+    user_message: str,
+    *,
+    require_delivery_enabled: bool = True,
+) -> list[SavedPoint]:
+    points = saved_point_service.list_points(db, telegram_user_id)
+    if require_delivery_enabled:
+        points = [item for item in points if item.report_delivery_enabled]
+    if not points:
         return []
 
     normalized_message = _normalize_delivery_text(user_message)
@@ -451,7 +455,7 @@ def _find_delivery_points_for_message(db, telegram_user_id: int, user_message: s
             message_aliases.add(_normalize_delivery_text(resolved.public_slug))
 
     matched: list[SavedPoint] = []
-    for point in enabled_points:
+    for point in points:
         aliases = _build_delivery_point_aliases(point)
         if any(
             alias and any(alias in candidate or candidate in alias for candidate in message_aliases if candidate)
@@ -459,6 +463,20 @@ def _find_delivery_points_for_message(db, telegram_user_id: int, user_message: s
         ):
             matched.append(point)
     return matched
+
+
+def _build_delivery_disabled_notice(points: list[SavedPoint]) -> str:
+    if not points:
+        return "В чат не отправлено: для выбранной точки выключена отправка."
+    if len(points) == 1:
+        return (
+            f"В чат не отправлено: для точки <b>{points[0].display_name}</b> выключена отправка.\n\n"
+            "Откройте точку и включите кнопку «📨 В чат»."
+        )
+    return (
+        "В чат не отправлено: для выбранных точек выключена отправка.\n\n"
+        "Откройте нужные точки и включите кнопку «📨 В чат»."
+    )
 
 
 async def _deliver_report_to_selected_chat(
@@ -991,6 +1009,13 @@ async def _send_saved_points_report(
         await message.answer(f"Отчёт также отправлен в чат: {delivered_to_chat}", reply_markup=AGENT_HOME_KEYBOARD)
     elif attempted_delivery and failed_delivery:
         await message.answer("Не удалось продублировать отчёт в выбранный чат.", reply_markup=AGENT_HOME_KEYBOARD)
+    elif any(not point.report_delivery_enabled for point in points):
+        disabled_points = [point for point in points if not point.report_delivery_enabled]
+        await message.answer(
+            _build_delivery_disabled_notice(disabled_points),
+            reply_markup=AGENT_HOME_KEYBOARD,
+            parse_mode="HTML",
+        )
 
 
 async def _dispatch_agent_request(message: Message, text: str) -> None:
@@ -1036,14 +1061,21 @@ async def _send_agent_request(message: Message, text: str) -> None:
         report_category = _resolve_report_category_from_result(result)
         db = get_db_session()
         try:
-            delivery_points = _find_delivery_points_for_message(db, message.from_user.id, text)
+            matched_points = _find_delivery_points_for_message(
+                db,
+                message.from_user.id,
+                text,
+                require_delivery_enabled=False,
+            )
+            delivery_points = [point for point in matched_points if point.report_delivery_enabled]
         finally:
             db.close()
 
         logger.info(
-            "Agent request delivery candidate telegram_user_id=%s category=%s matched_points=%s",
+            "Agent request delivery candidate telegram_user_id=%s category=%s matched_points=%s enabled_points=%s",
             message.from_user.id,
             report_category,
+            [point.display_name for point in matched_points],
             [point.display_name for point in delivery_points],
         )
         if delivery_points:
@@ -1065,6 +1097,17 @@ async def _send_agent_request(message: Message, text: str) -> None:
                     "Не удалось продублировать отчёт в выбранный чат.",
                     reply_markup=AGENT_HOME_KEYBOARD,
                 )
+        elif matched_points:
+            logger.info(
+                "Agent request delivery skipped telegram_user_id=%s category=%s reason=all_points_disabled",
+                message.from_user.id,
+                report_category,
+            )
+            await message.answer(
+                _build_delivery_disabled_notice(matched_points),
+                reply_markup=AGENT_HOME_KEYBOARD,
+                parse_mode="HTML",
+            )
         else:
             logger.info(
                 "Agent request delivery skipped telegram_user_id=%s category=%s reason=no_matched_points",

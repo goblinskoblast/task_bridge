@@ -1,4 +1,4 @@
-﻿import os
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -47,7 +47,7 @@ class AgentVisibilityTest(unittest.IsolatedAsyncioTestCase):
 
         with patch("bot.data_agent_handlers.data_agent_client.chat", AsyncMock(return_value=result)), patch(
             "bot.data_agent_handlers._find_delivery_points_for_message",
-            return_value=[SimpleNamespace(id=1, display_name="Верхний Уфалей, Ленина 147")],
+            return_value=[SimpleNamespace(id=1, display_name="Верхний Уфалей, Ленина 147", report_delivery_enabled=True)],
         ), patch(
             "bot.data_agent_handlers._deliver_report_to_selected_chat",
             AsyncMock(return_value="Таскбридж"),
@@ -58,6 +58,28 @@ class AgentVisibilityTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message.answers[1], "Отчёт также отправлен в чат: Таскбридж")
         mocked_delivery.assert_awaited_once()
 
+    async def test_completed_report_response_reports_disabled_point_delivery(self):
+        message = _DummyMessage()
+        result = {
+            "status": "completed",
+            "scenario": "stoplist_report",
+            "answer": "📍 Точка: Верхний Уфалей, Ленина 147\n🚫 Сейчас в стоп-листе: 1\n🆕 Соус Соевый 1 шт",
+        }
+
+        with patch("bot.data_agent_handlers.data_agent_client.chat", AsyncMock(return_value=result)), patch(
+            "bot.data_agent_handlers._find_delivery_points_for_message",
+            side_effect=[
+                [SimpleNamespace(id=1, display_name="Верхний Уфалей, Ленина 147", report_delivery_enabled=False)],
+            ],
+        ), patch(
+            "bot.data_agent_handlers._deliver_report_to_selected_chat",
+            AsyncMock(),
+        ) as mocked_delivery:
+            await _send_agent_request(message, "собери стоп-лист по точке Верхний Уфалей, Ленина 147")
+
+        self.assertEqual(message.answers[0], result["answer"])
+        self.assertIn("выключена отправка", message.answers[1])
+        mocked_delivery.assert_not_awaited()
     async def test_non_developer_cannot_use_agentdebug(self):
         message = _DummyMessage(user_id=17)
 
