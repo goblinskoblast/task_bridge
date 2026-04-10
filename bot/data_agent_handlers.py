@@ -6,13 +6,16 @@ from aiogram import F, Router
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, User as TelegramUser
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 
 from bot.data_agent_client import DataAgentClientError, data_agent_client
 from bot.report_delivery import (
     build_report_delivery_message,
     trim_telegram_text,
 )
+from bot.webapp_links import build_taskbridge_webapp_url
 from config import DEVELOPER_TELEGRAM_ID
 from db.database import get_db_session
 from db.models import Chat, DataAgentProfile, Message as MessageModel, SavedPoint, User
@@ -130,6 +133,44 @@ def _with_agent_home(keyboard: InlineKeyboardMarkup | None = None) -> InlineKeyb
     if not has_home:
         rows.append([InlineKeyboardButton(text="↩️ В меню агента", callback_data="agent_open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _build_slim_main_reply_keyboard(webapp_url: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📱 Панель задач", web_app=WebAppInfo(url=webapp_url))],
+            [KeyboardButton(text=AGENT_BUTTON_TEXT), KeyboardButton(text="💬 Поддержка")],
+            [KeyboardButton(text=HELP_BUTTON_TEXT)],
+        ],
+        resize_keyboard=True,
+        persistent=True,
+        input_field_placeholder="Напишите задачу или выберите действие ниже",
+    )
+
+
+async def _refresh_private_main_menu(message: Message, actor_user: TelegramUser | None = None) -> None:
+    effective_user = actor_user or message.from_user
+    db = get_db_session()
+    try:
+        user = _get_or_create_user(
+            db=db,
+            telegram_id=effective_user.id,
+            username=effective_user.username,
+            first_name=effective_user.first_name,
+            last_name=effective_user.last_name,
+            is_bot=effective_user.is_bot,
+        )
+        webapp_url = build_taskbridge_webapp_url(user_id=user.id, mode="executor")
+        service_message = await message.answer(
+            "Меню обновлено.",
+            reply_markup=_build_slim_main_reply_keyboard(webapp_url),
+        )
+        try:
+            await service_message.delete()
+        except TelegramBadRequest:
+            pass
+    finally:
+        db.close()
 
 
 def _sanitize_user_facing_answer(answer: str) -> str:
@@ -829,16 +870,19 @@ async def cmd_agent(message: Message, state: FSMContext) -> None:
 
 @router.message(F.text == AGENT_BUTTON_TEXT)
 async def open_agent_from_button(message: Message, state: FSMContext) -> None:
+    await _refresh_private_main_menu(message)
     await _open_agent_entry(message, state)
 
 
 @router.message(F.chat.type == "private", F.text == QUICK_REPORTS_BUTTON_TEXT)
 async def open_quick_reports_from_button(message: Message, state: FSMContext) -> None:
+    await _refresh_private_main_menu(message)
     await _open_agent_entry(message, state)
 
 
 @router.message(F.chat.type == "private", F.text == MONITORS_BUTTON_TEXT)
 async def open_monitors_from_button(message: Message) -> None:
+    await _refresh_private_main_menu(message)
     await _send_monitors_summary(message)
 
 

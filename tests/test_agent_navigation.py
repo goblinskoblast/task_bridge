@@ -6,7 +6,11 @@ os.environ.setdefault("BOT_TOKEN", "test-bot-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 
-from bot.data_agent_handlers import _build_point_actions_keyboard, _build_report_chat_keyboard
+from bot.data_agent_handlers import (
+    _build_point_actions_keyboard,
+    _build_report_chat_keyboard,
+    _build_slim_main_reply_keyboard,
+)
 from bot.handlers import _build_main_reply_keyboard
 
 
@@ -43,6 +47,16 @@ class AgentNavigationTest(unittest.TestCase):
         keyboard = _build_report_chat_keyboard([chat], selected_chat_id=None)
 
         self.assertIn("agent_open", _flatten_callback_data(keyboard))
+
+    def test_slim_main_reply_keyboard_has_no_duplicate_buttons(self):
+        keyboard = _build_slim_main_reply_keyboard("https://example.com/webapp")
+        texts = _flatten_button_texts(keyboard)
+
+        self.assertIn("🤖 Агент", texts)
+        self.assertIn("💬 Поддержка", texts)
+        self.assertIn("❓ Помощь", texts)
+        self.assertNotIn("⚡ Быстрые отчёты", texts)
+        self.assertNotIn("📡 Мониторы", texts)
 
 
 if __name__ == "__main__":
