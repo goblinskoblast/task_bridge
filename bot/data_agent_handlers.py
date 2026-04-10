@@ -473,6 +473,12 @@ async def _deliver_report_to_selected_chat(
     db = get_db_session()
     try:
         effective_telegram_user_id = telegram_user_id or message.from_user.id
+        logger.info(
+            "Report delivery requested telegram_user_id=%s category=%s answer_len=%s",
+            effective_telegram_user_id,
+            report_category,
+            len((answer or "").strip()),
+        )
         user = db.query(User).filter(User.telegram_id == effective_telegram_user_id).first()
         if not user:
             logger.warning("Report delivery skipped: user not found telegram_user_id=%s", effective_telegram_user_id)
@@ -518,6 +524,7 @@ async def _deliver_report_to_selected_chat(
         await message.bot.send_message(
             chat_id=target_chat_id,
             text=trim_telegram_text(delivery_text),
+            parse_mode=None,
         )
         logger.info(
             "Report delivery success telegram_user_id=%s user_id=%s category=%s target_chat_id=%s",
@@ -921,6 +928,14 @@ async def _send_saved_points_report(
     failed_delivery = False
     requester_name = _get_requester_name_from_actor(actor_user, message)
     for point in points:
+        logger.info(
+            "Saved point report started point_id=%s point=%s delivery_enabled=%s category=%s actor_telegram_id=%s",
+            point.id,
+            point.display_name,
+            point.report_delivery_enabled,
+            report_category,
+            actor_user.id if actor_user else message.from_user.id,
+        )
         try:
             result = await _call_agent(
                 message,
@@ -936,6 +951,12 @@ async def _send_saved_points_report(
         sections.append(f"{point.display_name}\n{answer}")
         if point.report_delivery_enabled:
             attempted_delivery = True
+            logger.info(
+                "Saved point report delivery attempt point_id=%s point=%s category=%s",
+                point.id,
+                point.display_name,
+                report_category,
+            )
             current_chat = await _deliver_report_to_selected_chat(
                 message,
                 _build_quick_report_request(action_key, point.display_name),
@@ -947,7 +968,20 @@ async def _send_saved_points_report(
             if current_chat and delivered_to_chat is None:
                 delivered_to_chat = current_chat
             if not current_chat:
+                logger.warning(
+                    "Saved point report delivery failed point_id=%s point=%s category=%s",
+                    point.id,
+                    point.display_name,
+                    report_category,
+                )
                 failed_delivery = True
+        else:
+            logger.info(
+                "Saved point report delivery skipped point_id=%s point=%s category=%s reason=point_disabled",
+                point.id,
+                point.display_name,
+                report_category,
+            )
 
     final_text = "\n\n".join(sections)
     if len(final_text) > 3900:
@@ -996,7 +1030,7 @@ async def _send_agent_request(message: Message, text: str) -> None:
         return
 
     answer = _build_user_safe_agent_answer(result)
-    await message.answer(answer, reply_markup=AGENT_HOME_KEYBOARD)
+    await message.answer(answer, reply_markup=AGENT_HOME_KEYBOARD, parse_mode=None)
 
     if is_report_delivery_candidate(result):
         report_category = _resolve_report_category_from_result(result)
@@ -1006,6 +1040,12 @@ async def _send_agent_request(message: Message, text: str) -> None:
         finally:
             db.close()
 
+        logger.info(
+            "Agent request delivery candidate telegram_user_id=%s category=%s matched_points=%s",
+            message.from_user.id,
+            report_category,
+            [point.display_name for point in delivery_points],
+        )
         if delivery_points:
             delivered_to_chat = await _deliver_report_to_selected_chat(
                 message,
@@ -1025,6 +1065,12 @@ async def _send_agent_request(message: Message, text: str) -> None:
                     "Не удалось продублировать отчёт в выбранный чат.",
                     reply_markup=AGENT_HOME_KEYBOARD,
                 )
+        else:
+            logger.info(
+                "Agent request delivery skipped telegram_user_id=%s category=%s reason=no_matched_points",
+                message.from_user.id,
+                report_category,
+            )
 
 
 async def _open_agent_entry(message: Message, state: FSMContext, *, actor_user: TelegramUser | None = None) -> None:

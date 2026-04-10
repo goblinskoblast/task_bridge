@@ -1458,17 +1458,17 @@ class ItalianPizzaPortalAdapter:
         period_label = period_hint or "текущий бланк"
         if not signals:
             return (
-                f"Точка: {point_name}\n"
-                f"Статус: красных зон по бланкам не найдено\n"
-                f"Период: {period_label}",
+                f"📍 Точка: {point_name}\n"
+                f"✅ Статус: красных зон по бланкам не найдено\n"
+                f"🕒 Период: {period_label}",
                 False,
             )
 
         lines = [
-            f"Точка: {point_name}",
-            "Статус: найдены красные зоны по бланкам",
-            f"Период: {period_label}",
-            "Красные зоны:",
+            f"📍 Точка: {point_name}",
+            "🔴 Статус: найдены красные зоны по бланкам",
+            f"🕒 Период: {period_label}",
+            "🔴 Красные зоны:",
         ]
         for index, signal in enumerate(signals[:18], start=1):
             rows = signal.get("rows") or []
@@ -1483,12 +1483,15 @@ class ItalianPizzaPortalAdapter:
                 elif label:
                     row_parts.append(label)
             details = "; ".join(row_parts)
-            summary = f"{index}. {signal.get('service') or 'Зона'} {signal.get('time_range') or '-'} -> {signal.get('column') or '-'}"
+            summary = (
+                f"🔴 {index}. {signal.get('service') or 'Зона'} "
+                f"{signal.get('time_range') or '-'} -> {signal.get('column') or '-'}"
+            )
             if details:
                 summary += f" ({details})"
             lines.append(summary)
         if len(signals) > 18:
-            lines.append(f"И еще {len(signals) - 18} красных зон.")
+            lines.append(f"🔴 И ещё {len(signals) - 18} красных зон.")
         return "\n".join(lines), True
 
     async def _scan_blank_report(self, page, point_name: str, period_hint: str) -> dict:

@@ -234,9 +234,21 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
             ],
         )
         self.assertTrue(has_red_flags)
+        self.assertIn("\U0001F534 \u0421\u0442\u0430\u0442\u0443\u0441", report_text)
+        self.assertIn("\U0001F534 1.", report_text)
         self.assertIn("16:45 - 17:00", report_text)
         self.assertIn("\u0417\u0430\u043a\u0443\u0441\u043a\u0438", report_text)
         self.assertIn("\u041f\u0440\u0438\u043d\u044f\u0442\u043e: 0", report_text)
+
+    def test_build_blank_report_without_signals_marks_green_status(self):
+        report_text, has_red_flags = self.adapter._build_blank_report_from_signals(
+            point_name="Test point",
+            period_hint="\u0442\u0435\u043a\u0443\u0449\u0438\u0439 \u0431\u043b\u0430\u043d\u043a",
+            signals=[],
+        )
+        self.assertFalse(has_red_flags)
+        self.assertIn("\u2705 \u0421\u0442\u0430\u0442\u0443\u0441", report_text)
+        self.assertIn("\U0001F4CD \u0422\u043e\u0447\u043a\u0430", report_text)
 
     def test_build_period_help_message_uses_visible_controls(self):
         message = self.adapter._build_period_help_message(
