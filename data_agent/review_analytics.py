@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import csv
-import io
 import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from io import BytesIO
 from typing import Any, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 import aiohttp
+import openpyxl
 from sqlalchemy import or_
 
 from config import ITALIAN_PIZZA_REVIEWS_SHEET_URLS
@@ -28,6 +28,12 @@ class ReviewAnalyticsPeriod:
     label: str
 
 
+@dataclass(frozen=True)
+class WorkbookSheet:
+    title: str
+    rows: list[list[Any]]
+
+
 class ItalianPizzaSheetAnalyticsProvider:
     source_name = "italian_pizza_sheet"
 
@@ -39,69 +45,44 @@ class ItalianPizzaSheetAnalyticsProvider:
             return {
                 "status": "not_configured",
                 "source": self.source_name,
-                "message": "Источник статистики Italian Pizza не настроен.",
+                "message": "Отчёт по отзывам для этой точки пока недоступен.",
             }
 
         last_error: str | None = None
         for source_url in self._sheet_urls:
-            csv_url = self._normalize_google_sheet_url(source_url)
+            xlsx_url = self._normalize_google_sheet_xlsx_url(source_url)
             try:
-                rows = await self._fetch_csv_rows(csv_url)
+                sheets = await self._fetch_workbook_sheets(xlsx_url)
             except Exception as exc:
                 last_error = str(exc)
-                logger.warning("Italian Pizza reviews sheet fetch failed url=%s error=%s", csv_url, exc)
+                logger.warning("Italian Pizza workbook fetch failed url=%s error=%s", xlsx_url, exc)
                 continue
 
-            if len(rows) < 3:
-                continue
-
-            sheet_point_name = self._extract_sheet_point_name(rows)
-            if not self._matches_point(sheet_point_name, point_name):
-                continue
-
-            period_index = self._select_period_column(rows, period.kind)
-            if period_index is None:
+            report = self._build_workbook_report(sheets, point_name=point_name, period=period)
+            if report:
                 return {
-                    "status": "failed",
+                    "status": "ok",
                     "source": self.source_name,
-                    "message": f"В статистике Italian Pizza не найден столбец для периода {period.label}.",
+                    "provider_label": "Italian Pizza",
+                    "report_text": report,
+                    "requested_point": point_name,
+                    "period_kind": period.kind,
                 }
-
-            report_text = self._render_report(rows, period_index=period_index, point_name=point_name, period=period)
-            if not report_text:
-                return {
-                    "status": "failed",
-                    "source": self.source_name,
-                    "message": "Не удалось собрать статистику Italian Pizza из таблицы.",
-                }
-
-            return {
-                "status": "ok",
-                "source": self.source_name,
-                "provider_label": "Italian Pizza",
-                "report_text": report_text,
-                "requested_point": point_name,
-                "sheet_point_name": sheet_point_name,
-                "period_kind": period.kind,
-            }
 
         if last_error:
             return {
-                "status": "failed",
+                "status": "not_configured",
                 "source": self.source_name,
-                "message": f"Не удалось загрузить статистику Italian Pizza: {last_error}",
+                "message": "Отчёт по отзывам для этой точки пока недоступен.",
             }
 
         return {
             "status": "not_relevant",
             "source": self.source_name,
-            "message": "Подходящий лист Italian Pizza для этой точки не найден.",
+            "message": "Отчёт по отзывам для этой точки пока недоступен.",
         }
 
-    def _normalize_google_sheet_url(self, source_url: str) -> str:
-        if "/export?" in source_url and "format=csv" in source_url:
-            return source_url
-
+    def _normalize_google_sheet_xlsx_url(self, source_url: str) -> str:
         parsed = urlparse(source_url)
         if "docs.google.com" not in parsed.netloc or "/spreadsheets/d/" not in parsed.path:
             return source_url
@@ -111,45 +92,122 @@ class ItalianPizzaSheetAnalyticsProvider:
             return source_url
 
         sheet_id = match.group(1)
-        query = parse_qs(parsed.query)
-        gid = query.get("gid", ["0"])[0]
-        return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+        return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=xlsx"
 
-    async def _fetch_csv_rows(self, csv_url: str) -> list[list[str]]:
-        timeout = aiohttp.ClientTimeout(total=30)
+    async def _fetch_workbook_sheets(self, xlsx_url: str) -> list[WorkbookSheet]:
+        timeout = aiohttp.ClientTimeout(total=60)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(csv_url) as response:
+            async with session.get(xlsx_url) as response:
                 response.raise_for_status()
                 content = await response.read()
 
-        text = content.decode("utf-8-sig", errors="replace")
-        reader = csv.reader(io.StringIO(text))
-        return [[self._clean_cell(cell) for cell in row] for row in reader]
+        workbook = openpyxl.load_workbook(BytesIO(content), read_only=True, data_only=True)
+        snapshots: list[WorkbookSheet] = []
+        for sheet in workbook.worksheets:
+            rows = [list(row) for row in sheet.iter_rows(values_only=True)]
+            snapshots.append(WorkbookSheet(title=str(sheet.title or "").strip(), rows=rows))
+        return snapshots
 
-    def _clean_cell(self, value: str) -> str:
-        cleaned = (value or "").replace("\xa0", " ").replace("Â", "").strip()
-        if "Ð" in cleaned or "Ñ" in cleaned:
-            try:
-                cleaned = cleaned.encode("latin1").decode("utf-8")
-            except Exception:
-                pass
-        return cleaned.strip()
+    def _build_workbook_report(self, sheets: list[WorkbookSheet], *, point_name: str, period: ReviewAnalyticsPeriod) -> str | None:
+        analytics_sheets = [sheet for sheet in sheets if "аналит" in self._normalize_label(sheet.title)]
+        if not analytics_sheets:
+            analytics_sheets = sheets
 
-    def _extract_sheet_point_name(self, rows: list[list[str]]) -> str:
-        candidates = []
-        for row_index, column_index in ((0, 2), (2, 1), (0, 1), (1, 1)):
-            if row_index < len(rows) and column_index < len(rows[row_index]):
-                value = rows[row_index][column_index].strip()
-                if value:
-                    candidates.append(value)
-        return candidates[0] if candidates else ""
+        for sheet in analytics_sheets:
+            report = self._build_sheet_report(sheet.rows, point_name=point_name, period=period)
+            if report:
+                return report
+        return None
 
-    def _normalize_label(self, value: str) -> str:
-        normalized = (value or "").lower().replace("ё", "е")
-        normalized = normalized.replace("ул.", " ").replace("улица", " ").replace("д.", " ")
-        normalized = normalized.replace("тц", " ")
-        normalized = re.sub(r"[^a-zа-я0-9]+", " ", normalized)
-        return re.sub(r"\s+", " ", normalized).strip()
+    def _build_sheet_report(self, rows: list[list[Any]], *, point_name: str, period: ReviewAnalyticsPeriod) -> str | None:
+        if len(rows) < 3:
+            return None
+
+        period_index = self._select_period_column(rows, period.kind)
+        if period_index is None:
+            return None
+
+        values_by_point = self._rows_by_point(rows, period_index)
+        matched_point = self._match_point_key(values_by_point.keys(), point_name)
+        if not matched_point:
+            return None
+
+        values = values_by_point[matched_point]
+        start_at = self._try_parse_date(rows[0][period_index] if period_index < len(rows[0]) else None)
+        end_at = self._try_parse_date(rows[1][period_index] if period_index < len(rows[1]) else None)
+        period_label = period.label
+        if start_at and end_at:
+            period_label = f"{period.label} ({start_at:%d.%m.%Y} - {end_at:%d.%m.%Y})"
+
+        total_orders = self._find_value(values, section=None, metric_markers=["количество", "заказов", "всего"])
+        positive_revii = self._find_value(values, section=None, metric_markers=["положительных", "оценок", "ревии"])
+        external_positive = self._find_value(values, section=None, metric_markers=["положительных", "других", "источников"])
+        negative_total = self._find_value(values, section=None, metric_markers=["негативных", "оценок", "отзывов"])
+        negative_product = self._find_value(values, section=None, metric_markers=["негативных", "качеству", "продукта"])
+        negative_service = self._find_value(values, section=None, metric_markers=["негативных", "качеству", "сервиса"])
+        delivery_negative = self._find_value(values, section="доставка", metric_markers=["количество", "негативных"])
+        delivery_share = self._find_value(values, section="доставка", metric_markers=["доля", "негативных", "доставку"])
+        pickup_negative = self._find_value(values, section="самовывоз", metric_markers=["количество", "негативных"])
+        pickup_share = self._find_value(values, section="самовывоз", metric_markers=["доля", "негативных", "самовывоз"])
+        hall_negative = self._find_value(values, section="зал", metric_markers=["количество", "негативных"])
+        hall_share = self._find_value(values, section="зал", metric_markers=["доля", "негативных", "зале"])
+        delay_count = self._find_value(values, section="опоздания", metric_markers=["количество", "опозданием", "доставку"])
+        delay_share = self._find_value(values, section="опоздания", metric_markers=["доля", "опозданием", "доставку"])
+        lateness_bonus = self._find_value(values, section=None, metric_markers=["бонусов", "опоздание"])
+
+        lines = [
+            "📊 Italian Pizza",
+            f"Точка: {point_name}",
+            f"Период: {period_label}",
+        ]
+        if total_orders:
+            lines.append(f"🧾 Заказов всего: {total_orders}")
+        if positive_revii or external_positive:
+            positive_line = positive_revii or "0"
+            if external_positive:
+                positive_line = f"{positive_line} (+ {external_positive} из других источников)"
+            lines.append(f"🙂 Положительных оценок: {positive_line}")
+        if negative_total:
+            lines.append(f"⚠️ Негативных оценок и отзывов: {negative_total}")
+        if negative_product or negative_service:
+            lines.append(f"🍕 Продукт / 🤝 сервис: {negative_product or '0'} / {negative_service or '0'}")
+        if delivery_negative or delivery_share:
+            lines.append(f"🛵 Доставка: {delivery_negative or '0'} негативных ({delivery_share or 'н/д'})")
+        if pickup_negative or pickup_share:
+            lines.append(f"🥡 Самовывоз: {pickup_negative or '0'} негативных ({pickup_share or 'н/д'})")
+        if hall_negative or hall_share:
+            lines.append(f"🏠 Зал: {hall_negative or '0'} негативных ({hall_share or 'н/д'})")
+        if delay_count or delay_share:
+            lines.append(f"⏱️ Опоздания доставки: {delay_count or '0'} заказов ({delay_share or 'н/д'})")
+        if lateness_bonus:
+            lines.append(f"🎁 Бонусов за опоздание: {lateness_bonus}")
+
+        return "\n".join(lines) if len(lines) > 3 else None
+
+    def _rows_by_point(self, rows: list[list[Any]], period_index: int) -> dict[str, dict[tuple[str, str], str]]:
+        values_by_point: dict[str, dict[tuple[str, str], str]] = {}
+        for row in rows[2:]:
+            if len(row) <= period_index:
+                continue
+            point_raw = self._clean_cell(row[1] if len(row) > 1 else "")
+            metric = self._normalize_label(self._clean_cell(row[2] if len(row) > 2 else ""))
+            if not point_raw or not metric:
+                continue
+            point_key = self._normalize_label(point_raw)
+            section = self._normalize_label(self._clean_cell(row[0] if len(row) > 0 else ""))
+            value = self._clean_cell(row[period_index])
+            if not value:
+                continue
+            values_by_point.setdefault(point_key, {})[(section, metric)] = value
+        return values_by_point
+
+    def _match_point_key(self, available_points: Any, requested_point: str) -> str | None:
+        aliases = self._point_aliases(requested_point)
+        for candidate in available_points:
+            normalized_candidate = self._normalize_label(str(candidate))
+            if any(alias in normalized_candidate or normalized_candidate in alias for alias in aliases):
+                return candidate
+        return None
 
     def _point_aliases(self, point_name: str) -> list[str]:
         aliases: list[str] = []
@@ -171,54 +229,21 @@ class ItalianPizzaSheetAnalyticsProvider:
                 aliases.append(normalized)
         return aliases
 
-    def _matches_point(self, sheet_point_name: str, requested_point: str) -> bool:
-        sheet_label = self._normalize_label(sheet_point_name)
-        aliases = self._point_aliases(requested_point)
-        return any(alias in sheet_label or sheet_label in alias for alias in aliases)
-
-    def _try_parse_date(self, value: str) -> Optional[datetime]:
-        cleaned = self._clean_cell(value)
-        if not cleaned:
-            return None
-        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y"):
-            try:
-                return datetime.strptime(cleaned, fmt)
-            except ValueError:
-                continue
-        return None
-
-    def _select_period_column(self, rows: list[list[str]], period_kind: str) -> Optional[int]:
-        if len(rows) < 3:
-            return None
+    def _select_period_column(self, rows: list[list[Any]], period_kind: str) -> Optional[int]:
         start_row = rows[0]
         end_row = rows[1]
-        reference_row = rows[2]
         candidates: list[int] = []
         for index in range(max(len(start_row), len(end_row))):
-            start_at = self._try_parse_date(start_row[index] if index < len(start_row) else "")
-            end_at = self._try_parse_date(end_row[index] if index < len(end_row) else "")
+            start_at = self._try_parse_date(start_row[index] if index < len(start_row) else None)
+            end_at = self._try_parse_date(end_row[index] if index < len(end_row) else None)
             if not start_at or not end_at:
                 continue
             span_days = max((end_at - start_at).days, 0)
             column_kind = "month" if span_days >= 20 else "week"
             if column_kind != period_kind:
                 continue
-            if index < len(reference_row) and self._clean_cell(reference_row[index]):
-                candidates.append(index)
+            candidates.append(index)
         return candidates[-1] if candidates else None
-
-    def _rows_by_key(self, rows: list[list[str]], period_index: int) -> dict[tuple[str, str], str]:
-        values: dict[tuple[str, str], str] = {}
-        for row in rows[2:]:
-            if len(row) <= period_index:
-                continue
-            section = self._normalize_label(row[0] if len(row) > 0 else "")
-            metric = self._normalize_label(row[2] if len(row) > 2 else "")
-            value = self._clean_cell(row[period_index])
-            if not metric or not value:
-                continue
-            values[(section, metric)] = value
-        return values
 
     def _find_value(self, values: dict[tuple[str, str], str], *, section: str | None, metric_markers: list[str]) -> str | None:
         normalized_section = self._normalize_label(section or "")
@@ -229,62 +254,37 @@ class ItalianPizzaSheetAnalyticsProvider:
                 return value
         return None
 
-    def _render_report(self, rows: list[list[str]], *, period_index: int, point_name: str, period: ReviewAnalyticsPeriod) -> str:
-        values = self._rows_by_key(rows, period_index)
-        start_at = self._try_parse_date(rows[0][period_index] if period_index < len(rows[0]) else "")
-        end_at = self._try_parse_date(rows[1][period_index] if period_index < len(rows[1]) else "")
-        period_label = period.label
-        if start_at and end_at:
-            period_label = f"{period.label} ({start_at:%d.%m.%Y} - {end_at:%d.%m.%Y})"
-
-        total_orders = self._find_value(values, section=None, metric_markers=["количество", "заказов", "всего"])
-        positive_revii = self._find_value(values, section=None, metric_markers=["положительных", "оценок", "ревии"])
-        external_positive = self._find_value(values, section=None, metric_markers=["положительных", "других", "источников"])
-        negative_total = self._find_value(values, section=None, metric_markers=["негативных", "оценок", "отзывов"])
-        negative_product = self._find_value(values, section=None, metric_markers=["негативных", "качеству", "продукта"])
-        negative_service = self._find_value(values, section=None, metric_markers=["негативных", "качеству", "сервиса"])
-        delivery_negative = self._find_value(values, section="доставка", metric_markers=["количество", "негативных"])
-        delivery_share = self._find_value(values, section="доставка", metric_markers=["доля", "негативных", "доставку"])
-        pickup_negative = self._find_value(values, section="самовывоз", metric_markers=["количество", "негативных"])
-        pickup_share = self._find_value(values, section="самовывоз", metric_markers=["доля", "негативных", "самовывоз"])
-        hall_negative = self._find_value(values, section="зал", metric_markers=["количество", "негативных"])
-        hall_share = self._find_value(values, section="зал", metric_markers=["доля", "негативных", "зале"])
-        delay_share = self._find_value(values, section="опоздания", metric_markers=["доля", "опозданием", "доставку"])
-        delay_count = self._find_value(values, section="опоздания", metric_markers=["количество", "опозданием", "доставку"])
-        lateness_bonus = self._find_value(values, section=None, metric_markers=["бонусов", "опоздание"])
-
-        lines = [
-            "📊 Italian Pizza",
-            f"Точка: {point_name}",
-            f"Период: {period_label}",
-        ]
-        if total_orders:
-            lines.append(f"🧾 Заказов всего: {total_orders}")
-        if positive_revii or external_positive:
-            positive_line = positive_revii or "0"
-            if external_positive:
-                positive_line = f"{positive_line} (+ {external_positive} из других источников)"
-            lines.append(f"🙂 Положительных оценок: {positive_line}")
-        if negative_total:
-            lines.append(f"⚠️ Негативных оценок и отзывов: {negative_total}")
-        if negative_product or negative_service:
-            lines.append(
-                "🍕 Продукт / 🤝 сервис: "
-                f"{negative_product or '0'} / {negative_service or '0'}"
-            )
-        if delivery_negative or delivery_share:
-            lines.append(f"🛵 Доставка: {delivery_negative or '0'} негативных ({delivery_share or 'н/д'})")
-        if pickup_negative or pickup_share:
-            lines.append(f"🥡 Самовывоз: {pickup_negative or '0'} негативных ({pickup_share or 'н/д'})")
-        if hall_negative or hall_share:
-            lines.append(f"🏠 Зал: {hall_negative or '0'} негативных ({hall_share or 'н/д'})")
-        if delay_count or delay_share:
-            lines.append(f"⏱️ Опоздания доставки: {delay_count or '0'} заказов ({delay_share or 'н/д'})")
-        if lateness_bonus:
-            lines.append(f"🎁 Бонусов за опоздание: {lateness_bonus}")
-        if len(lines) <= 3:
+    def _clean_cell(self, value: Any) -> str:
+        if value is None:
             return ""
-        return "\n".join(lines)
+        if isinstance(value, datetime):
+            return value.strftime("%d.%m.%Y %H:%M:%S") if value.time() != datetime.min.time() else value.strftime("%d.%m.%Y")
+        cleaned = str(value).replace("\xa0", " ").replace("Â", "").strip()
+        if "Ð" in cleaned or "Ñ" in cleaned:
+            try:
+                cleaned = cleaned.encode("latin1").decode("utf-8")
+            except Exception:
+                pass
+        return cleaned.strip()
+
+    def _normalize_label(self, value: str) -> str:
+        normalized = (value or "").lower().replace("ё", "е")
+        normalized = normalized.replace("ул.", " ").replace("улица", " ").replace("д.", " ").replace("тц", " ")
+        normalized = re.sub(r"[^a-zа-я0-9]+", " ", normalized)
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    def _try_parse_date(self, value: Any) -> Optional[datetime]:
+        if isinstance(value, datetime):
+            return value
+        cleaned = self._clean_cell(value)
+        if not cleaned:
+            return None
+        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y"):
+            try:
+                return datetime.strptime(cleaned, fmt)
+            except ValueError:
+                continue
+        return None
 
 
 class RocketDataReviewsProvider:
@@ -295,7 +295,7 @@ class RocketDataReviewsProvider:
             return {
                 "status": "not_configured",
                 "source": self.source_name,
-                "message": "Не удалось определить пользователя для RocketData.",
+                "message": "Отчёт по отзывам для этой точки пока недоступен.",
             }
 
         system = self._find_connected_system(user_id)
@@ -303,18 +303,18 @@ class RocketDataReviewsProvider:
             return {
                 "status": "not_configured",
                 "source": self.source_name,
-                "message": "Система RocketData не подключена.",
+                "message": "Отчёт по отзывам для этой точки пока недоступен.",
             }
 
         task_text = (
-            "Авторизуйся в RocketData и собери отчёт по отзывам для одной точки.\n\n"
+            "Авторизуйся в RocketData и собери недельный или месячный отчёт по отзывам для одной точки.\n\n"
             f"Точка: {point_name}\n"
             f"Период: {period.label}\n"
             "Нужно:\n"
             "1. Найти именно эту точку\n"
             "2. Собрать сводку по категориям: сервис, доставка, кухня, общий отчёт\n"
-            "3. Сфокусироваться на негативе, повторяющихся жалобах и рисках\n"
-            "4. Отдельно отметить сильные стороны, если они явно видны\n"
+            "3. Выделить повторяющиеся жалобы и зоны риска\n"
+            "4. Коротко отметить сильные стороны, если они явно видны\n"
             "5. Вернуть компактный отчёт на русском языке\n\n"
             f"Исходный запрос пользователя: {user_message}"
         )
@@ -329,9 +329,9 @@ class RocketDataReviewsProvider:
         except Exception as exc:
             logger.warning("RocketData reviews fetch failed point=%s error=%s", point_name, exc)
             return {
-                "status": "failed",
+                "status": "not_configured",
                 "source": self.source_name,
-                "message": f"Не удалось собрать отчёт из RocketData: {exc}",
+                "message": "Отчёт по отзывам для этой точки пока недоступен.",
             }
 
         return {
@@ -397,16 +397,6 @@ class ReviewAnalyticsCoordinator:
             for result in ok_results:
                 lines.append("")
                 lines.append(result["report_text"].strip())
-
-            skipped = [item for item in provider_results if item.get("status") in {"not_configured", "not_relevant"}]
-            if skipped:
-                skipped_labels = []
-                for item in skipped:
-                    source = item.get("source")
-                    skipped_labels.append("RocketData" if source == "rocketdata" else "Italian Pizza")
-                lines.append("")
-                lines.append(f"ℹ️ Недоступные источники: {', '.join(dict.fromkeys(skipped_labels))}")
-
             return {
                 "status": "ok",
                 "source": "reviews_multi_source",
@@ -417,43 +407,11 @@ class ReviewAnalyticsCoordinator:
                 "report_text": "\n".join(lines).strip(),
             }
 
-        failed_results = [item for item in provider_results if item.get("status") == "failed"]
-        if failed_results:
-            message = self._build_unavailable_message(provider_results, point_name=point_name, period=period)
-            return {
-                "status": "not_configured",
-                "source": "reviews_multi_source",
-                "message": message,
-            }
-
         return {
             "status": "not_configured",
             "source": "reviews_multi_source",
-            "message": self._build_unavailable_message(provider_results, point_name=point_name, period=period),
+            "message": f"Отчёт по отзывам для точки {point_name} {period.label} пока недоступен.",
         }
-
-    def _build_unavailable_message(
-        self,
-        provider_results: list[dict[str, Any]],
-        *,
-        point_name: str,
-        period: ReviewAnalyticsPeriod,
-    ) -> str:
-        reasons: list[str] = []
-        for item in provider_results:
-            source = item.get("source")
-            source_label = "RocketData" if source == "rocketdata" else "Italian Pizza"
-            message = (item.get("message") or "").strip()
-            if message:
-                reasons.append(f"{source_label}: {message}")
-
-        if not reasons:
-            reasons.append("Для этой точки ещё не подключён источник weekly/monthly аналитики.")
-
-        return (
-            f"Для точки {point_name} пока не удалось собрать отчёт по отзывам {period.label}.\n"
-            f"Причины: {'; '.join(reasons)}"
-        )
 
 
 review_analytics_coordinator = ReviewAnalyticsCoordinator()

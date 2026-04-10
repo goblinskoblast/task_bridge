@@ -9,6 +9,7 @@ os.environ.setdefault("AI_PROVIDER", "openai")
 from data_agent.review_analytics import (
     ItalianPizzaSheetAnalyticsProvider,
     ReviewAnalyticsPeriod,
+    WorkbookSheet,
     review_analytics_coordinator,
 )
 from data_agent.review_report import ReviewReportService
@@ -27,11 +28,17 @@ class ItalianPizzaSheetAnalyticsProviderTest(unittest.IsolatedAsyncioTestCase):
             ["", "Полевской", "Негативных отзывов по качеству сервиса", "", "8", "65", "23", "56"],
             ["Доставка", "Полевской", "Количество негативных оценок и отзывов", "", "12", "53", "19", "45"],
             ["Доставка", "Полевской", "Доля негативных оценок и отзывов от количества заказов на доставку", "", "8,70%", "8,19%", "14,73%", "7,35%"],
+            ["Самовывоз", "Полевской", "Количество негативных оценок и отзывов", "", "2", "11", "1", "3"],
+            ["Самовывоз", "Полевской", "Доля негативных оценок и отзывов от количества заказов на самовывоз", "", "2,30%", "3,17%", "1,19%", "2,50%"],
+            ["Зал", "Полевской", "Количество негативных оценок и отзывов", "", "0", "19", "8", "15"],
+            ["Зал", "Полевской", "Доля негативных оценок и отзывов от количества заказов в зале", "", "0,00%", "0,69%", "1,06%", "0,88%"],
             ["Опоздания", "Полевской", "Количество заказов с опозданием на доставку", "", "4", "20", "4", "8"],
             ["Опоздания", "Полевской", "Доля заказов с опозданием от общего количества заказов на доставку", "", "2,90%", "3,09%", "3,10%", "1,31%"],
+            ["", "Полевской", "Бонусов за опоздание", "", "2 140", "7 882", "1 195", "4 220"],
         ]
+        sheets = [WorkbookSheet(title="Аналитика", rows=rows)]
 
-        with patch.object(provider, "_fetch_csv_rows", AsyncMock(return_value=rows)):
+        with patch.object(provider, "_fetch_workbook_sheets", AsyncMock(return_value=sheets)):
             result = await provider.build_report(point_name="Полевской, Ленина 11", period=ReviewAnalyticsPeriod(kind="week", label="за неделю"))
 
         self.assertEqual(result["status"], "ok")
@@ -40,23 +47,24 @@ class ItalianPizzaSheetAnalyticsProviderTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("⚠️ Негативных оценок и отзывов: 28", result["report_text"])
         self.assertIn("⏱️ Опоздания доставки: 4 заказов", result["report_text"])
 
-    async def test_build_report_uses_latest_monthly_column(self):
-        provider = ItalianPizzaSheetAnalyticsProvider(["https://example.com/sheet"])
-        rows = [
-            ["", "", "Полевской", "", "05.01.2026", "01.01.2026", "02.02.2026", "01.02.2026"],
-            ["", "", "", "", "11.01.2026", "31.01.2026 23:59:59", "08.02.2026", "28.02.2026 23:59:59"],
-            ["", "Полевской", "Количество заказов всего (зал+самовывоз+доставка)", "", "890", "3 776", "771", "3 381"],
-            ["", "Полевской", "Положительных оценок Ревии", "", "45", "399", "51", "398"],
-            ["", "Полевской", "Негативных оценок и отзывов", "", "13", "81", "28", "63"],
+    async def test_build_report_scans_multiple_workbooks_for_point(self):
+        provider = ItalianPizzaSheetAnalyticsProvider(["https://example.com/a", "https://example.com/b"])
+        polevskoy = WorkbookSheet(title="Аналитика", rows=[["", "", "Полевской"], ["", "", ""], ["", "Полевской", "Количество заказов всего", "", "100"]])
+        ufaley_rows = [
+            ["", "", "Верхний Уфалей", "", "01.03.2026", "01.04.2026"],
+            ["", "", "", "", "07.03.2026", "30.04.2026 23:59:59"],
+            ["", "Верхний Уфалей", "Количество заказов всего (зал+самовывоз+доставка)", "", "701", "2 880"],
+            ["", "Верхний Уфалей", "Положительных оценок Ревии", "", "31", "140"],
+            ["", "Верхний Уфалей", "Негативных оценок и отзывов", "", "9", "41"],
         ]
+        side_effect = [[polevskoy], [WorkbookSheet(title="Аналитика", rows=ufaley_rows)]]
 
-        with patch.object(provider, "_fetch_csv_rows", AsyncMock(return_value=rows)):
-            result = await provider.build_report(point_name="Полевской, Ленина 11", period=ReviewAnalyticsPeriod(kind="month", label="за месяц"))
+        with patch.object(provider, "_fetch_workbook_sheets", AsyncMock(side_effect=side_effect)):
+            result = await provider.build_report(point_name="Верхний Уфалей, Ленина 147", period=ReviewAnalyticsPeriod(kind="week", label="за неделю"))
 
         self.assertEqual(result["status"], "ok")
-        self.assertIn("Период: за месяц", result["report_text"])
-        self.assertIn("🧾 Заказов всего: 3 381", result["report_text"])
-        self.assertIn("⚠️ Негативных оценок и отзывов: 63", result["report_text"])
+        self.assertIn("Верхний Уфалей, Ленина 147", result["report_text"])
+        self.assertIn("🧾 Заказов всего: 701", result["report_text"])
 
 
 class ReviewAnalyticsCoordinatorTest(unittest.IsolatedAsyncioTestCase):
@@ -81,15 +89,15 @@ class ReviewAnalyticsCoordinatorTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("📊 Italian Pizza", result["report_text"])
         self.assertIn("⭐ RocketData", result["report_text"])
 
-    async def test_build_report_returns_reasons_when_sources_unavailable(self):
+    async def test_build_report_returns_neutral_message_when_sources_unavailable(self):
         with patch.object(
             review_analytics_coordinator._italian_pizza,
             "build_report",
-            AsyncMock(return_value={"status": "not_relevant", "source": "italian_pizza_sheet", "message": "Подходящий лист Italian Pizza для этой точки не найден."}),
+            AsyncMock(return_value={"status": "not_relevant", "source": "italian_pizza_sheet", "message": "Отчёт по отзывам для этой точки пока недоступен."}),
         ), patch.object(
             review_analytics_coordinator._rocketdata,
             "build_report",
-            AsyncMock(return_value={"status": "failed", "source": "rocketdata", "message": "Не удалось собрать отчёт из RocketData: timeout"}),
+            AsyncMock(return_value={"status": "not_configured", "source": "rocketdata", "message": "Отчёт по отзывам для этой точки пока недоступен."}),
         ):
             result = await review_analytics_coordinator.build_report(
                 user_message="покажи отзывы по Верхний Уфалей, Ленина 147 за неделю",
@@ -98,9 +106,7 @@ class ReviewAnalyticsCoordinatorTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result["status"], "not_configured")
-        self.assertIn("Верхний Уфалей, Ленина 147", result["message"])
-        self.assertIn("Italian Pizza", result["message"])
-        self.assertIn("RocketData", result["message"])
+        self.assertEqual(result["message"], "Отчёт по отзывам для точки Верхний Уфалей, Ленина 147 за неделю пока недоступен.")
 
 
 class ReviewReportServiceAnalyticsTest(unittest.IsolatedAsyncioTestCase):

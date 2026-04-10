@@ -183,10 +183,7 @@ class DataAgentOrchestrator:
             elif review_result.get("status") in {"needs_point", "needs_period", "awaiting_user_input"}:
                 parts.append(review_result.get("message", "Нужно уточнить параметры для отчёта по отзывам."))
             else:
-                parts.append(
-                    "Отчёт по отзывам сейчас недоступен. "
-                    f"Причина: {review_result.get('message', 'источник не настроен')}"
-                )
+                parts.append(review_result.get("message", "Отчёт по отзывам сейчас недоступен. Попробуйте позже."))
 
         stoplist_result = tool_results.get("stoplist_tool")
         if stoplist_result:
