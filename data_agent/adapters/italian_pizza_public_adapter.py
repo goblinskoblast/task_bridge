@@ -48,6 +48,22 @@ class ItalianPizzaPublicAdapter:
                 response.raise_for_status()
                 return await response.text()
 
+    async def _fetch_public_json(self, url: str, *, params: dict | None = None):
+        timeout = aiohttp.ClientTimeout(total=30)
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36"
+            ),
+            "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://italianpizza.ru/",
+        }
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            async with session.get(url, params=params) as response:
+                response.raise_for_status()
+                return await response.json()
+
     def _decode_json_string(self, value: str) -> str:
         try:
             return json.loads(f'"{value}"')
@@ -61,6 +77,98 @@ class ItalianPizzaPublicAdapter:
                 continue
             diagnostics[key] = value
         return diagnostics
+
+    def _normalize_address_match(self, value: str) -> str:
+        normalized = self._normalize_text(value)
+        normalized = normalized.replace("стр ", " ").replace("строение ", " ")
+        normalized = normalized.replace("д ", " ").replace("дом ", " ")
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    async def _resolve_public_organization(self, point) -> dict | None:
+        city_query = point.city.replace("ё", "е")
+        cities = await self._fetch_public_json(
+            "https://italianpizza.ru/api/v3/cities",
+            params={"name": city_query, "withSatellites": "true"},
+        )
+        if not isinstance(cities, list) or not cities:
+            logger.info("Stoplist public api city not found city=%s", point.city)
+            return None
+
+        city = None
+        for item in cities:
+            if str(item.get("subdomain") or "").strip().lower() == point.public_slug.lower():
+                city = item
+                break
+        if city is None:
+            normalized_city = self._normalize_text(point.city)
+            for item in cities:
+                if self._normalize_text(str(item.get("name") or "")) == normalized_city:
+                    city = item
+                    break
+        if city is None:
+            city = cities[0]
+
+        organizations = await self._fetch_public_json(
+            "https://italianpizza.ru/api/v3/organizations",
+            params={"cityId": city.get("id"), "address": ""},
+        )
+        if not isinstance(organizations, list) or not organizations:
+            logger.info("Stoplist public api organizations not found point=%s city_id=%s", point.display_name, city.get("id"))
+            return None
+
+        target_address = self._normalize_address_match(point.address)
+        best_org = None
+        best_score = 0
+        for org in organizations:
+            score = 0
+            org_name = self._normalize_address_match(str(org.get("name") or ""))
+            org_address = self._normalize_address_match(str(org.get("address") or ""))
+            if target_address and target_address in org_name:
+                score += 10
+            if target_address and target_address in org_address:
+                score += 12
+            for token in [token for token in target_address.split() if len(token) >= 2]:
+                if token in org_name:
+                    score += 2
+                if token in org_address:
+                    score += 3
+            if score > best_score:
+                best_score = score
+                best_org = org
+
+        if best_org:
+            logger.info(
+                "Stoplist public api organization resolved point=%s organization_id=%s address=%s score=%s",
+                point.display_name,
+                best_org.get("id"),
+                best_org.get("address"),
+                best_score,
+            )
+        return best_org
+
+    async def _fetch_stoplist_products_via_public_api(self, point) -> list[str] | None:
+        organization = await self._resolve_public_organization(point)
+        if not organization or not organization.get("id"):
+            return None
+
+        categories = await self._fetch_public_json(
+            f"https://italianpizza.ru/api/v3/organizations/{organization['id']}/categories"
+        )
+        if not isinstance(categories, list):
+            return None
+
+        items: list[str] = []
+        for category in categories:
+            for product in category.get("products") or []:
+                status = str(product.get("status") or "").strip().lower()
+                if status not in {"stop_list", "not_included_menu"}:
+                    continue
+                name = re.sub(r"\s+", " ", str(product.get("name") or "").replace("\xa0", " ")).strip()
+                cleaned = self._clean_product_name(name)
+                if cleaned and cleaned not in items:
+                    items.append(cleaned)
+        logger.info("Stoplist public api extracted point=%s products_found=%s", point.display_name, len(items))
+        return items
 
     def _confirm_point_from_public_html(self, html: str, point, current_url: str) -> bool:
         normalized_html = self._normalize_text(html)
@@ -483,6 +591,39 @@ class ItalianPizzaPublicAdapter:
                 "diagnostics": {"stage": "resolve_point"},
             }
         target_url = point.public_url.rstrip("/") + "/"
+        stage = "public_api"
+        try:
+            api_items = await self._fetch_stoplist_products_via_public_api(point)
+            if api_items is not None:
+                if api_items:
+                    report_text = "Точка: {}\nСтоп-лист:\n{}".format(
+                        point.display_name,
+                        "\n".join(f"- {item}" for item in api_items[:60]),
+                    )
+                else:
+                    report_text = f"Точка: {point.display_name}\nСтоп-лист: недоступных позиций не найдено."
+                return {
+                    "status": "ok",
+                    "point_name": point.display_name,
+                    "selected": True,
+                    "items": api_items,
+                    "report_text": report_text,
+                    "alert_hash": None,
+                    "diagnostics": self._build_diagnostics(
+                        stage,
+                        target_url,
+                        address_filled=True,
+                        selected=True,
+                        products_found=len(api_items),
+                        source="public_api",
+                    ),
+                }
+            logger.info("Stoplist public api returned no point-specific data point=%s, fallback to html", point.display_name)
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            logger.warning("Stoplist public api failed point=%s error=%s", point.display_name, exc)
+        except Exception as exc:
+            logger.warning("Stoplist public api parse failed point=%s error=%s", point.display_name, exc, exc_info=True)
+
         stage = "fetch_html"
         try:
             logger.info("Stoplist public html fetch point=%s url=%s", point.display_name, target_url)
