@@ -23,11 +23,22 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 
 
-def _resolve_monitor_delivery_chat_id(db, user: User | None) -> int | None:
+def _resolve_monitor_delivery_chat_id(db, user: User | None, category: str | None = None) -> int | None:
     if not user:
         return None
 
     profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user.id).first()
+    if profile and category:
+        category_field = {
+            "reviews": "reviews_report_chat_id",
+            "stoplist": "stoplist_report_chat_id",
+            "blanks": "blanks_report_chat_id",
+        }.get(category)
+        if category_field:
+            category_chat_id = getattr(profile, category_field, None)
+            if category_chat_id:
+                return int(category_chat_id)
+
     if profile and profile.default_report_chat_id:
         return int(profile.default_report_chat_id)
 
@@ -91,7 +102,7 @@ async def _record_monitor_failure(bot: Bot, db, config: DataAgentMonitorConfig, 
     db.refresh(event)
 
     user = db.query(User).filter(User.id == config.user_id).first()
-    delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user)
+    delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, config.monitor_type)
     if delivery_chat_id:
         await bot.send_message(
             chat_id=delivery_chat_id,
@@ -164,7 +175,7 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
             db.refresh(event)
 
             user = db.query(User).filter(User.id == config.user_id).first()
-            delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user)
+            delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "blanks")
             if delivery_chat_id:
                 await bot.send_message(
                     chat_id=delivery_chat_id,
@@ -230,7 +241,7 @@ async def _run_stoplist_monitor(bot: Bot, config: DataAgentMonitorConfig) -> Non
             db.refresh(event)
 
             user = db.query(User).filter(User.id == config.user_id).first()
-            delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user)
+            delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "stoplist")
             if delivery_chat_id:
                 await bot.send_message(
                     chat_id=delivery_chat_id,
@@ -298,7 +309,7 @@ async def _run_reviews_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None
             db.refresh(event)
 
             user = db.query(User).filter(User.id == config.user_id).first()
-            delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user)
+            delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "reviews")
             if delivery_chat_id:
                 await bot.send_message(
                     chat_id=delivery_chat_id,

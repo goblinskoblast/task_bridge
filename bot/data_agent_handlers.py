@@ -36,6 +36,7 @@ SYSTEMS_BUTTON_TEXT = "🔌 Системы"
 POINTS_BUTTON_TEXT = "📍 Точки"
 HELP_BUTTON_TEXT = "❓ Помощь"
 REPORT_CHAT_CALLBACK_PREFIX = "agent_report_chat_select:"
+REPORT_CHAT_CATEGORY_CALLBACK_PREFIX = "agent_report_chat_category:"
 QUICK_REPORT_CALLBACK_PREFIX = "agent_quick:"
 POINT_CALLBACK_PREFIX = "agent_point:"
 POINT_REPORT_CALLBACK_PREFIX = "agent_point_report:"
@@ -68,7 +69,7 @@ AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
             InlineKeyboardButton(text=POINTS_BUTTON_TEXT, callback_data="agent_show_points"),
         ],
         [
-            InlineKeyboardButton(text="💬 Чат для отчётов", callback_data="agent_choose_report_chat"),
+            InlineKeyboardButton(text="💬 Чаты отчётов", callback_data="agent_choose_report_chat"),
             InlineKeyboardButton(text="🔌 Системы", callback_data="agent_show_systems"),
         ],
         [InlineKeyboardButton(text="➕ Подключить систему", callback_data="agent_connect_system")],
@@ -120,6 +121,27 @@ _REPORT_FAILURE_MESSAGES = {
     "stoplist_report": "Не удалось получить отчет по стоп-листу. Попробуйте позже.",
     "blanks_report": "Не удалось получить отчет по бланкам. Попробуйте позже.",
     "reviews_report": "Не удалось получить отчет по отзывам. Попробуйте позже.",
+}
+
+REPORT_CATEGORY_META = {
+    "reviews": {
+        "title": "Отзывы",
+        "emoji": "⭐",
+    },
+    "stoplist": {
+        "title": "Стоп-лист",
+        "emoji": "🚫",
+    },
+    "blanks": {
+        "title": "Бланки",
+        "emoji": "🧾",
+    },
+}
+
+PROFILE_REPORT_CHAT_FIELDS = {
+    "reviews": ("reviews_report_chat_id", "reviews_report_chat_title"),
+    "stoplist": ("stoplist_report_chat_id", "stoplist_report_chat_title"),
+    "blanks": ("blanks_report_chat_id", "blanks_report_chat_title"),
 }
 
 
@@ -255,6 +277,52 @@ def _get_or_create_profile(db, user_id: int) -> DataAgentProfile:
     return profile
 
 
+def _get_profile_report_chat(profile: DataAgentProfile, category: str) -> tuple[int | None, str | None]:
+    fields = PROFILE_REPORT_CHAT_FIELDS.get(category)
+    if fields:
+        chat_id = getattr(profile, fields[0], None)
+        chat_title = getattr(profile, fields[1], None)
+        if chat_id:
+            return int(chat_id), chat_title
+    if profile.default_report_chat_id:
+        return int(profile.default_report_chat_id), profile.default_report_chat_title
+    return None, None
+
+
+def _set_profile_report_chat(profile: DataAgentProfile, category: str, chat: Chat) -> None:
+    fields = PROFILE_REPORT_CHAT_FIELDS[category]
+    title = chat.title or chat.username or str(chat.chat_id)
+    setattr(profile, fields[0], chat.chat_id)
+    setattr(profile, fields[1], title)
+
+
+def _clear_profile_report_chat(profile: DataAgentProfile, category: str) -> None:
+    fields = PROFILE_REPORT_CHAT_FIELDS[category]
+    setattr(profile, fields[0], None)
+    setattr(profile, fields[1], None)
+
+
+def _resolve_report_category_from_action(action_key: str) -> str | None:
+    if action_key in {"reviews_day", "reviews_week"}:
+        return "reviews"
+    if action_key == "stoplist":
+        return "stoplist"
+    if action_key in {"blanks_current", "blanks_12h"}:
+        return "blanks"
+    return None
+
+
+def _resolve_report_category_from_result(result: dict) -> str | None:
+    scenario = (result.get("scenario") or "").strip()
+    if scenario == "reviews_report":
+        return "reviews"
+    if scenario == "stoplist_report":
+        return "stoplist"
+    if scenario == "blanks_report":
+        return "blanks"
+    return None
+
+
 def _get_user_report_chats(db, user_id: int) -> list[Chat]:
     chat_rows = (
         db.query(Chat)
@@ -278,7 +346,27 @@ def _get_user_report_chats(db, user_id: int) -> list[Chat]:
     return unique_chats
 
 
-def _build_report_chat_keyboard(chats: list[Chat], selected_chat_id: int | None) -> InlineKeyboardMarkup:
+def _build_report_chat_categories_keyboard(profile: DataAgentProfile) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    for category, meta in REPORT_CATEGORY_META.items():
+        current_chat_id, current_title = _get_profile_report_chat(profile, category)
+        suffix = f" • {current_title[:24]}" if current_title else " • не выбран"
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{meta['emoji']} {meta['title']}{suffix}",
+                    callback_data=f"{REPORT_CHAT_CATEGORY_CALLBACK_PREFIX}{category}",
+                )
+            ]
+        )
+    return _with_agent_home(InlineKeyboardMarkup(inline_keyboard=buttons))
+
+
+def _build_report_chat_keyboard(
+    chats: list[Chat],
+    selected_chat_id: int | None,
+    category: str = "reviews",
+) -> InlineKeyboardMarkup:
     buttons = []
     for item in chats[:10]:
         label = item.title or item.username or f"chat {item.chat_id}"
@@ -287,12 +375,15 @@ def _build_report_chat_keyboard(chats: list[Chat], selected_chat_id: int | None)
             [
                 InlineKeyboardButton(
                     text=f"{prefix}{label[:40]}",
-                    callback_data=f"{REPORT_CHAT_CALLBACK_PREFIX}{item.chat_id}",
+                    callback_data=f"{REPORT_CHAT_CALLBACK_PREFIX}{category}:{item.chat_id}",
                 )
             ]
         )
 
-    buttons.append([InlineKeyboardButton(text="Отключить доставку в чат", callback_data="agent_report_chat_clear")])
+    buttons.append(
+        [InlineKeyboardButton(text="Отключить доставку в этот чат", callback_data=f"agent_report_chat_clear:{category}")]
+    )
+    buttons.append([InlineKeyboardButton(text="↩️ К категориям", callback_data="agent_choose_report_chat")])
     return _with_agent_home(InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
@@ -375,6 +466,7 @@ async def _deliver_report_to_selected_chat(
     user_message: str,
     answer: str,
     *,
+    report_category: str | None = None,
     telegram_user_id: int | None = None,
     requester_name: str | None = None,
 ) -> str | None:
@@ -387,28 +479,33 @@ async def _deliver_report_to_selected_chat(
             return None
 
         profile = _get_or_create_profile(db, user.id)
-        if not profile.default_report_chat_id:
-            logger.info("Report delivery skipped: no default report chat user_id=%s", user.id)
+        target_chat_id, target_chat_title = _get_profile_report_chat(profile, report_category or "")
+        if not target_chat_id:
+            logger.info(
+                "Report delivery skipped: no report chat user_id=%s category=%s",
+                user.id,
+                report_category,
+            )
             return None
 
         chat = (
             db.query(Chat)
             .filter(
-                Chat.chat_id == profile.default_report_chat_id,
+                Chat.chat_id == target_chat_id,
             )
             .first()
         )
-        target_chat_id = int(profile.default_report_chat_id)
         chat_title = (
             (chat.title if chat and chat.title else None)
             or (chat.username if chat and chat.username else None)
-            or profile.default_report_chat_title
+            or target_chat_title
             or str(target_chat_id)
         )
         logger.info(
-            "Report delivery attempt telegram_user_id=%s user_id=%s target_chat_id=%s title=%s",
+            "Report delivery attempt telegram_user_id=%s user_id=%s category=%s target_chat_id=%s title=%s",
             effective_telegram_user_id,
             user.id,
+            report_category,
             target_chat_id,
             chat_title,
         )
@@ -423,9 +520,10 @@ async def _deliver_report_to_selected_chat(
             text=trim_telegram_text(delivery_text),
         )
         logger.info(
-            "Report delivery success telegram_user_id=%s user_id=%s target_chat_id=%s",
+            "Report delivery success telegram_user_id=%s user_id=%s category=%s target_chat_id=%s",
             effective_telegram_user_id,
             user.id,
+            report_category,
             target_chat_id,
         )
         return chat_title
@@ -812,6 +910,7 @@ async def _send_saved_points_report(
     *,
     actor_user: TelegramUser | None = None,
 ) -> None:
+    report_category = _resolve_report_category_from_action(action_key)
     waiting = await message.answer(
         f"⏳ Собираю отчёт «{QUICK_REPORT_ACTIONS[action_key]['title']}» по {len(points)} "
         f"{'точке' if len(points) == 1 else 'точкам'}..."
@@ -841,6 +940,7 @@ async def _send_saved_points_report(
                 message,
                 _build_quick_report_request(action_key, point.display_name),
                 answer,
+                report_category=report_category,
                 telegram_user_id=actor_user.id if actor_user else message.from_user.id,
                 requester_name=requester_name,
             )
@@ -899,6 +999,7 @@ async def _send_agent_request(message: Message, text: str) -> None:
     await message.answer(answer, reply_markup=AGENT_HOME_KEYBOARD)
 
     if is_report_delivery_candidate(result):
+        report_category = _resolve_report_category_from_result(result)
         db = get_db_session()
         try:
             delivery_points = _find_delivery_points_for_message(db, message.from_user.id, text)
@@ -910,6 +1011,7 @@ async def _send_agent_request(message: Message, text: str) -> None:
                 message,
                 text,
                 answer,
+                report_category=report_category,
                 telegram_user_id=message.from_user.id,
                 requester_name=_get_requester_name(message),
             )
@@ -1456,8 +1558,8 @@ async def cmd_reportchat(message: Message) -> None:
             return
 
         await message.answer(
-            "💬 <b>Чат для отчётов</b>\n\nВыберите, куда дублировать отчёты по отзывам, стоп-листам и бланкам.",
-            reply_markup=_build_report_chat_keyboard(chats, profile.default_report_chat_id),
+            "💬 <b>Чаты для отчётов</b>\n\nВыберите категорию и укажите, в какой чат отправлять её отчёты.",
+            reply_markup=_build_report_chat_categories_keyboard(profile),
             parse_mode="HTML",
         )
     finally:
@@ -1491,8 +1593,50 @@ async def callback_agent_choose_report_chat(callback: CallbackQuery) -> None:
             return
 
         await callback.message.answer(
-            "💬 <b>Чат для отчётов</b>\n\nВыберите, куда дублировать отчёты по отзывам, стоп-листам и бланкам.",
-            reply_markup=_build_report_chat_keyboard(chats, profile.default_report_chat_id),
+            "💬 <b>Чаты для отчётов</b>\n\nВыберите категорию и укажите, в какой чат отправлять её отчёты.",
+            reply_markup=_build_report_chat_categories_keyboard(profile),
+            parse_mode="HTML",
+        )
+    finally:
+        db.close()
+
+
+@router.callback_query(F.data.startswith(REPORT_CHAT_CATEGORY_CALLBACK_PREFIX))
+async def callback_agent_report_chat_category(callback: CallbackQuery) -> None:
+    await callback.answer()
+    if not callback.message:
+        return
+
+    category = callback.data[len(REPORT_CHAT_CATEGORY_CALLBACK_PREFIX):]
+    if category not in REPORT_CATEGORY_META:
+        await callback.message.answer("Не удалось определить категорию отчёта.", reply_markup=AGENT_HOME_KEYBOARD)
+        return
+
+    db = get_db_session()
+    try:
+        user = _get_or_create_user(
+            db=db,
+            telegram_id=callback.from_user.id,
+            username=callback.from_user.username,
+            first_name=callback.from_user.first_name,
+            last_name=callback.from_user.last_name,
+            is_bot=callback.from_user.is_bot,
+        )
+        profile = _get_or_create_profile(db, user.id)
+        chats = _get_user_report_chats(db, user.id)
+        if not chats:
+            await callback.message.answer(
+                "💬 Я пока не вижу подходящих групповых чатов.\n\n"
+                "Напишите сообщение в нужном чате с TaskBridge и попробуйте снова.",
+                reply_markup=AGENT_HOME_KEYBOARD,
+            )
+            return
+
+        selected_chat_id, _ = _get_profile_report_chat(profile, category)
+        meta = REPORT_CATEGORY_META[category]
+        await callback.message.answer(
+            f"💬 <b>{meta['title']}</b>\n\nВыберите чат для этой категории отчётов.",
+            reply_markup=_build_report_chat_keyboard(chats, selected_chat_id, category),
             parse_mode="HTML",
         )
     finally:
@@ -1505,7 +1649,13 @@ async def callback_agent_report_chat_select(callback: CallbackQuery) -> None:
     if not callback.message:
         return
 
-    selected_chat_id = int(callback.data.split(":")[-1])
+    payload = callback.data[len(REPORT_CHAT_CALLBACK_PREFIX):]
+    category, chat_id_raw = payload.split(":", 1)
+    if category not in REPORT_CATEGORY_META or not chat_id_raw.lstrip("-").isdigit():
+        await callback.message.answer("Не удалось сохранить настройки чата.", reply_markup=AGENT_HOME_KEYBOARD)
+        return
+
+    selected_chat_id = int(chat_id_raw)
     db = get_db_session()
     try:
         user = _get_or_create_user(
@@ -1527,12 +1677,13 @@ async def callback_agent_report_chat_select(callback: CallbackQuery) -> None:
             )
             return
 
-        profile.default_report_chat_id = selected_chat.chat_id
-        profile.default_report_chat_title = selected_chat.title or selected_chat.username or str(selected_chat.chat_id)
+        _set_profile_report_chat(profile, category, selected_chat)
         db.commit()
 
+        category_title = REPORT_CATEGORY_META[category]["title"]
+        _, chat_title = _get_profile_report_chat(profile, category)
         await callback.message.answer(
-            f"✅ Готово. Новые отчёты буду дублировать в чат:\n<b>{profile.default_report_chat_title}</b>",
+            f"✅ Готово. Отчёты категории <b>{category_title}</b> буду дублировать в чат:\n<b>{chat_title}</b>",
             reply_markup=AGENT_HOME_KEYBOARD,
             parse_mode="HTML",
         )
@@ -1540,10 +1691,16 @@ async def callback_agent_report_chat_select(callback: CallbackQuery) -> None:
         db.close()
 
 
-@router.callback_query(F.data == "agent_report_chat_clear")
+@router.callback_query(F.data.startswith("agent_report_chat_clear"))
 async def callback_agent_report_chat_clear(callback: CallbackQuery) -> None:
     await callback.answer("Доставка в чат отключена")
     if not callback.message:
+        return
+
+    parts = callback.data.split(":", 1)
+    category = parts[1] if len(parts) > 1 else ""
+    if category not in REPORT_CATEGORY_META:
+        await callback.message.answer("Не удалось определить категорию отчёта.", reply_markup=AGENT_HOME_KEYBOARD)
         return
 
     db = get_db_session()
@@ -1557,10 +1714,14 @@ async def callback_agent_report_chat_clear(callback: CallbackQuery) -> None:
             is_bot=callback.from_user.is_bot,
         )
         profile = _get_or_create_profile(db, user.id)
-        profile.default_report_chat_id = None
-        profile.default_report_chat_title = None
+        _clear_profile_report_chat(profile, category)
         db.commit()
-        await callback.message.answer("✅ Дублирование отчётов в групповой чат отключено.", reply_markup=AGENT_HOME_KEYBOARD)
+        category_title = REPORT_CATEGORY_META[category]["title"]
+        await callback.message.answer(
+            f"✅ Дублирование отчётов категории <b>{category_title}</b> в чат отключено.",
+            reply_markup=AGENT_HOME_KEYBOARD,
+            parse_mode="HTML",
+        )
     finally:
         db.close()
 

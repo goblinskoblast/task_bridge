@@ -111,6 +111,30 @@ def _ensure_data_agent_profile_columns():
         alter_statements.append(
             "ALTER TABLE data_agent_profiles ADD COLUMN default_report_chat_title VARCHAR(500)"
         )
+    if "reviews_report_chat_id" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE data_agent_profiles ADD COLUMN reviews_report_chat_id {bigint_type}"
+        )
+    if "reviews_report_chat_title" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE data_agent_profiles ADD COLUMN reviews_report_chat_title VARCHAR(500)"
+        )
+    if "stoplist_report_chat_id" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE data_agent_profiles ADD COLUMN stoplist_report_chat_id {bigint_type}"
+        )
+    if "stoplist_report_chat_title" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE data_agent_profiles ADD COLUMN stoplist_report_chat_title VARCHAR(500)"
+        )
+    if "blanks_report_chat_id" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE data_agent_profiles ADD COLUMN blanks_report_chat_id {bigint_type}"
+        )
+    if "blanks_report_chat_title" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE data_agent_profiles ADD COLUMN blanks_report_chat_title VARCHAR(500)"
+        )
 
     if not alter_statements:
         return
