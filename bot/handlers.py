@@ -294,8 +294,7 @@ def _build_main_reply_keyboard(webapp_url: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=PANEL_BUTTON_TEXT, web_app=WebAppInfo(url=webapp_url))],
-            [KeyboardButton(text=AGENT_MAIN_BUTTON_TEXT), KeyboardButton(text=QUICK_REPORTS_BUTTON_TEXT)],
-            [KeyboardButton(text=MONITORS_BUTTON_TEXT), KeyboardButton(text=SUPPORT_BUTTON_TEXT)],
+            [KeyboardButton(text=AGENT_MAIN_BUTTON_TEXT), KeyboardButton(text=SUPPORT_BUTTON_TEXT)],
             [KeyboardButton(text=HELP_BUTTON_TEXT)],
         ],
         resize_keyboard=True,

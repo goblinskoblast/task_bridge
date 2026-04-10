@@ -69,6 +69,12 @@ AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
     ]
 )
 
+AGENT_HOME_KEYBOARD = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="↩️ В меню агента", callback_data="agent_open")],
+    ]
+)
+
 QUICK_REPORT_ACTIONS = {
     "reviews_day": {
         "title": "Отзывы за сутки",
@@ -109,6 +115,21 @@ _REPORT_FAILURE_MESSAGES = {
     "blanks_report": "Не удалось получить отчет по бланкам. Попробуйте позже.",
     "reviews_report": "Не удалось получить отчет по отзывам. Попробуйте позже.",
 }
+
+
+def _with_agent_home(keyboard: InlineKeyboardMarkup | None = None) -> InlineKeyboardMarkup:
+    if keyboard is None:
+        return AGENT_HOME_KEYBOARD
+
+    rows: list[list[InlineKeyboardButton]] = [list(row) for row in keyboard.inline_keyboard]
+    has_home = any(
+        getattr(button, "callback_data", None) == "agent_open"
+        for row in rows
+        for button in row
+    )
+    if not has_home:
+        rows.append([InlineKeyboardButton(text="↩️ В меню агента", callback_data="agent_open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _sanitize_user_facing_answer(answer: str) -> str:
@@ -228,7 +249,7 @@ def _build_report_chat_keyboard(chats: list[Chat], selected_chat_id: int | None)
         )
 
     buttons.append([InlineKeyboardButton(text="Отключить доставку в чат", callback_data="agent_report_chat_clear")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    return _with_agent_home(InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
 def _get_requester_name(message: Message) -> str:
@@ -349,14 +370,13 @@ def _build_points_overview_keyboard(points: list[SavedPoint]) -> InlineKeyboardM
     if len(points) > 1:
         buttons.append([InlineKeyboardButton(text="🌐 Все точки", callback_data=f"{POINT_CALLBACK_PREFIX}all")])
     buttons.append([InlineKeyboardButton(text="➕ Добавить точку", callback_data="agent_point_add")])
-    buttons.append([InlineKeyboardButton(text="↩️ В меню агента", callback_data="agent_open")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    return _with_agent_home(InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
 def _build_point_actions_keyboard(point: SavedPoint) -> InlineKeyboardMarkup:
     point_id = point.id
     delivery_label = "📨 В чат: вкл" if point.report_delivery_enabled else "🔕 В чат: выкл"
-    return InlineKeyboardMarkup(
+    return _with_agent_home(InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="⭐ Отзывы", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}{point_id}:reviews_day"),
@@ -372,11 +392,11 @@ def _build_point_actions_keyboard(point: SavedPoint) -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton(text="↩️ К списку точек", callback_data="agent_show_points")],
         ]
-    )
+    ))
 
 
 def _build_all_points_actions_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
+    return _with_agent_home(InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="⭐ Отзывы", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}all:reviews_day"),
@@ -388,7 +408,7 @@ def _build_all_points_actions_keyboard() -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton(text="↩️ К списку точек", callback_data="agent_show_points")],
         ]
-    )
+    ))
 
 
 def _build_points_summary_text(points: list[SavedPoint]) -> str:
@@ -561,7 +581,7 @@ async def _prompt_quick_report_action(
     await state.update_data(quick_report_action=action_key)
     await message.answer(
         _build_quick_report_prompt(action_key),
-        reply_markup=QUICK_REPORT_PROMPT_KEYBOARD,
+        reply_markup=_with_agent_home(QUICK_REPORT_PROMPT_KEYBOARD),
         parse_mode="HTML",
     )
 
@@ -572,7 +592,7 @@ async def _send_systems_summary(message: Message, *, telegram_user_id: int | Non
         systems = await data_agent_client.list_systems(effective_user_id)
     except Exception as exc:
         logger.error("Agent systems error: %s", exc, exc_info=True)
-        await message.answer("Не удалось получить список подключённых систем.")
+        await message.answer("Не удалось получить список подключённых систем.", reply_markup=AGENT_HOME_KEYBOARD)
         return
 
     if not systems:
@@ -595,7 +615,7 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
         monitors = await data_agent_client.list_monitors(effective_user_id)
     except Exception as exc:
         logger.error("Agent monitors error: %s", exc, exc_info=True)
-        await message.answer("Не удалось получить список мониторингов.")
+        await message.answer("Не удалось получить список мониторингов.", reply_markup=AGENT_HOME_KEYBOARD)
         return
 
     if not monitors:
@@ -653,7 +673,7 @@ async def _send_point_details(message: Message, telegram_user_id: int, point_id:
     try:
         point = saved_point_service.get_point(db, telegram_user_id, point_id)
         if not point or not point.is_active:
-            await message.answer("Точка не найдена или уже удалена.")
+            await message.answer("Точка не найдена или уже удалена.", reply_markup=AGENT_HOME_KEYBOARD)
             return
         await message.answer(
             "📍 <b>Точка</b>\n\n"
@@ -672,7 +692,7 @@ async def _send_all_points_details(message: Message, telegram_user_id: int) -> N
     try:
         points = saved_point_service.list_points(db, telegram_user_id)
         if not points:
-            await message.answer("Сначала добавьте хотя бы одну точку.")
+            await message.answer("Сначала добавьте хотя бы одну точку.", reply_markup=AGENT_HOME_KEYBOARD)
             return
         await message.answer(
             _build_points_summary_text(points),
@@ -730,11 +750,11 @@ async def _send_saved_points_report(
     final_text = "\n\n".join(sections)
     if len(final_text) > 3900:
         final_text = final_text[:3890].rstrip() + "…"
-    await waiting.edit_text(final_text, parse_mode=None)
+    await waiting.edit_text(final_text, parse_mode=None, reply_markup=AGENT_HOME_KEYBOARD)
     if delivered_to_chat:
-        await message.answer(f"Отчёт также отправлен в чат: {delivered_to_chat}")
+        await message.answer(f"Отчёт также отправлен в чат: {delivered_to_chat}", reply_markup=AGENT_HOME_KEYBOARD)
     elif attempted_delivery and failed_delivery:
-        await message.answer("Не удалось продублировать отчёт в выбранный чат.")
+        await message.answer("Не удалось продублировать отчёт в выбранный чат.", reply_markup=AGENT_HOME_KEYBOARD)
 
 
 async def _dispatch_agent_request(message: Message, text: str) -> None:
@@ -757,7 +777,7 @@ async def _send_agent_request(message: Message, text: str) -> None:
             exc,
             exc_info=True,
         )
-        await message.answer(exc.user_message)
+        await message.answer(exc.user_message, reply_markup=AGENT_HOME_KEYBOARD)
         return
     except Exception as exc:
         logger.error(
@@ -767,11 +787,14 @@ async def _send_agent_request(message: Message, text: str) -> None:
             exc,
             exc_info=True,
         )
-        await message.answer("Агент сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз.")
+        await message.answer(
+            "Агент сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз.",
+            reply_markup=AGENT_HOME_KEYBOARD,
+        )
         return
 
     answer = _build_user_safe_agent_answer(result)
-    await message.answer(answer)
+    await message.answer(answer, reply_markup=AGENT_HOME_KEYBOARD)
 
 
 async def _open_agent_entry(message: Message, state: FSMContext, *, actor_user: TelegramUser | None = None) -> None:
@@ -840,6 +863,7 @@ async def callback_agent_connect_system(callback: CallbackQuery, state: FSMConte
             "🔗 <b>Подключение системы</b>\n\n"
             "Пришлите URL системы одним сообщением.\n"
             "Например: <code>https://portal.example.com</code>",
+            reply_markup=AGENT_HOME_KEYBOARD,
             parse_mode="HTML",
         )
 
@@ -873,7 +897,8 @@ async def callback_agent_point_add(callback: CallbackQuery, state: FSMContext) -
     if not has_system:
         if callback.message:
             await callback.message.answer(
-                "Сначала подключите систему Italian Pizza. После этого можно будет добавлять точки."
+                "Сначала подключите систему Italian Pizza. После этого можно будет добавлять точки.",
+                reply_markup=AGENT_HOME_KEYBOARD,
             )
         return
     await state.set_state(PointManagementState.waiting_for_new_point)
@@ -883,6 +908,7 @@ async def callback_agent_point_add(callback: CallbackQuery, state: FSMContext) -
             "Точка будет привязана к подключённой системе Italian Pizza.\n\n"
             "Пришлите город и адрес одним сообщением.\n"
             "Например: <code>Сухой Лог, Белинского 40</code>",
+            reply_markup=AGENT_HOME_KEYBOARD,
             parse_mode="HTML",
         )
 
@@ -905,7 +931,7 @@ async def callback_agent_point(callback: CallbackQuery, state: FSMContext) -> No
                 db.close()
             await state.clear()
             if not points:
-                await callback.message.answer("Сначала добавьте хотя бы одну точку.")
+                await callback.message.answer("Сначала добавьте хотя бы одну точку.", reply_markup=AGENT_HOME_KEYBOARD)
                 return
             await _send_saved_points_report(callback.message, action_key, points, actor_user=callback.from_user)
             return
@@ -923,12 +949,12 @@ async def callback_agent_point(callback: CallbackQuery, state: FSMContext) -> No
             return
         finally:
             db.close()
-        await callback.message.answer(f"🗑 Точка отключена: {point.display_name}")
+        await callback.message.answer(f"🗑 Точка отключена: {point.display_name}", reply_markup=AGENT_HOME_KEYBOARD)
         await _send_points_summary(callback.message, telegram_user_id=callback.from_user.id)
         return
 
     if not payload.isdigit():
-        await callback.message.answer("Не удалось определить точку.")
+        await callback.message.answer("Не удалось определить точку.", reply_markup=AGENT_HOME_KEYBOARD)
         return
 
     point_id = int(payload)
@@ -1293,7 +1319,8 @@ async def cmd_reportchat(message: Message) -> None:
         if not chats:
             await message.answer(
                 "💬 Я пока не вижу подходящих групповых чатов.\n\n"
-                "Напишите что-нибудь в нужном чате с TaskBridge и повторите команду."
+                "Напишите что-нибудь в нужном чате с TaskBridge и повторите команду.",
+                reply_markup=AGENT_HOME_KEYBOARD,
             )
             return
 
@@ -1327,7 +1354,8 @@ async def callback_agent_choose_report_chat(callback: CallbackQuery) -> None:
         if not chats:
             await callback.message.answer(
                 "💬 Я пока не вижу подходящих групповых чатов.\n\n"
-                "Напишите сообщение в нужном чате с TaskBridge и попробуйте снова."
+                "Напишите сообщение в нужном чате с TaskBridge и попробуйте снова.",
+                reply_markup=AGENT_HOME_KEYBOARD,
             )
             return
 
@@ -1362,7 +1390,10 @@ async def callback_agent_report_chat_select(callback: CallbackQuery) -> None:
         selected_chat = next((item for item in available_chats if item.chat_id == selected_chat_id), None)
 
         if not selected_chat:
-            await callback.message.answer("Этот чат недоступен для выбора. Попробуйте обновить список.")
+            await callback.message.answer(
+                "Этот чат недоступен для выбора. Попробуйте обновить список.",
+                reply_markup=AGENT_HOME_KEYBOARD,
+            )
             return
 
         profile.default_report_chat_id = selected_chat.chat_id
@@ -1371,6 +1402,7 @@ async def callback_agent_report_chat_select(callback: CallbackQuery) -> None:
 
         await callback.message.answer(
             f"✅ Готово. Новые отчёты буду дублировать в чат:\n<b>{profile.default_report_chat_title}</b>",
+            reply_markup=AGENT_HOME_KEYBOARD,
             parse_mode="HTML",
         )
     finally:
@@ -1397,7 +1429,7 @@ async def callback_agent_report_chat_clear(callback: CallbackQuery) -> None:
         profile.default_report_chat_id = None
         profile.default_report_chat_title = None
         db.commit()
-        await callback.message.answer("✅ Дублирование отчётов в групповой чат отключено.")
+        await callback.message.answer("✅ Дублирование отчётов в групповой чат отключено.", reply_markup=AGENT_HOME_KEYBOARD)
     finally:
         db.close()
 
