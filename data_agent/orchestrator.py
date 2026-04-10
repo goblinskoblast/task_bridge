@@ -192,10 +192,7 @@ class DataAgentOrchestrator:
             elif stoplist_result.get("status") in {"needs_point", "needs_period", "awaiting_user_input"}:
                 parts.append(stoplist_result.get("message", "Нужно уточнить параметры для стоп-листа."))
             else:
-                parts.append(
-                    "Стоп-лист сейчас не удалось собрать. "
-                    f"Причина: {stoplist_result.get('message', stoplist_result.get('error', 'неизвестная ошибка'))}"
-                )
+                parts.append(stoplist_result.get("message", "Стоп-лист сейчас не удалось собрать. Попробуйте позже."))
 
         blanks_result = tool_results.get("blanks_tool")
         if blanks_result:
@@ -204,10 +201,7 @@ class DataAgentOrchestrator:
             elif blanks_result.get("status") in {"needs_point", "needs_period", "awaiting_user_input"}:
                 parts.append(blanks_result.get("message", "Нужно уточнить параметры для отчёта по бланкам."))
             else:
-                parts.append(
-                    "Проверку бланков сейчас не удалось выполнить. "
-                    f"Причина: {blanks_result.get('message', blanks_result.get('error', 'неизвестная ошибка'))}"
-                )
+                parts.append(blanks_result.get("message", "Проверку бланков сейчас не удалось выполнить. Попробуйте позже."))
 
         if not parts:
             parts.append("Пока не удалось собрать полезные данные по этому запросу. Нужен более конкретный источник или уточнение задачи.")

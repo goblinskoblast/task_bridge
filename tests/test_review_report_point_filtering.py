@@ -1,4 +1,4 @@
-import os
+﻿import os
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -15,13 +15,13 @@ from data_agent.scenario_engine import (
 
 
 class ReviewReportPointFilteringTest(unittest.IsolatedAsyncioTestCase):
-    async def test_public_reviews_providers_default_to_both_sources(self):
+    async def test_public_reviews_providers_default_to_yandex(self):
         providers = _resolve_public_reviews_providers("собери отзывы по Верхний Уфалей, Ленина 147")
-        self.assertEqual(providers, ["yandex_maps", "2gis"])
+        self.assertEqual(providers, ["yandex_maps"])
 
-    async def test_public_reviews_providers_keep_explicit_source_first(self):
+    async def test_public_reviews_providers_keep_explicit_2gis(self):
         providers = _resolve_public_reviews_providers("собери отзывы по Верхний Уфалей, Ленина 147 на 2гис")
-        self.assertEqual(providers, ["2gis", "yandex_maps"])
+        self.assertEqual(providers, ["2gis"])
 
     async def test_filter_rows_by_point_matches_aliases(self):
         service = ReviewReportService()
@@ -49,7 +49,7 @@ class ReviewReportPointFilteringTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["status"], "ok")
         self.assertIn("По выбранной точке", summary["report_text"])
 
-    async def test_reviews_scenario_prefers_sheet_for_point_queries(self):
+    async def test_reviews_scenario_prefers_structured_report_for_point_queries(self):
         scenario = ReviewsReportScenario()
         sheet_result = {"status": "ok", "report_text": "sheet report"}
 
@@ -75,7 +75,7 @@ class ReviewReportPointFilteringTest(unittest.IsolatedAsyncioTestCase):
         )
         mocked_browser.assert_not_awaited()
 
-    async def test_reviews_scenario_uses_browser_for_maps_queries(self):
+    async def test_reviews_scenario_uses_browser_for_explicit_maps_queries(self):
         scenario = ReviewsReportScenario()
         browser_result = {"status": "ok", "report_text": "maps report"}
 
@@ -97,10 +97,36 @@ class ReviewReportPointFilteringTest(unittest.IsolatedAsyncioTestCase):
         mocked_build_report.assert_not_awaited()
         mocked_browser.assert_awaited_once()
 
-    async def test_public_reviews_browser_collects_yandex_and_2gis(self):
+    async def test_reviews_scenario_falls_back_to_yandex_when_structured_sources_unavailable(self):
+        scenario = ReviewsReportScenario()
+        fallback_result = {"status": "ok", "report_text": "yandex fallback"}
+
+        with patch(
+            "data_agent.scenario_engine.review_report_service.build_report",
+            AsyncMock(return_value={"status": "not_configured", "message": "Отчёт пока недоступен."}),
+        ) as mocked_build_report, patch(
+            "data_agent.scenario_engine._run_public_reviews_browser",
+            AsyncMock(return_value=fallback_result),
+        ) as mocked_browser:
+            execution = await scenario.execute(
+                user_id=17,
+                user_message="собери отзывы по Верхний Уфалей, Ленина 147 за неделю",
+                slots={"point_name": "Верхний Уфалей, Ленина 147"},
+                systems=[],
+            )
+
+        self.assertEqual(execution.tool_results["review_tool"], fallback_result)
+        mocked_build_report.assert_awaited_once()
+        mocked_browser.assert_awaited_once_with(
+            "собери отзывы по Верхний Уфалей, Ленина 147 за неделю",
+            targets=["Верхний Уфалей, Ленина 147"],
+            providers=["yandex_maps"],
+        )
+
+    async def test_public_reviews_browser_collects_yandex_only_by_default(self):
         with patch(
             "data_agent.scenario_engine.browser_agent.extract_data",
-            AsyncMock(side_effect=["yandex report", "2gis report"]),
+            AsyncMock(return_value="yandex report"),
         ) as mocked_extract:
             result = await _run_public_reviews_browser(
                 "собери отзывы по Верхний Уфалей, Ленина 147",
@@ -108,23 +134,19 @@ class ReviewReportPointFilteringTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["providers"], ["yandex_maps", "2gis"])
-        self.assertEqual(mocked_extract.await_count, 2)
+        self.assertEqual(result["providers"], ["yandex_maps"])
+        self.assertEqual(mocked_extract.await_count, 1)
         first_url = mocked_extract.await_args_list[0].kwargs["url"]
-        second_url = mocked_extract.await_args_list[1].kwargs["url"]
         self.assertIn("yandex.ru/maps", first_url)
-        self.assertIn("2gis.ru/search", second_url)
         self.assertIn("Яндекс Карты", result["report_text"])
-        self.assertIn("2GIS", result["report_text"])
         self.assertIn("yandex report", result["report_text"])
-        self.assertIn("2gis report", result["report_text"])
 
-    async def test_reviews_scenario_requests_point_when_sheet_missing(self):
+    async def test_reviews_scenario_requests_point_when_sources_missing_without_point(self):
         scenario = ReviewsReportScenario()
 
         with patch(
             "data_agent.scenario_engine.review_report_service.build_report",
-            AsyncMock(return_value={"status": "not_configured", "message": "Не задан REVIEWS_SHEET_URL"}),
+            AsyncMock(return_value={"status": "not_configured", "message": "Отчёт пока недоступен."}),
         ) as mocked_build_report, patch(
             "data_agent.scenario_engine._run_public_reviews_browser",
             AsyncMock(),

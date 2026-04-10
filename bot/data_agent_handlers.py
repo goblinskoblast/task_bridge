@@ -111,6 +111,29 @@ _REPORT_FAILURE_MESSAGES = {
 }
 
 
+def _sanitize_user_facing_answer(answer: str) -> str:
+    text = (answer or "").strip()
+    if not text:
+        return ""
+
+    cleaned_lines: list[str] = []
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        lowered = stripped.lower()
+        if lowered.startswith("причина:") or lowered.startswith("причины:"):
+            continue
+
+        if " Причина:" in raw_line:
+            raw_line = raw_line.split(" Причина:", 1)[0].rstrip()
+        if " Причины:" in raw_line:
+            raw_line = raw_line.split(" Причины:", 1)[0].rstrip()
+
+        if raw_line.strip():
+            cleaned_lines.append(raw_line)
+
+    return "\n".join(cleaned_lines).strip()
+
+
 class ConnectSystemState(StatesGroup):
     waiting_for_url = State()
     waiting_for_login = State()
@@ -229,7 +252,7 @@ def _is_developer_telegram_id(telegram_user_id: int | None) -> bool:
 def _build_user_safe_agent_answer(result: dict) -> str:
     scenario = (result.get("scenario") or "").strip()
     status = (result.get("status") or "").strip()
-    answer = (result.get("answer") or "").strip()
+    answer = _sanitize_user_facing_answer((result.get("answer") or "").strip())
     if status == "failed" and scenario in _REPORT_FAILURE_MESSAGES:
         if answer and not answer.startswith("DataAgent не смог обработать запрос:"):
             return answer
@@ -250,22 +273,28 @@ async def _deliver_report_to_selected_chat(
         effective_telegram_user_id = telegram_user_id or message.from_user.id
         user = db.query(User).filter(User.telegram_id == effective_telegram_user_id).first()
         if not user:
+            logger.warning("Report delivery skipped: user not found telegram_user_id=%s", effective_telegram_user_id)
             return None
 
         profile = _get_or_create_profile(db, user.id)
         if not profile.default_report_chat_id:
+            logger.info("Report delivery skipped: no default report chat user_id=%s", user.id)
             return None
 
         chat = (
             db.query(Chat)
             .filter(
                 Chat.chat_id == profile.default_report_chat_id,
-                Chat.is_active.is_(True),
             )
             .first()
         )
-        if not chat:
-            return None
+        target_chat_id = int(profile.default_report_chat_id)
+        chat_title = (
+            (chat.title if chat and chat.title else None)
+            or (chat.username if chat and chat.username else None)
+            or profile.default_report_chat_title
+            or str(target_chat_id)
+        )
 
         delivery_text = build_report_delivery_message(
             requester_name=requester_name or _get_requester_name(message),
@@ -273,10 +302,10 @@ async def _deliver_report_to_selected_chat(
             answer=answer,
         )
         await message.bot.send_message(
-            chat_id=chat.chat_id,
+            chat_id=target_chat_id,
             text=trim_telegram_text(delivery_text),
         )
-        return chat.title or chat.username or str(chat.chat_id)
+        return chat_title
     except Exception as exc:
         logger.error("Report delivery to selected chat failed: %s", exc, exc_info=True)
         return None
@@ -667,6 +696,8 @@ async def _send_saved_points_report(
     )
     sections: list[str] = []
     delivered_to_chat: str | None = None
+    attempted_delivery = False
+    failed_delivery = False
     requester_name = _get_requester_name_from_actor(actor_user, message)
     for point in points:
         try:
@@ -683,6 +714,7 @@ async def _send_saved_points_report(
             answer = "Не удалось получить отчёт по этой точке."
         sections.append(f"{point.display_name}\n{answer}")
         if point.report_delivery_enabled:
+            attempted_delivery = True
             current_chat = await _deliver_report_to_selected_chat(
                 message,
                 _build_quick_report_request(action_key, point.display_name),
@@ -692,6 +724,8 @@ async def _send_saved_points_report(
             )
             if current_chat and delivered_to_chat is None:
                 delivered_to_chat = current_chat
+            if not current_chat:
+                failed_delivery = True
 
     final_text = "\n\n".join(sections)
     if len(final_text) > 3900:
@@ -699,6 +733,8 @@ async def _send_saved_points_report(
     await waiting.edit_text(final_text, parse_mode=None)
     if delivered_to_chat:
         await message.answer(f"Отчёт также отправлен в чат: {delivered_to_chat}")
+    elif attempted_delivery and failed_delivery:
+        await message.answer("Не удалось продублировать отчёт в выбранный чат.")
 
 
 async def _dispatch_agent_request(message: Message, text: str) -> None:

@@ -1,4 +1,4 @@
-import os
+﻿import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -20,7 +20,7 @@ class _DummyMessage:
 
 
 class AgentVisibilityTest(unittest.IsolatedAsyncioTestCase):
-    async def test_failed_report_response_is_neutral_without_debug_block(self):
+    async def test_failed_report_response_is_sanitized_without_debug_block(self):
         message = _DummyMessage()
         result = {
             "status": "failed",
@@ -34,7 +34,7 @@ class AgentVisibilityTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             message.answers,
-            ["Стоп-лист сейчас не удалось собрать. Причина: Не удалось подтвердить выбор точки."],
+            ["Стоп-лист сейчас не удалось собрать."],
         )
 
     async def test_non_developer_cannot_use_agentdebug(self):

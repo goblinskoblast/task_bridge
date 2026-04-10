@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import re
@@ -8,9 +8,10 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from db.database import get_db_session
-from db.models import DataAgentSystem, PointStatRun, PointStatSnapshot, SavedPoint
+from db.models import DataAgentSystem, PointStatRun, PointStatSnapshot, SavedPoint, User
 
 from .blanks_tool import blanks_tool
+from .italian_pizza import resolve_italian_pizza_point
 from .stoplist_tool import stoplist_tool
 
 logger = logging.getLogger(__name__)
@@ -246,7 +247,7 @@ class PointStatisticsService:
         items: list[str] = []
         for line in report_text.splitlines():
             stripped = line.strip()
-            if stripped.startswith("- "):
+            if stripped.startswith("- ") or stripped.startswith("• "):
                 item = stripped[2:].strip()
                 if item and item not in items:
                     items.append(item)
@@ -264,21 +265,37 @@ class PointStatisticsService:
                         values.append(normalized)
         return values[:30]
 
-    def _find_saved_point_by_name(self, db: Session, user_id: int, point_name: str) -> SavedPoint | None:
-        normalized_target = self._normalize_point_name(point_name)
-        if not normalized_target:
+    def _find_saved_point_by_name(self, db: Session, telegram_user_id: int, point_name: str) -> SavedPoint | None:
+        user = db.query(User).filter(User.telegram_id == telegram_user_id).first()
+        if not user:
             return None
+
         points = (
             db.query(SavedPoint)
             .filter(
-                SavedPoint.user_id == user_id,
+                SavedPoint.user_id == user.id,
                 SavedPoint.is_active.is_(True),
                 SavedPoint.provider == "italian_pizza",
             )
             .all()
         )
+        if not points:
+            return None
+
+        resolved_target = resolve_italian_pizza_point(point_name)
+        target_slug = resolved_target.public_slug if resolved_target else None
+        target_city = self._normalize_text(resolved_target.city if resolved_target else "")
+        target_address = self._normalize_text(resolved_target.address if resolved_target else "")
+        normalized_target_display = self._normalize_point_name(point_name)
+
         for point in points:
-            if self._normalize_point_name(point.display_name) == normalized_target:
+            if self._matches_saved_point(
+                point,
+                target_slug=target_slug,
+                target_city=target_city,
+                target_address=target_address,
+                normalized_target_display=normalized_target_display,
+            ):
                 return point
         return None
 
@@ -318,7 +335,31 @@ class PointStatisticsService:
         db.commit()
 
     def _normalize_point_name(self, value: str) -> str:
+        resolved = resolve_italian_pizza_point(value or "")
+        if resolved:
+            return self._normalize_text(f"{resolved.city} {resolved.address}")
+        return self._normalize_text(value)
+
+    def _matches_saved_point(
+        self,
+        point: SavedPoint,
+        *,
+        target_slug: str | None,
+        target_city: str,
+        target_address: str,
+        normalized_target_display: str,
+    ) -> bool:
+        if target_slug and point.external_point_key == target_slug:
+            return True
+        if target_city and target_address:
+            if self._normalize_text(point.city) == target_city and self._normalize_text(point.address) == target_address:
+                return True
+        return self._normalize_point_name(point.display_name) == normalized_target_display
+
+    def _normalize_text(self, value: str) -> str:
         normalized = (value or "").lower().replace("ё", "е")
+        normalized = normalized.replace("ул.", " ").replace("улица", " ").replace("тц", " ")
+        normalized = re.sub(r"[^a-zа-я0-9]+", " ", normalized)
         return re.sub(r"\s+", " ", normalized).strip()
 
     def _normalize_items(self, items: list[str] | tuple[str, ...] | None) -> list[str]:
@@ -330,10 +371,11 @@ class PointStatisticsService:
         return normalized
 
     def _compute_stoplist_delta(self, previous_items: list[str], current_items: list[str]) -> dict[str, list[str]]:
+        current_set = set(current_items)
         previous_set = set(previous_items)
         return {
             "added": [item for item in current_items if item not in previous_set],
-            "removed": [item for item in previous_items if item not in set(current_items)],
+            "removed": [item for item in previous_items if item not in current_set],
             "stayed": [item for item in current_items if item in previous_set],
         }
 

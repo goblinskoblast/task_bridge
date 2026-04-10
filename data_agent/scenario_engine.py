@@ -49,6 +49,14 @@ class ReviewsReportScenario(BaseScenario):
             tool_result = await _run_public_reviews_browser(user_message, targets=[point_name])
         else:
             tool_result = await review_report_service.build_report(user_message, point_name=point_name, user_id=user_id)
+            if tool_result.get("status") in {"not_configured", "not_relevant"} and point_name:
+                fallback_result = await _run_public_reviews_browser(
+                    user_message,
+                    targets=[point_name],
+                    providers=["yandex_maps"],
+                )
+                if fallback_result.get("status") == "ok":
+                    tool_result = fallback_result
             if tool_result.get("status") == "not_configured" and not point_name:
                 tool_result = {
                     "status": "needs_point",
@@ -241,13 +249,11 @@ def _resolve_public_reviews_providers(user_message: str) -> list[str]:
     if any(marker in lowered for marker in ["только яндекс", "only yandex", "лишь яндекс"]):
         return ["yandex_maps"]
 
-    if mentions_2gis and mentions_yandex:
-        return ["yandex_maps", "2gis"]
     if mentions_2gis:
-        return ["2gis", "yandex_maps"]
+        return ["2gis"]
     if mentions_yandex:
-        return ["yandex_maps", "2gis"]
-    return ["yandex_maps", "2gis"]
+        return ["yandex_maps"]
+    return ["yandex_maps"]
 
 
 def _provider_label(provider: str) -> str:
@@ -259,9 +265,9 @@ def _is_access_denied_payload(payload: str) -> bool:
     return "ошибка_доступа" in lowered or "access denied" in lowered or "отказ" in lowered
 
 
-async def _run_public_reviews_browser(user_message: str, targets: List[str]) -> dict:
+async def _run_public_reviews_browser(user_message: str, targets: List[str], providers: List[str] | None = None) -> dict:
     logger.info("Public reviews resolution message=%s targets=%s", user_message[:300], targets)
-    providers = _resolve_public_reviews_providers(user_message)
+    providers = providers or _resolve_public_reviews_providers(user_message)
     results: List[dict] = []
     for target in targets[:5]:
         for provider in providers:
@@ -313,8 +319,12 @@ async def _run_public_reviews_browser(user_message: str, targets: List[str]) -> 
                 )
     ok_results = [item for item in results if item["status"] == "ok" and not item.get("access_denied")]
     if not ok_results:
-        return {"status": "failed", "message": "Не удалось собрать отзывы по переданным точкам.", "targets": results}
-    report_lines = ["Отчет по отзывам по точкам:"]
+        return {
+            "status": "not_configured",
+            "message": "Отчёт по отзывам для этой точки пока недоступен.",
+            "targets": results,
+        }
+    report_lines = ["Отчёт по отзывам по точкам:"]
     for target_label in list(dict.fromkeys(item["target"] for item in ok_results)):
         report_lines.append(f"\nТочка: {target_label}")
         for item in [candidate for candidate in ok_results if candidate["target"] == target_label]:
@@ -340,3 +350,4 @@ async def _run_public_reviews_browser(user_message: str, targets: List[str]) -> 
 
 
 scenario_engine = DataAgentScenarioEngine()
+

@@ -1,4 +1,4 @@
-import unittest
+﻿import unittest
 
 from bot.report_delivery import (
     build_report_delivery_message,
@@ -14,7 +14,18 @@ class ReportDeliveryTest(unittest.TestCase):
                 {
                     "status": "completed",
                     "scenario": "reviews_report",
-                    "answer": "Отчет готов",
+                    "answer": "Отчёт готов",
+                }
+            )
+        )
+
+    def test_ok_report_scenario_is_delivery_candidate(self):
+        self.assertTrue(
+            is_report_delivery_candidate(
+                {
+                    "status": "ok",
+                    "scenario": "stoplist_report",
+                    "answer": "Стоп-лист собран",
                 }
             )
         )

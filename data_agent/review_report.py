@@ -54,7 +54,7 @@ class ReviewReportService:
             return {
                 "status": "not_configured",
                 "source": "google_sheets_csv",
-                "message": "Не задан REVIEWS_SHEET_URL",
+                "message": "Отчёт по отзывам пока недоступен.",
             }
 
         csv_url = self._normalize_google_sheet_url(REVIEWS_SHEET_URL)

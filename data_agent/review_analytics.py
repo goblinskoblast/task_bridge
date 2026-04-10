@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 import re
@@ -108,7 +108,13 @@ class ItalianPizzaSheetAnalyticsProvider:
             snapshots.append(WorkbookSheet(title=str(sheet.title or "").strip(), rows=rows))
         return snapshots
 
-    def _build_workbook_report(self, sheets: list[WorkbookSheet], *, point_name: str, period: ReviewAnalyticsPeriod) -> str | None:
+    def _build_workbook_report(
+        self,
+        sheets: list[WorkbookSheet],
+        *,
+        point_name: str,
+        period: ReviewAnalyticsPeriod,
+    ) -> str | None:
         analytics_sheets = [sheet for sheet in sheets if "аналит" in self._normalize_label(sheet.title)]
         if not analytics_sheets:
             analytics_sheets = sheets
@@ -119,7 +125,13 @@ class ItalianPizzaSheetAnalyticsProvider:
                 return report
         return None
 
-    def _build_sheet_report(self, rows: list[list[Any]], *, point_name: str, period: ReviewAnalyticsPeriod) -> str | None:
+    def _build_sheet_report(
+        self,
+        rows: list[list[Any]],
+        *,
+        point_name: str,
+        period: ReviewAnalyticsPeriod,
+    ) -> str | None:
         if len(rows) < 3:
             return None
 
@@ -245,7 +257,13 @@ class ItalianPizzaSheetAnalyticsProvider:
             candidates.append(index)
         return candidates[-1] if candidates else None
 
-    def _find_value(self, values: dict[tuple[str, str], str], *, section: str | None, metric_markers: list[str]) -> str | None:
+    def _find_value(
+        self,
+        values: dict[tuple[str, str], str],
+        *,
+        section: str | None,
+        metric_markers: list[str],
+    ) -> str | None:
         normalized_section = self._normalize_label(section or "")
         for (row_section, row_metric), value in values.items():
             if normalized_section and row_section != normalized_section:
@@ -258,14 +276,10 @@ class ItalianPizzaSheetAnalyticsProvider:
         if value is None:
             return ""
         if isinstance(value, datetime):
-            return value.strftime("%d.%m.%Y %H:%M:%S") if value.time() != datetime.min.time() else value.strftime("%d.%m.%Y")
-        cleaned = str(value).replace("\xa0", " ").replace("Â", "").strip()
-        if "Ð" in cleaned or "Ñ" in cleaned:
-            try:
-                cleaned = cleaned.encode("latin1").decode("utf-8")
-            except Exception:
-                pass
-        return cleaned.strip()
+            if value.time() != datetime.min.time():
+                return value.strftime("%d.%m.%Y %H:%M:%S")
+            return value.strftime("%d.%m.%Y")
+        return str(value).replace("\xa0", " ").strip()
 
     def _normalize_label(self, value: str) -> str:
         normalized = (value or "").lower().replace("ё", "е")
@@ -290,7 +304,14 @@ class ItalianPizzaSheetAnalyticsProvider:
 class RocketDataReviewsProvider:
     source_name = "rocketdata"
 
-    async def build_report(self, *, point_name: str, period: ReviewAnalyticsPeriod, user_message: str, user_id: int | None) -> dict[str, Any]:
+    async def build_report(
+        self,
+        *,
+        point_name: str,
+        period: ReviewAnalyticsPeriod,
+        user_message: str,
+        user_id: int | None,
+    ) -> dict[str, Any]:
         if not user_id:
             return {
                 "status": "not_configured",

@@ -1,5 +1,6 @@
-import os
+﻿import os
 import unittest
+from types import SimpleNamespace
 
 os.environ.setdefault("BOT_TOKEN", "test-bot-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
@@ -28,6 +29,23 @@ class StoplistMemoryTest(unittest.TestCase):
         self.assertEqual(delta["added"], ["Четыре сыра"])
         self.assertEqual(delta["removed"], ["Пепперони"])
         self.assertEqual(delta["stayed"], ["Маргарита"])
+
+    def test_matches_saved_point_by_external_slug(self):
+        point = SimpleNamespace(
+            city="Верхний Уфалей",
+            address="Ленина 147",
+            display_name="Верхний Уфалей, Ленина 147",
+            external_point_key="ufaley",
+        )
+        self.assertTrue(
+            point_statistics_service._matches_saved_point(
+                point,
+                target_slug="ufaley",
+                target_city="верхний уфалей",
+                target_address="ленина 147",
+                normalized_target_display=point_statistics_service._normalize_point_name("Верхний Уфалей, Ленина 147"),
+            )
+        )
 
     def test_render_stoplist_report_with_history(self):
         text = point_statistics_service._render_stoplist_report(

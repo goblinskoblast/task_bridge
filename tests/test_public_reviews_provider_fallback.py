@@ -1,4 +1,4 @@
-import os
+﻿import os
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -18,6 +18,7 @@ class PublicReviewsProviderFallbackTest(unittest.IsolatedAsyncioTestCase):
             result = await _run_public_reviews_browser(
                 "собери отзывы по Артёмовский, Гагарина 2а за неделю",
                 targets=["Артёмовский, Гагарина 2а"],
+                providers=["yandex_maps", "2gis"],
             )
 
         self.assertEqual(result["status"], "ok")

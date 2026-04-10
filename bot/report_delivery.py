@@ -1,9 +1,11 @@
+﻿from __future__ import annotations
+
 REPORT_SCENARIOS = {"reviews_report", "stoplist_report", "blanks_report"}
 
 
 def is_report_delivery_candidate(result: dict) -> bool:
     return (
-        result.get("status") == "completed"
+        result.get("status") in {"completed", "ok"}
         and result.get("scenario") in REPORT_SCENARIOS
         and bool((result.get("answer") or "").strip())
     )
@@ -24,7 +26,7 @@ def build_report_delivery_message(
 ) -> str:
     return "\n".join(
         [
-            "TaskBridge: отчет от агента",
+            "TaskBridge: отчёт от агента",
             f"Запросил: {requester_name}",
             f"Запрос: {user_message.strip()}",
             "",
