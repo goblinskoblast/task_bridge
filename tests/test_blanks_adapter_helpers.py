@@ -259,6 +259,55 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         self.assertIn("3 \u0447\u0430\u0441\u0430", message)
         self.assertIn("12 \u0447\u0430\u0441\u043e\u0432", message)
 
+    def test_point_selection_confirmed_for_address_specific_match(self):
+        point_result = {
+            "selected": True,
+            "matched_point": "Lenina, 147",
+            "visible_point_controls": ["Upper Ufaley", "Lenina, 147"],
+            "point_menu_collapsed": False,
+        }
+        self.assertTrue(
+            self.adapter._point_selection_confirmed(
+                point_result,
+                "Blank overload report\nHome",
+                "Upper Ufaley, Lenina 147",
+            )
+        )
+
+    def test_point_selection_confirmed_when_body_mentions_point(self):
+        point_result = {
+            "selected": False,
+            "matched_point": None,
+            "visible_point_controls": ["Home", "Blank overload report"],
+            "point_menu_collapsed": False,
+        }
+        self.assertTrue(
+            self.adapter._point_selection_confirmed(
+                point_result,
+                "Operator\nUpper Ufaley, Lenina 147\nBlank overload report",
+                "Upper Ufaley, Lenina 147",
+            )
+        )
+
+    def test_point_selection_not_confirmed_for_city_only_match_with_open_menu(self):
+        point_result = {
+            "selected": True,
+            "matched_point": "Upper Ufaley",
+            "visible_point_controls": [
+                "Upper Ufaley (1) Lenina, 147",
+                "Yekaterinburg (1) Sulimova, 31A",
+                "Asbest (1) Leningradskaya, 26/2",
+            ],
+            "point_menu_collapsed": False,
+        }
+        self.assertFalse(
+            self.adapter._point_selection_confirmed(
+                point_result,
+                "Home\nBlank overload report",
+                "Upper Ufaley, Lenina 147",
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -195,6 +195,25 @@ class ItalianPizzaPortalAdapter:
         lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
         return any(self._line_mentions_requested_point(line, point_name) for line in lines)
 
+    def _point_selection_confirmed(self, point_result: dict, body_text: str, point_name: str) -> bool:
+        visible_controls = point_result.get("visible_point_controls") or []
+        matched_point = str(point_result.get("matched_point") or "").strip()
+        body_text = body_text or ""
+
+        header_match = self._point_header_matches_requested_point(body_text, point_name)
+        body_match = self._body_mentions_requested_point(body_text, point_name)
+        matched_label_match = self._line_mentions_requested_point(matched_point, point_name)
+        matched_label_specific = self._point_specificity_score(matched_point, point_name) >= 3
+        menu_open = self._point_menu_looks_open(visible_controls)
+
+        if point_result.get("selected") and (header_match or body_match or matched_label_match or matched_label_specific):
+            return True
+
+        if (header_match or body_match) and not menu_open:
+            return True
+
+        return False
+
     def _extract_point_specific_body(self, text: str, point_name: str) -> tuple[str, bool]:
         lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
         if not lines:
@@ -1929,15 +1948,7 @@ class ItalianPizzaPortalAdapter:
                 point_result = await self._select_point(page, point_name)
                 current_url = page.url
                 body_text = await page.locator("body").inner_text()
-                point_selected = (
-                    point_result["selected"]
-                    and point_result.get("point_menu_collapsed", False)
-                    and self._point_header_matches_requested_point(body_text, point_name)
-                )
-                if not point_selected:
-                    point_selected = self._point_header_matches_requested_point(body_text, point_name) and not self._point_menu_looks_open(
-                        point_result["visible_point_controls"]
-                    )
+                point_selected = self._point_selection_confirmed(point_result, body_text, point_name)
                 if not point_selected:
                     return self._build_failed_result(
                         point_name,
