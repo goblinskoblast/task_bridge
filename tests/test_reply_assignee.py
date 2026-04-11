@@ -1,12 +1,21 @@
+import asyncio
 import os
 import unittest
 from types import SimpleNamespace
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 os.environ.setdefault("BOT_TOKEN", "test-bot-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 
-from bot.handlers import _extract_reply_assignee_hint, _resolve_assignee_usernames
+from bot.handlers import (
+    _extract_reply_assignee_hint,
+    _resolve_assignee_usernames,
+    get_or_create_user_by_username,
+)
+from db.models import User
 
 
 class ReplyAssigneeTest(unittest.TestCase):
@@ -21,7 +30,7 @@ class ReplyAssigneeTest(unittest.TestCase):
             reply_user=SimpleNamespace(
                 id=42,
                 username="vladislav",
-                first_name="Владислав",
+                first_name="?????????",
                 last_name=None,
                 is_bot=False,
             )
@@ -37,7 +46,7 @@ class ReplyAssigneeTest(unittest.TestCase):
             reply_user=SimpleNamespace(
                 id=77,
                 username=None,
-                first_name="Владислав",
+                first_name="?????????",
                 last_name=None,
                 is_bot=False,
             )
@@ -61,6 +70,39 @@ class ReplyAssigneeTest(unittest.TestCase):
         )
 
         self.assertIsNone(_extract_reply_assignee_hint(message))
+
+    def test_get_or_create_user_by_username_allocates_unique_placeholder_ids(self):
+        engine = create_engine("sqlite:///:memory:")
+        User.__table__.create(engine)
+        SessionLocal = sessionmaker(bind=engine)
+        db = SessionLocal()
+        try:
+            db.add(User(telegram_id=-1, username="existing", first_name="@existing", is_bot=False))
+            db.commit()
+
+            created = asyncio.run(get_or_create_user_by_username(db, "newuser"))
+
+            self.assertEqual(created.username, "newuser")
+            self.assertEqual(created.telegram_id, -2)
+        finally:
+            db.close()
+
+    def test_get_or_create_user_by_username_reuses_existing_username(self):
+        engine = create_engine("sqlite:///:memory:")
+        User.__table__.create(engine)
+        SessionLocal = sessionmaker(bind=engine)
+        db = SessionLocal()
+        try:
+            existing = User(telegram_id=-5, username="dr.cyrill", first_name="@dr.cyrill", is_bot=False)
+            db.add(existing)
+            db.commit()
+
+            resolved = asyncio.run(get_or_create_user_by_username(db, "dr.cyrill"))
+
+            self.assertEqual(resolved.id, existing.id)
+            self.assertEqual(resolved.telegram_id, -5)
+        finally:
+            db.close()
 
     def test_reply_hint_used_only_when_ai_found_no_assignee(self):
         reply_hint = {"token": "vladislav"}

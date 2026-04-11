@@ -10,6 +10,8 @@ from aiogram.types import (
 )
 from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import TASK_KEYWORDS, MINI_APP_URL, HOST, PORT
@@ -150,12 +152,20 @@ async def get_or_create_user(bot: Bot, telegram_id: int, username: str = None,
     return user
 
 
+def _allocate_placeholder_telegram_id(db: Session) -> int:
+    min_negative = db.query(func.min(User.telegram_id)).filter(User.telegram_id < 0).scalar()
+    if min_negative is None:
+        return -1
+    return int(min_negative) - 1
+
+
 async def get_or_create_user_by_username(db: Session, username: str) -> User:
     if username.startswith("tgid:"):
         telegram_id = int(username.split(":", 1)[1])
         user = db.query(User).filter(User.telegram_id == telegram_id).first()
         if user:
             return user
+
         user = User(
             telegram_id=telegram_id,
             username=None,
@@ -163,26 +173,47 @@ async def get_or_create_user_by_username(db: Session, username: str) -> User:
             is_bot=False
         )
         db.add(user)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            existing_user = db.query(User).filter(User.telegram_id == telegram_id).first()
+            if existing_user:
+                return existing_user
+            raise
+
         db.refresh(user)
         logger.info(f"Created user placeholder by telegram id {telegram_id} (ID: {user.id})")
         return user
 
-    user = db.query(User).filter(User.username == username).first()
+    normalized_username = str(username or "").strip().lstrip("@")
+    user = db.query(User).filter(User.username == normalized_username).first()
+    if user:
+        return user
 
-    if not user:
+    for _ in range(3):
+        placeholder_telegram_id = _allocate_placeholder_telegram_id(db)
         user = User(
-            telegram_id=-1,
-            username=username,
-            first_name=f"@{username}",
+            telegram_id=placeholder_telegram_id,
+            username=normalized_username,
+            first_name=f"@{normalized_username}",
             is_bot=False
         )
         db.add(user)
-        db.commit()
-        db.refresh(user)
-        logger.info(f"Created temporary user @{username} (ID: {user.id})")
+        try:
+            db.commit()
+            db.refresh(user)
+            logger.info(
+                f"Created temporary user @{normalized_username} with placeholder telegram_id={placeholder_telegram_id} (ID: {user.id})"
+            )
+            return user
+        except IntegrityError:
+            db.rollback()
+            existing_user = db.query(User).filter(User.username == normalized_username).first()
+            if existing_user:
+                return existing_user
 
-    return user
+    raise RuntimeError(f"Failed to allocate placeholder user for @{normalized_username}")
 
 
 async def get_or_create_chat(chat_id: int, chat_type: str, title: str = None,
