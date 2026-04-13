@@ -46,13 +46,19 @@ class DataAgentClient:
     async def health(self) -> Dict[str, Any]:
         return await self._request("GET", "/health")
 
-    async def chat(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def chat(
+        self,
+        payload: Dict[str, Any],
+        *,
+        timeout_seconds: int | None = None,
+        retry_attempts: int = 2,
+    ) -> Dict[str, Any]:
         return await self._request(
             "POST",
             "/chat",
             json=payload,
-            timeout_seconds=self.chat_timeout_seconds,
-            retry_attempts=2,
+            timeout_seconds=timeout_seconds or self.chat_timeout_seconds,
+            retry_attempts=retry_attempts,
         )
 
     async def connect_system(self, payload: Dict[str, Any]) -> Dict[str, Any]:

@@ -54,5 +54,21 @@ class AgentRequestErrorsTest(unittest.IsolatedAsyncioTestCase):
         )
 
 
+    async def test_background_long_request_uses_extended_timeout_without_retry(self):
+        message = _DummyMessage()
+
+        with patch("bot.data_agent_handlers.data_agent_client.chat", AsyncMock(return_value={"answer": "ok"})) as mocked_chat:
+            await _send_agent_request(
+                message,
+                "Покажи мне бланки загрузки по всем добавленным точкам",
+                send_progress=False,
+            )
+
+        self.assertEqual(message.answers, ["ok"])
+        self.assertEqual(mocked_chat.await_count, 1)
+        self.assertEqual(mocked_chat.await_args.kwargs.get("retry_attempts"), 1)
+        self.assertGreaterEqual(mocked_chat.await_args.kwargs.get("timeout_seconds") or 0, 300)
+
+
 if __name__ == "__main__":
     unittest.main()

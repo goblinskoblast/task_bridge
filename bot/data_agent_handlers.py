@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 _BACKGROUND_AGENT_TASKS: set[asyncio.Task] = set()
+_LONG_AGENT_CHAT_TIMEOUT_SECONDS = max(data_agent_client.chat_timeout_seconds, 300)
 
 AGENT_BUTTON_TEXT = "🤖 Агент"
 QUICK_REPORTS_BUTTON_TEXT = "⚡ Быстрые отчёты"
@@ -741,7 +742,14 @@ async def _user_has_connected_italian_pizza_system(telegram_user_id: int) -> boo
         db.close()
 
 
-async def _call_agent(message: Message, text: str, *, actor_user: TelegramUser | None = None) -> dict:
+async def _call_agent(
+    message: Message,
+    text: str,
+    *,
+    actor_user: TelegramUser | None = None,
+    chat_timeout_seconds: int | None = None,
+    retry_attempts: int = 2,
+) -> dict:
     effective_user = actor_user or message.from_user
     return await data_agent_client.chat(
         {
@@ -749,7 +757,9 @@ async def _call_agent(message: Message, text: str, *, actor_user: TelegramUser |
             "message": text,
             "username": effective_user.username,
             "first_name": effective_user.first_name,
-        }
+        },
+        timeout_seconds=chat_timeout_seconds,
+        retry_attempts=retry_attempts,
     )
 
 
@@ -792,6 +802,18 @@ def _schedule_background_agent_request(message: Message, text: str, *, send_prog
             logger.error("Background agent task failed: %s", exc, exc_info=True)
 
     task.add_done_callback(_cleanup)
+
+
+def _resolve_agent_chat_timeout_seconds(text: str, *, send_progress: bool) -> int | None:
+    if send_progress or not _looks_like_long_agent_request(text):
+        return None
+    return _LONG_AGENT_CHAT_TIMEOUT_SECONDS
+
+
+def _resolve_agent_retry_attempts(text: str, *, send_progress: bool) -> int:
+    if send_progress or not _looks_like_long_agent_request(text):
+        return 2
+    return 1
 
 
 def _format_agent_debug_message(result: dict) -> str:
@@ -1118,7 +1140,12 @@ async def _send_agent_request(message: Message, text: str, *, send_progress: boo
         await message.answer(_build_agent_progress_message(text), reply_markup=AGENT_HOME_KEYBOARD)
 
     try:
-        result = await _call_agent(message, text)
+        result = await _call_agent(
+            message,
+            text,
+            chat_timeout_seconds=_resolve_agent_chat_timeout_seconds(text, send_progress=send_progress),
+            retry_attempts=_resolve_agent_retry_attempts(text, send_progress=send_progress),
+        )
     except DataAgentClientError as exc:
         logger.error(
             "Agent chat transport error type=%s user_id=%s message=%s detail=%s",
