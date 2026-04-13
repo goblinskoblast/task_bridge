@@ -168,7 +168,7 @@ class DataAgentRuntime:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
         scenario = "general"
         reasoning = "Rule-based routing"
-        if any(token in lowered for token in ["стоп-лист", "стоп лист", "недоступн", "нет в наличии"]):
+        if self._contains_stoplist_intent(lowered):
             scenario = "stoplist_report"
             reasoning = "Определен сценарий стоп-листа"
         elif any(token in lowered for token in ["бланк загрузки", "бланки загрузки", "бланк", "бланки", "перегруз", "красн", "лимит", "норматив"]):
@@ -200,6 +200,22 @@ class DataAgentRuntime:
             slots=slots,
             missing_slots=missing,
             reasoning=reasoning,
+        )
+
+    def _contains_stoplist_intent(self, lowered: str) -> bool:
+        return any(
+            token in lowered
+            for token in [
+                "стоп-лист",
+                "стоп лист",
+                "стоплист",
+                "по стопам",
+                "стопы",
+                "стопам",
+                "стопах",
+                "недоступн",
+                "нет в наличии",
+            ]
         )
 
     async def _llm_decision(self, message: str, session: AgentSessionSnapshot, systems_count: int) -> Optional[AgentDecision]:

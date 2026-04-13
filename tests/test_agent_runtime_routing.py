@@ -8,6 +8,7 @@ os.environ.setdefault("AI_PROVIDER", "openai")
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 
 from data_agent.agent_runtime import AgentDecision, AgentSessionSnapshot, DataAgentRuntime
+from data_agent.italian_pizza import resolve_italian_pizza_point
 
 
 class AgentRuntimeRoutingTest(unittest.TestCase):
@@ -74,6 +75,21 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
         self.assertTrue(decision.slots.get("all_points"))
         self.assertEqual(decision.slots.get("period_hint"), "за последние 3 часа")
         self.assertEqual(decision.missing_slots, [])
+
+    def test_rule_based_decision_recognizes_stoplist_slang_and_noisy_point(self):
+        decision = self.runtime._rule_based_decision(
+            "Дай мне отчёт по стопам верхнего фолия Ленина 147.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "stoplist_report")
+        self.assertEqual(decision.slots.get("point_name"), "Верхний Уфалей, Ленина 147")
+
+    def test_resolve_italian_pizza_point_supports_noisy_ufaley_alias(self):
+        point = resolve_italian_pizza_point("верхнего фолия ленина 147")
+        self.assertIsNotNone(point)
+        self.assertEqual(point.display_name, "Верхний Уфалей, Ленина 147")
 
 
 class AgentRuntimeAsyncRoutingTest(unittest.IsolatedAsyncioTestCase):
