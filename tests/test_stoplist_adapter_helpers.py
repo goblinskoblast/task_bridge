@@ -45,7 +45,8 @@ class StoplistAdapterHelpersTest(unittest.TestCase):
         )
         self.assertEqual(result["status"], "failed")
         self.assertFalse(result["selected"])
-        self.assertIn("временно недоступен", result["report_text"])
+        self.assertEqual(result["report_text"], "Не удалось получить отчет по стоп-листу. Попробуйте позже.")
+        self.assertEqual(result["diagnostics"]["issue_text"], "Публичный сайт временно недоступен.")
         self.assertEqual(result["diagnostics"]["stage"], "goto")
         self.assertEqual(result["diagnostics"]["products_found"], 0)
 

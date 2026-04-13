@@ -130,6 +130,29 @@ _REPORT_FAILURE_MESSAGES = {
     "reviews_report": "Не удалось получить отчет по отзывам. Попробуйте позже.",
 }
 
+_INTERNAL_ERROR_MARKERS = (
+    "не удалось определить публичную точку",
+    "техническая ошибка",
+    "page.evaluate",
+    "locator.evaluate",
+    "playwright",
+    "trace:",
+    "diagnostics",
+)
+
+_MOJIBAKE_MARKERS = (
+    "????",
+    "Рџ",
+    "Рњ",
+    "Рќ",
+    "РЎ",
+    "Р°",
+    "СЃ",
+    "С‚",
+    "вЂ",
+    "рџ",
+)
+
 REPORT_CATEGORY_META = {
     "reviews": {
         "title": "Отзывы",
@@ -233,6 +256,8 @@ def _sanitize_user_facing_answer(answer: str) -> str:
         lowered = stripped.lower()
         if lowered.startswith("причина:") or lowered.startswith("причины:"):
             continue
+        if any(marker in lowered for marker in _INTERNAL_ERROR_MARKERS):
+            continue
 
         if " Причина:" in raw_line:
             raw_line = raw_line.split(" Причина:", 1)[0].rstrip()
@@ -243,6 +268,17 @@ def _sanitize_user_facing_answer(answer: str) -> str:
             cleaned_lines.append(raw_line)
 
     return "\n".join(cleaned_lines).strip()
+
+
+def _looks_corrupted_user_text(text: str) -> bool:
+    normalized = text or ""
+    if not normalized:
+        return False
+    if any(marker in normalized for marker in _MOJIBAKE_MARKERS):
+        return True
+    question_marks = normalized.count("?")
+    letters = sum(1 for char in normalized if char.isalpha())
+    return question_marks >= 6 and question_marks >= max(letters // 2, 6)
 
 
 class ConnectSystemState(StatesGroup):
@@ -433,9 +469,12 @@ def _build_user_safe_agent_answer(result: dict) -> str:
     scenario = (result.get("scenario") or "").strip()
     status = (result.get("status") or "").strip()
     answer = _sanitize_user_facing_answer((result.get("answer") or "").strip())
+    if scenario in _REPORT_FAILURE_MESSAGES and (
+        _looks_corrupted_user_text(answer)
+        or any(marker in answer.lower() for marker in _INTERNAL_ERROR_MARKERS)
+    ):
+        return _REPORT_FAILURE_MESSAGES[scenario]
     if status == "failed" and scenario in _REPORT_FAILURE_MESSAGES:
-        if answer and not answer.startswith("DataAgent не смог обработать запрос:"):
-            return answer
         return _REPORT_FAILURE_MESSAGES[scenario]
     return answer or "Не удалось получить ответ от агента."
 

@@ -34,7 +34,7 @@ class AgentVisibilityTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             message.answers,
-            ["Стоп-лист сейчас не удалось собрать."],
+            ["Не удалось получить отчет по стоп-листу. Попробуйте позже."],
         )
 
     async def test_completed_report_response_is_duplicated_to_selected_chat(self):

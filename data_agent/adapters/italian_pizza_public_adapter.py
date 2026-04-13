@@ -253,15 +253,18 @@ class ItalianPizzaPublicAdapter:
         return None
 
     def _build_failed_result(self, point_name: str, issue_text: str, diagnostics: dict | None = None) -> dict:
-        report_text = f"Точка: {point_name}\nСтатус: {issue_text}"
+        logger.info("Stoplist public adapter failed point=%s issue=%s diagnostics=%s", point_name, issue_text, diagnostics or {})
+        safe_message = "Не удалось получить отчет по стоп-листу. Попробуйте позже."
+        diagnostics_payload = dict(diagnostics or {})
+        diagnostics_payload["issue_text"] = issue_text
         return {
             "status": "failed",
             "point_name": point_name,
             "selected": False,
-            "report_text": report_text,
-            "message": issue_text,
+            "report_text": safe_message,
+            "message": safe_message,
             "alert_hash": None,
-            "diagnostics": diagnostics or {},
+            "diagnostics": diagnostics_payload,
         }
 
     def _looks_like_order_action(self, text: str) -> bool:
@@ -584,12 +587,11 @@ class ItalianPizzaPublicAdapter:
     async def collect_stoplist(self, point_name: str) -> dict:
         point = resolve_italian_pizza_point(point_name)
         if not point:
-            return {
-                "status": "failed",
-                "point_name": point_name,
-                "report_text": f"Не удалось определить публичную точку для стоп-листа: {point_name}",
-                "diagnostics": {"stage": "resolve_point"},
-            }
+            return self._build_failed_result(
+                point_name,
+                "Не удалось определить публичную точку для стоп-листа.",
+                diagnostics={"stage": "resolve_point"},
+            )
         target_url = point.public_url.rstrip("/") + "/"
         stage = "public_api"
         try:

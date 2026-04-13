@@ -16,6 +16,18 @@ from .prompts import (
 logger = logging.getLogger(__name__)
 
 KNOWN_TOOLS = {"email_tool", "calendar_tool", "browser_tool", "review_tool", "stoplist_tool", "blanks_tool", "orchestrator"}
+UNSAFE_FAILURE_MESSAGE_MARKERS = (
+    "причина:",
+    "причины:",
+    "не удалось определить публичную точку",
+    "подходящий лист",
+    "italian pizza:",
+    "rocketdata:",
+    "page.evaluate",
+    "locator.evaluate",
+    "playwright",
+    "техническая ошибка",
+)
 
 
 @dataclass
@@ -183,7 +195,7 @@ class DataAgentOrchestrator:
             elif review_result.get("status") in {"needs_point", "needs_period", "awaiting_user_input"}:
                 parts.append(review_result.get("message", "Нужно уточнить параметры для отчёта по отзывам."))
             else:
-                parts.append(review_result.get("message", "Отчёт по отзывам сейчас недоступен. Попробуйте позже."))
+                parts.append(_safe_failure_message(review_result, "Отчёт по отзывам сейчас недоступен. Попробуйте позже."))
 
         stoplist_result = tool_results.get("stoplist_tool")
         if stoplist_result:
@@ -192,7 +204,7 @@ class DataAgentOrchestrator:
             elif stoplist_result.get("status") in {"needs_point", "needs_period", "awaiting_user_input"}:
                 parts.append(stoplist_result.get("message", "Нужно уточнить параметры для стоп-листа."))
             else:
-                parts.append(stoplist_result.get("message", "Стоп-лист сейчас не удалось собрать. Попробуйте позже."))
+                parts.append(_safe_failure_message(stoplist_result, "Стоп-лист сейчас не удалось собрать. Попробуйте позже."))
 
         blanks_result = tool_results.get("blanks_tool")
         if blanks_result:
@@ -201,7 +213,7 @@ class DataAgentOrchestrator:
             elif blanks_result.get("status") in {"needs_point", "needs_period", "awaiting_user_input"}:
                 parts.append(blanks_result.get("message", "Нужно уточнить параметры для отчёта по бланкам."))
             else:
-                parts.append(blanks_result.get("message", "Проверку бланков сейчас не удалось выполнить. Попробуйте позже."))
+                parts.append(_safe_failure_message(blanks_result, "Проверку бланков сейчас не удалось выполнить. Попробуйте позже."))
 
         if not parts:
             parts.append("Пока не удалось собрать полезные данные по этому запросу. Нужен более конкретный источник или уточнение задачи.")
@@ -210,3 +222,15 @@ class DataAgentOrchestrator:
 
 
 orchestrator = DataAgentOrchestrator()
+
+
+def _safe_failure_message(result: Dict[str, Any], fallback: str) -> str:
+    message = str(result.get("message") or "").strip()
+    if not message:
+        return fallback
+    lowered = message.lower()
+    if any(marker in lowered for marker in UNSAFE_FAILURE_MESSAGE_MARKERS):
+        return fallback
+    if "????" in message:
+        return fallback
+    return message
