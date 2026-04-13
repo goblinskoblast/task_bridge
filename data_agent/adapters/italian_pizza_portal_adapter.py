@@ -14,6 +14,10 @@ MSK_TZ = ZoneInfo("Europe/Moscow")
 
 class ItalianPizzaPortalAdapter:
     _POINT_CONTROL_SELECTOR = "button, [role='button'], [role='option'], [role='tab'], [role='menuitem'], label, span, div, li, option, a"
+    _STRICT_RED_ATTR_RE = re.compile(
+        r"\b(red|danger|error|critical|alarm|negative|alert|overload|limit)\b",
+        flags=re.IGNORECASE,
+    )
     _POINT_SEARCH_SELECTORS = [
         "input[placeholder*='точк']",
         "input[placeholder*='поиск']",
@@ -1467,6 +1471,53 @@ class ItalianPizzaPortalAdapter:
 """
         )
 
+    def _parse_rgb_triplet(self, value: str) -> tuple[int, int, int] | None:
+        match = re.search(r"rgba?\((\d+),\s*(\d+),\s*(\d+)", str(value or ""), flags=re.IGNORECASE)
+        if not match:
+            return None
+        return tuple(int(part) for part in match.groups())
+
+    def _rgb_looks_red(self, value: str) -> bool:
+        rgb = self._parse_rgb_triplet(value)
+        if not rgb:
+            return False
+        red, green, blue = rgb
+        return red >= 150 and red - max(green, blue) >= 25 and green <= 220 and blue <= 220
+
+    def _blank_row_has_red_evidence(self, row: dict) -> bool:
+        if row.get("inferred_rule"):
+            return True
+
+        color_fields = [
+            row.get("background_color"),
+            row.get("text_color"),
+            row.get("border_color"),
+        ]
+        if any(self._rgb_looks_red(value) for value in color_fields if value):
+            return True
+
+        attr_blob = " ".join(
+            str(value or "")
+            for value in (
+                row.get("class_name"),
+                row.get("data_cy"),
+                row.get("matched_tag"),
+            )
+        )
+        return bool(self._STRICT_RED_ATTR_RE.search(attr_blob))
+
+    def _filter_red_blank_signals(self, signals: list[dict]) -> list[dict]:
+        filtered: list[dict] = []
+        for signal in signals:
+            rows = signal.get("rows") or []
+            red_rows = [row for row in rows if self._blank_row_has_red_evidence(row)]
+            if not red_rows:
+                continue
+            cleaned_signal = dict(signal)
+            cleaned_signal["rows"] = red_rows
+            filtered.append(cleaned_signal)
+        return filtered
+
     def _build_blank_report_from_signals(
         self,
         *,
@@ -1525,6 +1576,7 @@ class ItalianPizzaPortalAdapter:
 
         if not scan_hours:
             snapshot = await self._read_blank_red_signals(page)
+            filtered_signals = self._filter_red_blank_signals(snapshot.get("signals") or [])
             if snapshot.get("first_slot"):
                 inspected_slots.append(snapshot["first_slot"])
             observed_slot_counts.append(int(snapshot.get("slot_count") or 0))
@@ -1532,7 +1584,7 @@ class ItalianPizzaPortalAdapter:
             report_text, has_red_flags = self._build_blank_report_from_signals(
                 point_name=point_name,
                 period_hint=period_hint,
-                signals=snapshot.get("signals") or [],
+                signals=filtered_signals,
             )
             return {
                 "status": "ok",
@@ -1544,7 +1596,7 @@ class ItalianPizzaPortalAdapter:
                 "inspected_slots": inspected_slots,
                 "slot_count": max(observed_slot_counts or [0]),
                 "table_count": max(observed_table_counts or [0]),
-                "red_signal_count": len(snapshot.get("signals") or []),
+                "red_signal_count": len(filtered_signals),
                 "styled_cell_samples": snapshot.get("styled_cell_samples") or [],
                 "table_samples": snapshot.get("table_samples") or [],
             }
@@ -1595,10 +1647,11 @@ class ItalianPizzaPortalAdapter:
             seen_keys.add(key)
             unique_signals.append(signal)
 
+        filtered_signals = self._filter_red_blank_signals(unique_signals)
         report_text, has_red_flags = self._build_blank_report_from_signals(
             point_name=point_name,
             period_hint=period_hint,
-            signals=unique_signals,
+            signals=filtered_signals,
         )
         return {
             "status": "ok",
@@ -1610,7 +1663,7 @@ class ItalianPizzaPortalAdapter:
             "inspected_slots": inspected_slots,
             "slot_count": max(observed_slot_counts or [0]),
             "table_count": max(observed_table_counts or [0]),
-            "red_signal_count": len(unique_signals),
+            "red_signal_count": len(filtered_signals),
             "styled_cell_samples": styled_cell_samples,
             "table_samples": table_samples,
         }

@@ -250,6 +250,54 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         self.assertIn("\u2705 \u0421\u0442\u0430\u0442\u0443\u0441", report_text)
         self.assertIn("\U0001F4CD \u0422\u043e\u0447\u043a\u0430", report_text)
 
+    def test_filter_red_blank_signals_ignores_warning_only_rows(self):
+        filtered = self.adapter._filter_red_blank_signals(
+            [
+                {
+                    "service": "\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430",
+                    "time_range": "18:00 - 18:15",
+                    "column": "\u041f\u0438\u0446\u0446\u0430",
+                    "rows": [
+                        {
+                            "row_label": "\u041e\u0441\u0442\u0430\u0442\u043e\u043a",
+                            "value": "1",
+                            "class_name": "blank-cell warning-state",
+                            "data_cy": "capacity-warning",
+                            "background_color": "rgb(255, 244, 179)",
+                            "text_color": "rgb(40, 40, 40)",
+                            "border_color": "rgb(255, 224, 102)",
+                        }
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(filtered, [])
+
+    def test_filter_red_blank_signals_keeps_inferred_breach_rows(self):
+        filtered = self.adapter._filter_red_blank_signals(
+            [
+                {
+                    "service": "\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430",
+                    "time_range": "18:00 - 18:15",
+                    "column": "\u041f\u0438\u0446\u0446\u0430",
+                    "rows": [
+                        {
+                            "row_label": "\u041c\u0430\u043a\u0441",
+                            "value": "4",
+                            "inferred_rule": "accepted_gt_max",
+                        },
+                        {
+                            "row_label": "\u041f\u0440\u0438\u043d\u044f\u0442\u043e",
+                            "value": "7",
+                            "inferred_rule": "accepted_gt_max",
+                        },
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(len(filtered[0]["rows"]), 2)
+
     def test_build_period_help_message_uses_visible_controls(self):
         message = self.adapter._build_period_help_message(
             "\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 6 \u0447\u0430\u0441\u043e\u0432",

@@ -82,15 +82,6 @@ def _is_within_active_window(config: DataAgentMonitorConfig, now: datetime) -> b
     return current_hour >= start_hour or current_hour <= end_hour
 
 
-def _extract_red_zone_lines(report_text: str) -> list[str]:
-    red_lines: list[str] = []
-    for line in (report_text or "").splitlines():
-        lowered = line.lower()
-        if any(marker in lowered for marker in ["красн", "перегруз", "лимит", "норматив"]):
-            red_lines.append(line.strip())
-    return [line for line in red_lines if line]
-
-
 def _hours_word(hours: int) -> str:
     remainder_10 = hours % 10
     remainder_100 = hours % 100
@@ -235,9 +226,8 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
         config.last_result_json = result
 
         if result.get("has_red_flags") and result.get("alert_hash") != config.last_alert_hash:
-            report_text = result.get("report_text") or ""
-            red_lines = _extract_red_zone_lines(report_text)
-            red_summary = "\n".join(red_lines) if red_lines else report_text
+            report_text = (result.get("report_text") or "").strip()
+            red_summary = report_text
             event = DataAgentMonitorEvent(
                 user_id=config.user_id,
                 config_id=config.id,
@@ -266,6 +256,13 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
                         f"{red_summary[:3500]}"
                     ),
                     parse_mode="HTML",
+                )
+                logger.info(
+                    "Blanks monitor alert sent user_id=%s point=%s chat_id=%s alert_hash=%s",
+                    config.user_id,
+                    config.point_name,
+                    delivery_chat_id,
+                    result.get("alert_hash"),
                 )
                 event.sent_to_telegram = True
                 config.last_alert_hash = result.get("alert_hash")
