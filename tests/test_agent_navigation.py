@@ -52,7 +52,6 @@ class AgentNavigationTest(unittest.TestCase):
                 "📊 Отчёты",
                 "📍 Точки",
                 "🔌 Системы",
-                "⚙️ Настройки",
             ],
         )
 
