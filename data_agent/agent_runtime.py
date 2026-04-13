@@ -141,14 +141,16 @@ class DataAgentRuntime:
         followup_request = self._is_followup(source_message, session)
 
         merged_slots = dict(base.slots or {})
-        if not merged_slots.get("point_name") and followup_request:
+        if not merged_slots.get("point_name") and not merged_slots.get("all_points") and followup_request:
             if session.slots.get("point_name"):
                 merged_slots["point_name"] = session.slots.get("point_name")
-        if not merged_slots.get("period_hint") and same_scenario and session.slots.get("period_hint"):
+        if not merged_slots.get("period_hint") and followup_request and same_scenario and session.slots.get("period_hint"):
             merged_slots["period_hint"] = session.slots.get("period_hint")
         if not merged_slots.get("monitor_interval_minutes") and same_scenario and session.slots.get("monitor_interval_minutes"):
             merged_slots["monitor_interval_minutes"] = session.slots.get("monitor_interval_minutes")
         required = self._required_slots(base.scenario)
+        if merged_slots.get("all_points") and "point_name" in required:
+            required = [slot for slot in required if slot != "point_name"]
         missing = [slot for slot in required if not merged_slots.get(slot)]
         return AgentDecision(
             scenario=base.scenario,
@@ -187,8 +189,11 @@ class DataAgentRuntime:
         slots = self._extract_slots(message, session)
         slots["source_message"] = message
         if scenario == "blanks_report" and not slots.get("period_hint"):
-            slots["period_hint"] = session.slots.get("period_hint") or "текущий бланк"
-        missing = [slot for slot in self._required_slots(scenario) if not slots.get(slot)]
+            slots["period_hint"] = "за последние 3 часа"
+        required = self._required_slots(scenario)
+        if slots.get("all_points") and "point_name" in required:
+            required = [slot for slot in required if slot != "point_name"]
+        missing = [slot for slot in required if not slots.get(slot)]
         return AgentDecision(
             scenario=scenario,
             selected_tools=SCENARIO_TOOL_MAP.get(scenario, ["orchestrator"]),
@@ -231,7 +236,10 @@ class DataAgentRuntime:
         if result.get("period_hint"):
             slots["period_hint"] = str(result["period_hint"]).strip()
         slots["source_message"] = message
-        missing = [slot for slot in self._required_slots(scenario) if not slots.get(slot)]
+        required = self._required_slots(scenario)
+        if slots.get("all_points") and "point_name" in required:
+            required = [slot for slot in required if slot != "point_name"]
+        missing = [slot for slot in required if not slots.get(slot)]
         return AgentDecision(
             scenario=scenario,
             selected_tools=SCENARIO_TOOL_MAP.get(scenario, ["orchestrator"]),
@@ -245,6 +253,8 @@ class DataAgentRuntime:
         point = resolve_italian_pizza_point(message)
         if point:
             slots["point_name"] = point.display_name
+        if self._is_all_points_request(message):
+            slots["all_points"] = True
         period = self._extract_period_hint(message)
         if period:
             slots["period_hint"] = period
@@ -257,7 +267,7 @@ class DataAgentRuntime:
             slots["monitor_start_hour"] = start_hour
             slots["monitor_end_hour"] = end_hour
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
-        if any(marker in lowered for marker in FOLLOWUP_MARKERS) and session.slots.get("point_name"):
+        if any(marker in lowered for marker in FOLLOWUP_MARKERS) and session.slots.get("point_name") and not slots.get("all_points"):
             slots.setdefault("point_name", session.slots.get("point_name"))
         return slots
 
@@ -322,6 +332,17 @@ class DataAgentRuntime:
         if not (0 <= start_hour <= 23 and 0 <= end_hour <= 23):
             return None
         return start_hour, end_hour
+
+    def _is_all_points_request(self, message: str) -> bool:
+        lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
+        markers = (
+            "все точки",
+            "по всем точкам",
+            "по всем добавленным точкам",
+            "все добавленные точки",
+            "по добавленным точкам",
+        )
+        return any(marker in lowered for marker in markers)
 
     def _required_slots(self, scenario: str) -> List[str]:
         if scenario in {"stoplist_report", "blanks_report"}:

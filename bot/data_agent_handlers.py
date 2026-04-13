@@ -1092,7 +1092,7 @@ async def _send_agent_request(message: Message, text: str) -> None:
         )
         return
 
-    answer = _build_user_safe_agent_answer(result)
+    answer = trim_telegram_text(_build_user_safe_agent_answer(result))
     await message.answer(answer, reply_markup=AGENT_HOME_KEYBOARD, parse_mode=None)
 
     if is_report_delivery_candidate(result):

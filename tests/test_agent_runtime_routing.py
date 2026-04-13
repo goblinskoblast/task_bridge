@@ -63,6 +63,18 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
 
         self.assertEqual(merged.slots.get("point_name"), "Верхний Уфалей, Ленина 147")
 
+    def test_rule_based_decision_detects_all_saved_points_request_for_blanks(self):
+        decision = self.runtime._rule_based_decision(
+            "Покажи мне бланки загрузки по всем добавленным точкам.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "blanks_report")
+        self.assertTrue(decision.slots.get("all_points"))
+        self.assertEqual(decision.slots.get("period_hint"), "за последние 3 часа")
+        self.assertEqual(decision.missing_slots, [])
+
 
 class AgentRuntimeAsyncRoutingTest(unittest.IsolatedAsyncioTestCase):
     async def test_decide_skips_llm_for_explicit_stoplist_request(self):
@@ -81,6 +93,15 @@ class AgentRuntimeAsyncRoutingTest(unittest.IsolatedAsyncioTestCase):
 
 
 class AgentRuntimePeriodHintTest(unittest.TestCase):
+    def test_rule_based_blanks_without_period_defaults_to_three_hours(self):
+        runtime = DataAgentRuntime()
+        decision = runtime._rule_based_decision(
+            "Покажи бланки загрузки по точке Асбест, ТЦ Небо, Ленинградская 26/2",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+        self.assertEqual(decision.slots.get("period_hint"), "за последние 3 часа")
+
     def test_extract_period_hint_supports_six_hours(self):
         runtime = DataAgentRuntime()
         period = runtime._extract_period_hint("проверь бланки за последние 6 часов")

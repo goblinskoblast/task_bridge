@@ -15,6 +15,7 @@ from .models import ConnectedSystem
 from .orchestrator import orchestrator
 from .point_statistics import point_statistics_service
 from .review_report import review_report_service
+from .saved_points import saved_point_service
 from .stoplist_tool import stoplist_tool
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,10 @@ class StoplistReportScenario(BaseScenario):
     selected_tools = ["stoplist_tool"]
 
     async def execute(self, *, user_id: int, user_message: str, slots: dict, systems: List[ConnectedSystem]) -> ScenarioExecution:
+        if slots.get("all_points"):
+            tool_result = await _run_saved_points_stoplist_report(user_id=user_id)
+            return ScenarioExecution(selected_tools=list(self.selected_tools), tool_results={"stoplist_tool": tool_result})
+
         point_name = slots.get("point_name")
         logger.info("Stoplist scenario execute user_id=%s point=%s", user_id, point_name)
         if not point_name:
@@ -84,8 +89,12 @@ class BlanksReportScenario(BaseScenario):
     selected_tools = ["blanks_tool"]
 
     async def execute(self, *, user_id: int, user_message: str, slots: dict, systems: List[ConnectedSystem]) -> ScenarioExecution:
+        period_hint = slots.get("period_hint") or "за последние 3 часа"
+        if slots.get("all_points"):
+            tool_result = await _run_saved_points_blanks_report(user_id=user_id, period_hint=period_hint)
+            return ScenarioExecution(selected_tools=list(self.selected_tools), tool_results={"blanks_tool": tool_result})
+
         point_name = slots.get("point_name")
-        period_hint = slots.get("period_hint") or "текущий бланк"
         logger.info("Blanks scenario execute user_id=%s point=%s period=%s", user_id, point_name, period_hint)
         if not point_name:
             return ScenarioExecution(selected_tools=list(self.selected_tools), tool_results={"blanks_tool": {"status": "needs_point", "message": "Не удалось определить точку. Укажите город и адрес пиццерии."}})
@@ -254,6 +263,92 @@ def _resolve_public_reviews_providers(user_message: str) -> list[str]:
     if mentions_yandex:
         return ["yandex_maps"]
     return ["yandex_maps"]
+
+
+def _result_text_or_fallback(result: dict, *, failure_text: str) -> str:
+    status = str(result.get("status") or "").lower()
+    if status in {"ok", "completed"}:
+        return str(result.get("report_text") or "").strip() or "Отчёт собран."
+    return failure_text
+
+
+async def _run_saved_points_stoplist_report(*, user_id: int) -> dict:
+    db = get_db_session()
+    try:
+        points = saved_point_service.list_points(db, user_id)
+    finally:
+        db.close()
+
+    if not points:
+        return {
+            "status": "needs_saved_points",
+            "message": "Сначала добавьте хотя бы одну точку, чтобы собрать общий отчёт.",
+        }
+
+    sections: list[str] = []
+    has_ok_results = False
+    for point in points:
+        result = await stoplist_tool.collect_for_point(
+            url="",
+            username="",
+            encrypted_password="",
+            point_name=point.display_name,
+        )
+        result = point_statistics_service.enrich_stoplist_report(user_id, point.display_name, result)
+        text = _result_text_or_fallback(result, failure_text="Не удалось получить отчёт по этой точке.")
+        if str(result.get("status") or "").lower() in {"ok", "completed"}:
+            has_ok_results = True
+        sections.append(f"{point.display_name}\n{text}")
+
+    final_text = "\n\n".join(sections).strip()
+    return {
+        "status": "ok" if has_ok_results else "failed",
+        "report_text": final_text or "Не удалось получить общий отчёт по точкам.",
+    }
+
+
+async def _run_saved_points_blanks_report(*, user_id: int, period_hint: str) -> dict:
+    db = get_db_session()
+    try:
+        points = saved_point_service.list_points(db, user_id)
+        if not points:
+            return {
+                "status": "needs_saved_points",
+                "message": "Сначала добавьте хотя бы одну точку, чтобы собрать общий отчёт.",
+            }
+
+        sections: list[str] = []
+        has_ok_results = False
+        has_red_flags = False
+        for point in points:
+            system = _find_italian_pizza_system(db, user_id, point_name=point.display_name)
+            if not system:
+                result = {
+                    "status": "system_not_connected",
+                }
+            else:
+                result = await blanks_tool.inspect_point(
+                    url=system.url or ITALIAN_PIZZA_PORTAL_URL,
+                    username=system.login,
+                    encrypted_password=system.encrypted_password,
+                    point_name=point.display_name,
+                    period_hint=period_hint,
+                )
+            if str(result.get("status") or "").lower() in {"ok", "completed"}:
+                has_ok_results = True
+            if result.get("has_red_flags"):
+                has_red_flags = True
+            text = _result_text_or_fallback(result, failure_text="Не удалось получить отчёт по этой точке.")
+            sections.append(f"{point.display_name}\n{text}")
+
+        final_text = "\n\n".join(sections).strip()
+        return {
+            "status": "ok" if has_ok_results else "failed",
+            "report_text": final_text or "Не удалось получить общий отчёт по точкам.",
+            "has_red_flags": has_red_flags,
+        }
+    finally:
+        db.close()
 
 
 def _provider_label(provider: str) -> str:

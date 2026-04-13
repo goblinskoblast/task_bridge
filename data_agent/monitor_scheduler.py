@@ -15,6 +15,7 @@ from db.models import DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentPr
 
 from .blanks_tool import blanks_tool
 from .debugging import build_debug_artifacts
+from .point_statistics import point_statistics_service
 from .review_report import review_report_service
 from .stoplist_tool import stoplist_tool
 
@@ -88,6 +89,24 @@ def _extract_red_zone_lines(report_text: str) -> list[str]:
         if any(marker in lowered for marker in ["красн", "перегруз", "лимит", "норматив"]):
             red_lines.append(line.strip())
     return [line for line in red_lines if line]
+
+
+def _hours_word(hours: int) -> str:
+    remainder_10 = hours % 10
+    remainder_100 = hours % 100
+    if remainder_10 == 1 and remainder_100 != 11:
+        return "час"
+    if remainder_10 in {2, 3, 4} and remainder_100 not in {12, 13, 14}:
+        return "часа"
+    return "часов"
+
+
+def _monitor_blanks_period_hint(config: DataAgentMonitorConfig) -> str:
+    minutes = int(config.check_interval_minutes or 0)
+    if minutes < 60:
+        return "текущий бланк"
+    hours = max(1, round(minutes / 60))
+    return f"за последние {hours} {_hours_word(hours)}"
 
 
 async def _record_monitor_failure(bot: Bot, db, config: DataAgentMonitorConfig, result: dict, tool_name: str) -> None:
@@ -169,6 +188,7 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
             username=system.login,
             encrypted_password=system.encrypted_password,
             point_name=config.point_name,
+            period_hint=_monitor_blanks_period_hint(config),
         )
 
         result_status = result.get("status") or "ok"
@@ -228,12 +248,15 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
 async def _run_stoplist_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
     db = get_db_session()
     try:
+        user = db.query(User).filter(User.id == config.user_id).first()
         result = await stoplist_tool.collect_for_point(
             url="",
             username="",
             encrypted_password="",
             point_name=config.point_name,
         )
+        if user and user.telegram_id:
+            result = point_statistics_service.enrich_stoplist_report(user.telegram_id, config.point_name, result)
 
         result_status = result.get("status") or "ok"
         if result_status in {"failed", "error", "system_not_connected"}:
@@ -248,8 +271,10 @@ async def _run_stoplist_monitor(bot: Bot, config: DataAgentMonitorConfig) -> Non
         report_hash = result.get("alert_hash") or None
         if report_text and report_hash is None:
             report_hash = hashlib.sha256(report_text.encode("utf-8", errors="ignore")).hexdigest()
+        previous_hash = config.last_alert_hash
+        changed = bool(report_hash and report_hash != previous_hash)
 
-        if report_hash and report_hash != config.last_alert_hash:
+        if report_text:
             event = DataAgentMonitorEvent(
                 user_id=config.user_id,
                 config_id=config.id,
@@ -257,30 +282,31 @@ async def _run_stoplist_monitor(bot: Bot, config: DataAgentMonitorConfig) -> Non
                 monitor_type=config.monitor_type,
                 point_name=config.point_name,
                 severity="info",
-                title=f"Обновился стоп-лист: {config.point_name}",
+                title=(f"Обновился стоп-лист: {config.point_name}" if changed else f"Стоп-лист по расписанию: {config.point_name}"),
                 body=report_text,
-                event_hash=report_hash,
+                event_hash=hashlib.sha256(
+                    f"{report_hash or 'stoplist'}:{datetime.utcnow().isoformat()}".encode("utf-8", errors="ignore")
+                ).hexdigest(),
                 sent_to_telegram=False,
             )
             db.add(event)
             db.commit()
             db.refresh(event)
 
-            user = db.query(User).filter(User.id == config.user_id).first()
             delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "stoplist")
             if delivery_chat_id:
                 await bot.send_message(
                     chat_id=delivery_chat_id,
                     text=(
-                        f"Стоп-лист изменился\n\n"
+                        f"{'Стоп-лист изменился' if changed else 'Стоп-лист по расписанию'}\n\n"
                         f"<b>Точка:</b> {config.point_name}\n\n"
                         f"{report_text[:3500]}"
                     ),
                     parse_mode="HTML",
                 )
                 event.sent_to_telegram = True
-                config.last_alert_hash = report_hash
-                db.commit()
+            config.last_alert_hash = report_hash
+            db.commit()
         else:
             db.commit()
     except Exception as exc:
