@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramForbiddenError
 from sqlalchemy.orm import Session
 
 from db.models import Task, User
+from db.task_retention import visible_tasks
 from config import BOT_TOKEN
 from bot.webapp_links import build_taskbridge_webapp_url
 
@@ -37,7 +38,7 @@ async def notify_comment_added(task_id: int, comment_author_id: int, comment_tex
     try:
         bot = get_notification_bot()
 
-        task = db.query(Task).filter(Task.id == task_id).first()
+        task = visible_tasks(db.query(Task)).filter(Task.id == task_id).first()
         if not task:
             logger.warning(f"Task {task_id} not found")
             return
@@ -121,7 +122,7 @@ async def notify_status_changed(
     try:
         bot = get_notification_bot()
 
-        task = db.query(Task).filter(Task.id == task_id).first()
+        task = visible_tasks(db.query(Task)).filter(Task.id == task_id).first()
         if not task:
             logger.warning(f"Task {task_id} not found")
             return

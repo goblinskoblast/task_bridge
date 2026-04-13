@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from bot.webapp_links import build_taskbridge_webapp_url
 from db.models import PendingTask, Task, User
+from db.task_retention import visible_tasks
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ async def notify_comment_added(
     кроме автора комментария.
     """
     try:
-        task = db.query(Task).filter(Task.id == task_id).first()
+        task = visible_tasks(db.query(Task)).filter(Task.id == task_id).first()
         if not task:
             logger.warning("Task %s not found", task_id)
             return
@@ -97,7 +98,7 @@ async def notify_assigned_user(
 ) -> bool:
     """Отправляет назначенному исполнителю уведомление о новой задаче."""
     try:
-        task = db.query(Task).filter(Task.id == task_id).first()
+        task = visible_tasks(db.query(Task)).filter(Task.id == task_id).first()
         if not task:
             logger.warning("Task %s not found", task_id)
             return False

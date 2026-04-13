@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from config import TASK_KEYWORDS, MINI_APP_URL, HOST, PORT
 from db.models import User, Message as MessageModel, Task, Category, PendingTask, TaskFile, Chat
 from db.database import get_db_session
+from db.task_retention import actionable_tasks, visible_tasks
 from bot.ai_extractor import analyze_message, telegram_message_requires_context
 from bot.task_file_binding import extract_task_reference, resolve_task_for_file_upload
 from bot.webapp_links import build_taskbridge_webapp_url
@@ -408,9 +409,8 @@ async def cmd_start(message: Message):
             db.commit()
             logger.info("Updated telegram_id for user @%s (ID: %s)", user.username, user.id)
 
-        pending_tasks = db.query(Task).join(Task.assignees).filter(
+        pending_tasks = actionable_tasks(db.query(Task)).join(Task.assignees).filter(
             User.id == user.id,
-            Task.status.in_(["pending", "in_progress"]),
         ).all()
 
         if pending_tasks:
@@ -531,7 +531,7 @@ async def handle_task_start(callback: CallbackQuery):
 
     try:
         task_id = int(callback.data.split(":")[1])
-        task = db.query(Task).filter(Task.id == task_id).first()
+        task = visible_tasks(db.query(Task)).filter(Task.id == task_id).first()
 
         if not task:
             await callback.answer("Задача не найдена", show_alert=True)
@@ -773,7 +773,7 @@ async def handle_task_complete(callback: CallbackQuery):
 
     try:
         task_id = int(callback.data.split(":")[1])
-        task = db.query(Task).filter(Task.id == task_id).first()
+        task = visible_tasks(db.query(Task)).filter(Task.id == task_id).first()
 
         if not task:
             await callback.answer("Задача не найдена", show_alert=True)

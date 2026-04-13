@@ -123,6 +123,9 @@ class Task(Base):
     reminder_interval_hours = Column(Integer, nullable=True)  # NULL = default by priority
     last_assignee_reminder_sent_at = Column(DateTime, nullable=True)
     last_creator_reminder_sent_at = Column(DateTime, nullable=True)
+    is_deleted = Column(Boolean, default=False, nullable=False, index=True)
+    deleted_at = Column(DateTime, nullable=True)
+    delete_reason = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

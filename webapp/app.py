@@ -7,6 +7,7 @@ from typing import Any, List, Optional
 
 from db.database import get_db, get_db_session
 from db.models import Task, User, Category, Message as MessageModel, TaskFile, Comment, EmailAccount, EmailMessage, EmailAttachment, task_assignees
+from db.task_retention import DELETE_REASON_MANUAL, mark_task_deleted, visible_tasks
 from pydantic import BaseModel
 import asyncio
 import os
@@ -276,6 +277,8 @@ def _user_can_access_task(task: Task, user: User) -> bool:
 def _ensure_task_access(task: Optional[Task], user: User) -> Task:
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    if task.is_deleted:
+        raise HTTPException(status_code=404, detail="Task not found")
     if not _user_can_access_task(task, user):
         raise HTTPException(status_code=403, detail="You do not have access to this task")
     return task
@@ -286,6 +289,14 @@ def _ensure_task_manage_access(task: Optional[Task], user: User) -> Task:
     if task.created_by != user.id:
         raise HTTPException(status_code=403, detail="Only the task creator can modify this task")
     return task
+
+
+def _visible_task_query(db: Session):
+    return visible_tasks(db.query(Task))
+
+
+def _visible_task_by_id(db: Session, task_id: int):
+    return _visible_task_query(db).filter(Task.id == task_id)
 
 
 def _get_owned_email_account(db: Session, account_id: int, current_user: User) -> EmailAccount:
@@ -752,7 +763,7 @@ async def data_agent_calendar_events(
         return {"events_count": 0, "events": []}
 
     tasks = (
-        db.query(Task)
+        _visible_task_query(db)
         .filter(Task.due_date.isnot(None))
         .filter(Task.due_date >= now, Task.due_date <= horizon)
         .filter(
@@ -803,7 +814,7 @@ async def get_tasks(
 
     logger.info(f"GET /api/tasks - Filters: status={status}, category_id={category_id}, assigned_to={assigned_to}, created_by={created_by}")
 
-    query = db.query(Task)
+    query = _visible_task_query(db)
 
     if status:
         query = query.filter(Task.status == status)
@@ -843,7 +854,7 @@ async def get_tasks(
 
 @app.get("/api/tasks/{task_id}", response_model=dict)
 async def get_task(task_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    task = _ensure_task_access(db.query(Task).filter(Task.id == task_id).first(), current_user)
+    task = _ensure_task_access(_visible_task_by_id(db, task_id).first(), current_user)
     return serialize_task(task)
 
 
@@ -862,7 +873,7 @@ async def update_task_settings(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    task = _ensure_task_manage_access(db.query(Task).filter(Task.id == task_id).first(), current_user)
+    task = _ensure_task_manage_access(_visible_task_by_id(db, task_id).first(), current_user)
 
     if settings.reminder_interval_hours is None:
         task.reminder_interval_hours = None
@@ -883,7 +894,7 @@ async def update_task_due_date(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    task = _ensure_task_manage_access(db.query(Task).filter(Task.id == task_id).first(), current_user)
+    task = _ensure_task_manage_access(_visible_task_by_id(db, task_id).first(), current_user)
 
     if payload.due_date:
         try:
@@ -910,7 +921,7 @@ async def update_task_status(
     if user_id is not None and user_id != current_user.id:
         raise HTTPException(status_code=403, detail="You cannot impersonate another user")
 
-    task = _ensure_task_access(db.query(Task).filter(Task.id == task_id).first(), current_user)
+    task = _ensure_task_access(_visible_task_by_id(db, task_id).first(), current_user)
 
     if status not in ["pending", "in_progress", "completed", "cancelled"]:
         raise HTTPException(status_code=400, detail="Invalid status")
@@ -936,9 +947,9 @@ async def update_task_status(
 @app.delete("/api/tasks/{task_id}")
 async def delete_task(task_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Удалить задачу."""
-    task = _ensure_task_manage_access(db.query(Task).filter(Task.id == task_id).first(), current_user)
+    task = _ensure_task_manage_access(_visible_task_by_id(db, task_id).first(), current_user)
 
-    db.delete(task)
+    mark_task_deleted(task, reason=DELETE_REASON_MANUAL)
     db.commit()
 
     return {"message": "Task deleted successfully"}
@@ -951,7 +962,7 @@ async def get_categories(db: Session = Depends(get_db)):
     
     result = []
     for category in categories:
-        task_count = db.query(func.count(Task.id)).filter(Task.category_id == category.id).scalar()
+        task_count = _visible_task_query(db).filter(Task.category_id == category.id).count()
         result.append({
             "id": category.id,
             "name": category.name,
@@ -1039,7 +1050,7 @@ async def get_stats(
     if assigned_to is not None and assigned_to != current_user.id:
         raise HTTPException(status_code=403, detail="You can request only your own assigned-task stats")
 
-    query = db.query(Task)
+    query = _visible_task_query(db)
 
     # Фильтруем по создателю или исполнителю
     if created_by:
@@ -1073,7 +1084,7 @@ async def get_stats(
 @app.get("/api/tasks/{task_id}/files", response_model=List[dict])
 async def get_task_files(task_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Получить список файлов задачи."""
-    _ensure_task_access(db.query(Task).filter(Task.id == task_id).first(), current_user)
+    _ensure_task_access(_visible_task_by_id(db, task_id).first(), current_user)
 
     files = db.query(TaskFile).filter(TaskFile.task_id == task_id).order_by(desc(TaskFile.created_at)).all()
 
@@ -1112,7 +1123,7 @@ class AssigneeUpdate(BaseModel):
 @app.get("/api/tasks/{task_id}/comments", response_model=List[dict])
 async def get_task_comments(task_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Получить список комментариев задачи."""
-    _ensure_task_access(db.query(Task).filter(Task.id == task_id).first(), current_user)
+    _ensure_task_access(_visible_task_by_id(db, task_id).first(), current_user)
 
     comments = db.query(Comment).filter(Comment.task_id == task_id).order_by(Comment.created_at).all()
 
@@ -1141,7 +1152,7 @@ async def create_task_comment(
     db: Session = Depends(get_db),
 ):
     """Создать комментарий к задаче."""
-    _ensure_task_access(db.query(Task).filter(Task.id == task_id).first(), current_user)
+    _ensure_task_access(_visible_task_by_id(db, task_id).first(), current_user)
     if comment_data.user_id is not None and comment_data.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="You cannot create comments on behalf of another user")
 
@@ -1180,7 +1191,7 @@ async def add_task_assignee(
     db: Session = Depends(get_db),
 ):
     """Добавить исполнителя к задаче."""
-    task = _ensure_task_manage_access(db.query(Task).filter(Task.id == task_id).first(), current_user)
+    task = _ensure_task_manage_access(_visible_task_by_id(db, task_id).first(), current_user)
 
     user = db.query(User).filter(User.id == assignee_data.user_id).first()
     if not user:
@@ -1217,7 +1228,7 @@ async def remove_task_assignee(
     db: Session = Depends(get_db),
 ):
     """Удалить исполнителя из задачи."""
-    task = _ensure_task_manage_access(db.query(Task).filter(Task.id == task_id).first(), current_user)
+    task = _ensure_task_manage_access(_visible_task_by_id(db, task_id).first(), current_user)
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:

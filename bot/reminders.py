@@ -12,6 +12,11 @@ from config import (
 )
 from db.models import Task, User
 from db.database import get_db_session
+from db.task_retention import (
+    OVERDUE_AUTO_DELETE_GRACE_DAYS,
+    actionable_tasks,
+    cleanup_overdue_tasks,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -168,9 +173,7 @@ async def check_and_send_reminders(bot: Bot):
         tz = pytz.timezone(TIMEZONE)
         now = datetime.now(tz)
 
-        active_tasks = db.query(Task).filter(
-            Task.status.in_(["pending", "in_progress"])
-        ).all()
+        active_tasks = actionable_tasks(db.query(Task)).all()
 
         logger.info(f"Found {len(active_tasks)} active tasks")
 
@@ -229,6 +232,26 @@ async def check_and_send_reminders(bot: Bot):
         db.close()
 
 
+async def cleanup_deleted_overdue_tasks() -> None:
+    db = get_db_session()
+
+    try:
+        deleted_tasks = cleanup_overdue_tasks(db)
+        if deleted_tasks:
+            logger.info(
+                "Auto-deleted %s overdue tasks older than %s days: %s",
+                len(deleted_tasks),
+                OVERDUE_AUTO_DELETE_GRACE_DAYS,
+                [task.id for task in deleted_tasks],
+            )
+        else:
+            logger.info("No overdue tasks qualified for auto-delete")
+    except Exception as exc:
+        logger.error("Error in cleanup_deleted_overdue_tasks: %s", exc, exc_info=True)
+    finally:
+        db.close()
+
+
 def start_reminder_scheduler(bot: Bot):
     global scheduler
 
@@ -245,6 +268,14 @@ def start_reminder_scheduler(bot: Bot):
             minutes=REMINDER_CHECK_INTERVAL,
             args=[bot],
             id="check_reminders",
+            replace_existing=True
+        )
+
+        scheduler.add_job(
+            cleanup_deleted_overdue_tasks,
+            "interval",
+            minutes=60,
+            id="cleanup_deleted_overdue_tasks",
             replace_existing=True
         )
 

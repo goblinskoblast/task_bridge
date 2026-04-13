@@ -5,6 +5,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from db.models import Task, User
+from db.task_retention import visible_tasks
 
 
 TASK_REFERENCE_PATTERNS = [
@@ -28,7 +29,7 @@ def extract_task_reference(text: Optional[str]) -> Optional[int]:
 
 def get_user_in_progress_tasks(db: Session, user_id: int) -> List[Task]:
     return (
-        db.query(Task)
+        visible_tasks(db.query(Task))
         .join(Task.assignees)
         .filter(
             User.id == user_id,

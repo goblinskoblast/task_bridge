@@ -73,6 +73,7 @@ def _ensure_task_columns():
     inspector = inspect(sync_engine)
     column_names = {column["name"] for column in inspector.get_columns("tasks")}
     datetime_type = "TIMESTAMP" if sync_engine.dialect.name == "postgresql" else "DATETIME"
+    boolean_type = "BOOLEAN" if sync_engine.dialect.name == "postgresql" else "INTEGER"
     alter_statements = []
 
     if "reminder_interval_hours" not in column_names:
@@ -84,6 +85,19 @@ def _ensure_task_columns():
     if "last_creator_reminder_sent_at" not in column_names:
         alter_statements.append(
             f"ALTER TABLE tasks ADD COLUMN last_creator_reminder_sent_at {datetime_type}"
+        )
+    if "is_deleted" not in column_names:
+        default_literal = "FALSE" if sync_engine.dialect.name == "postgresql" else "0"
+        alter_statements.append(
+            f"ALTER TABLE tasks ADD COLUMN is_deleted {boolean_type} DEFAULT {default_literal}"
+        )
+    if "deleted_at" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE tasks ADD COLUMN deleted_at {datetime_type}"
+        )
+    if "delete_reason" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE tasks ADD COLUMN delete_reason VARCHAR(100)"
         )
 
     if not alter_statements:
