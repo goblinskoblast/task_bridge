@@ -252,6 +252,8 @@ class DataAgentService:
         scenario: str,
         point_name: str,
         interval_minutes: int,
+        start_hour: int | None = None,
+        end_hour: int | None = None,
     ) -> str | None:
         monitor_type = scenario_to_monitor_type(scenario)
         if scenario == "reviews_report" and interval_minutes:
@@ -284,11 +286,17 @@ class DataAgentService:
                     point_name=point_name,
                     check_interval_minutes=interval_minutes,
                     is_active=True,
+                    active_from_hour=start_hour,
+                    active_to_hour=end_hour,
                 )
                 db.add(existing)
             else:
                 existing.check_interval_minutes = interval_minutes
                 existing.is_active = True
+                if start_hour is not None:
+                    existing.active_from_hour = start_hour
+                if end_hour is not None:
+                    existing.active_to_hour = end_hour
 
             profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user.id).first()
             chat_title = profile.default_report_chat_title if profile else None
@@ -390,12 +398,16 @@ class DataAgentService:
             success = response_status != "failed"
             interval_minutes = decision.slots.get("monitor_interval_minutes")
             point_name = decision.slots.get("point_name")
+            start_hour = decision.slots.get("monitor_start_hour")
+            end_hour = decision.slots.get("monitor_end_hour")
             if isinstance(interval_minutes, int) and interval_minutes > 0 and point_name:
                 monitor_note = self._upsert_monitor(
                     user_id=payload.user_id,
                     scenario=decision.scenario,
                     point_name=point_name,
                     interval_minutes=interval_minutes,
+                    start_hour=start_hour,
+                    end_hour=end_hour,
                 )
                 if monitor_note:
                     answer = f"{answer}{monitor_note}"

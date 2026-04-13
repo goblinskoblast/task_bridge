@@ -251,6 +251,11 @@ class DataAgentRuntime:
         interval = self._extract_monitor_interval(message)
         if interval:
             slots["monitor_interval_minutes"] = interval
+        window = self._extract_monitor_window(message)
+        if window:
+            start_hour, end_hour = window
+            slots["monitor_start_hour"] = start_hour
+            slots["monitor_end_hour"] = end_hour
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
         if any(marker in lowered for marker in FOLLOWUP_MARKERS) and session.slots.get("point_name"):
             slots.setdefault("point_name", session.slots.get("point_name"))
@@ -306,6 +311,17 @@ class DataAgentRuntime:
         if match:
             return int(match.group(1)) * 60
         return None
+
+    def _extract_monitor_window(self, message: str) -> Optional[tuple[int, int]]:
+        lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
+        match = re.search(r"с\s*(\d{1,2})(?::\d{2})?\s*до\s*(\d{1,2})(?::\d{2})?", lowered)
+        if not match:
+            return None
+        start_hour = int(match.group(1))
+        end_hour = int(match.group(2))
+        if not (0 <= start_hour <= 23 and 0 <= end_hour <= 23):
+            return None
+        return start_hour, end_hour
 
     def _required_slots(self, scenario: str) -> List[str]:
         if scenario in {"stoplist_report", "blanks_report"}:

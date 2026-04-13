@@ -65,6 +65,7 @@ def init_db():
     Base.metadata.create_all(bind=sync_engine)
     _ensure_task_columns()
     _ensure_data_agent_profile_columns()
+    _ensure_data_agent_monitor_columns()
     _ensure_data_agent_session_columns()
     _ensure_saved_point_columns()
 
@@ -177,6 +178,32 @@ def _ensure_data_agent_session_columns():
     if "last_debug_payload" not in column_names:
         alter_statements.append(
             "ALTER TABLE data_agent_sessions ADD COLUMN last_debug_payload JSON"
+        )
+
+    if not alter_statements:
+        return
+
+    with sync_engine.begin() as connection:
+        for statement in alter_statements:
+            connection.execute(text(statement))
+
+
+def _ensure_data_agent_monitor_columns():
+    inspector = inspect(sync_engine)
+    if "data_agent_monitor_configs" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("data_agent_monitor_configs")}
+    integer_type = "INTEGER"
+    alter_statements = []
+
+    if "active_from_hour" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE data_agent_monitor_configs ADD COLUMN active_from_hour {integer_type}"
+        )
+    if "active_to_hour" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE data_agent_monitor_configs ADD COLUMN active_to_hour {integer_type}"
         )
 
     if not alter_statements:

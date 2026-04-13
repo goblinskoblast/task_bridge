@@ -472,6 +472,8 @@ class DataAgentMonitorConfig(Base):
     point_name = Column(String(255), nullable=False)
     point_address = Column(String(500), nullable=True)
     check_interval_minutes = Column(Integer, nullable=False, default=60)
+    active_from_hour = Column(Integer, nullable=True)
+    active_to_hour = Column(Integer, nullable=True)
     is_active = Column(Boolean, default=True)
     last_checked_at = Column(DateTime, nullable=True)
     last_status = Column(String(100), nullable=True)

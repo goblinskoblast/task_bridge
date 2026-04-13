@@ -67,6 +67,29 @@ def _build_monitor_failure_message(config: DataAgentMonitorConfig, summary: str)
     return templates.get(config.monitor_type, "Не удалось получить отчет. Попробуйте позже.")
 
 
+def _is_within_active_window(config: DataAgentMonitorConfig, now: datetime) -> bool:
+    start_hour = config.active_from_hour
+    end_hour = config.active_to_hour
+    if start_hour is None or end_hour is None:
+        return True
+
+    current_hour = now.hour
+    if start_hour == end_hour:
+        return True
+    if start_hour < end_hour:
+        return start_hour <= current_hour <= end_hour
+    return current_hour >= start_hour or current_hour <= end_hour
+
+
+def _extract_red_zone_lines(report_text: str) -> list[str]:
+    red_lines: list[str] = []
+    for line in (report_text or "").splitlines():
+        lowered = line.lower()
+        if any(marker in lowered for marker in ["красн", "перегруз", "лимит", "норматив"]):
+            red_lines.append(line.strip())
+    return [line for line in red_lines if line]
+
+
 async def _record_monitor_failure(bot: Bot, db, config: DataAgentMonitorConfig, result: dict, tool_name: str) -> None:
     config.last_checked_at = datetime.utcnow()
     config.last_status = result.get("status") or "failed"
@@ -158,6 +181,9 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
         config.last_result_json = result
 
         if result.get("has_red_flags") and result.get("alert_hash") != config.last_alert_hash:
+            report_text = result.get("report_text") or ""
+            red_lines = _extract_red_zone_lines(report_text)
+            red_summary = "\n".join(red_lines) if red_lines else report_text
             event = DataAgentMonitorEvent(
                 user_id=config.user_id,
                 config_id=config.id,
@@ -166,7 +192,7 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
                 point_name=config.point_name,
                 severity="warning",
                 title=f"Найдены красные бланки: {config.point_name}",
-                body=result.get("report_text"),
+                body=red_summary,
                 event_hash=result.get("alert_hash"),
                 sent_to_telegram=False,
             )
@@ -183,7 +209,7 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
                         f"Обнаружены красные бланки\n\n"
                         f"<b>Точка:</b> {config.point_name}\n"
                         f"<b>Статус:</b> найдены красные бланки\n\n"
-                        f"{result.get('report_text', '')[:3500]}"
+                        f"{red_summary[:3500]}"
                     ),
                     parse_mode="HTML",
                 )
@@ -340,6 +366,8 @@ async def _run_monitors(bot: Bot) -> None:
         logger.info("Running data-agent monitors: %s active configs", len(configs))
 
         for item in configs:
+            if not _is_within_active_window(item, now):
+                continue
             if item.last_checked_at:
                 elapsed_minutes = (now.replace(tzinfo=None) - item.last_checked_at).total_seconds() / 60
                 if elapsed_minutes < item.check_interval_minutes:
