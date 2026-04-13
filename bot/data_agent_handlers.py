@@ -17,6 +17,7 @@ from bot.report_delivery import (
     is_report_delivery_candidate,
     trim_telegram_text,
 )
+from bot.voice_transcription import VoiceTranscriptionError, transcribe_telegram_voice
 from bot.webapp_links import build_taskbridge_webapp_url
 from config import DEVELOPER_TELEGRAM_ID
 from db.database import get_db_session
@@ -601,6 +602,13 @@ def _build_quick_report_prompt(action_key: str) -> str:
 def _build_quick_report_request(action_key: str, point: str) -> str:
     action = QUICK_REPORT_ACTIONS[action_key]
     return action["request_builder"](point.strip())
+
+
+def _build_voice_request_preview(text: str) -> str:
+    normalized = " ".join((text or "").strip().split())
+    if len(normalized) > 280:
+        normalized = normalized[:277].rstrip() + "..."
+    return f"Распознал запрос:\n{normalized}"
 
 
 def _point_button_label(point: SavedPoint) -> str:
@@ -1929,3 +1937,22 @@ async def connect_waiting_for_password(message: Message, state: FSMContext) -> N
 )
 async def handle_private_agent_message(message: Message, state: FSMContext) -> None:
     await _dispatch_agent_request(message, (message.text or "").strip())
+
+
+@router.message(
+    StateFilter(None),
+    F.chat.type == "private",
+    F.voice,
+)
+async def handle_private_agent_voice(message: Message, state: FSMContext) -> None:
+    waiting_message = await message.answer("Распознаю голосовое сообщение...")
+    try:
+        request_text = await transcribe_telegram_voice(message)
+    except VoiceTranscriptionError:
+        await waiting_message.edit_text(
+            "Не удалось распознать голосовое сообщение. Попробуйте ещё раз или отправьте запрос текстом."
+        )
+        return
+
+    await waiting_message.edit_text(_build_voice_request_preview(request_text))
+    await _dispatch_agent_request(message, request_text)
