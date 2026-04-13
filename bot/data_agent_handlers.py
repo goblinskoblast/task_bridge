@@ -678,9 +678,9 @@ def _build_points_summary_text(points: list[SavedPoint]) -> str:
         )
 
     lines = ["📍 <b>Ваши точки</b>", ""]
-    for point in points:
+    for index, point in enumerate(points, start=1):
         delivery_mark = " • в чат" if point.report_delivery_enabled else ""
-        lines.append(f"• <b>#{point.id}</b> {point.display_name}{delivery_mark}")
+        lines.append(f"• <b>{index}.</b> {point.display_name}{delivery_mark}")
     if len(points) > 1:
         lines.extend(["", "Можно выбрать одну точку или сразу «Все точки»."])
     return "\n".join(lines)
