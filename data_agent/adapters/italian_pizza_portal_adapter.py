@@ -15,7 +15,7 @@ MSK_TZ = ZoneInfo("Europe/Moscow")
 class ItalianPizzaPortalAdapter:
     _POINT_CONTROL_SELECTOR = "button, [role='button'], [role='option'], [role='tab'], [role='menuitem'], label, span, div, li, option, a"
     _STRICT_RED_ATTR_RE = re.compile(
-        r"\b(red|danger|error|critical|alarm|negative|alert|overload|limit)\b",
+        r"\b(red|danger|error|critical|alarm|negative|alert)\b",
         flags=re.IGNORECASE,
     )
     _POINT_SEARCH_SELECTORS = [
@@ -1203,7 +1203,7 @@ class ItalianPizzaPortalAdapter:
       node.getAttribute?.("aria-label") || "",
       node.getAttribute?.("style") || "",
     ].join(" ");
-    return /jss261|red|danger|error|critical|alarm|negative|alert|overload|limit|warning/i.test(blob);
+    return /\b(red|danger|error|critical|alarm|negative|alert)\b/i.test(blob);
   };
   const isVisuallyInteresting = (node) => {
     const style = getComputedStyle(node);

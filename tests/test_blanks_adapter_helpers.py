@@ -273,6 +273,29 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         )
         self.assertEqual(filtered, [])
 
+    def test_filter_red_blank_signals_ignores_limit_state_without_red_style(self):
+        filtered = self.adapter._filter_red_blank_signals(
+            [
+                {
+                    "service": "\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430",
+                    "time_range": "18:00 - 18:15",
+                    "column": "\u041f\u0438\u0446\u0446\u0430",
+                    "rows": [
+                        {
+                            "row_label": "\u041f\u0440\u0438\u043d\u044f\u0442\u043e",
+                            "value": "0",
+                            "class_name": "blank-cell limit-state",
+                            "data_cy": "capacity-limit",
+                            "background_color": "rgb(255, 244, 179)",
+                            "text_color": "rgb(40, 40, 40)",
+                            "border_color": "rgb(255, 224, 102)",
+                        }
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(filtered, [])
+
     def test_filter_red_blank_signals_keeps_inferred_breach_rows(self):
         filtered = self.adapter._filter_red_blank_signals(
             [

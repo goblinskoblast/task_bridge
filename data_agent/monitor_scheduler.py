@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 
 
+def _load_monitor_config(db, config: DataAgentMonitorConfig | None) -> DataAgentMonitorConfig | None:
+    config_id = getattr(config, "id", None)
+    if not config_id:
+        return None
+    return db.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == config_id).first()
+
+
 def _resolve_monitor_delivery_chat_id(db, user: User | None, category: str | None = None) -> int | None:
     if not user:
         return None
@@ -135,6 +142,10 @@ def _is_monitor_due(config: DataAgentMonitorConfig, now: datetime) -> bool:
 
 
 async def _record_monitor_failure(bot: Bot, db, config: DataAgentMonitorConfig, result: dict, tool_name: str) -> None:
+    config = _load_monitor_config(db, config)
+    if not config:
+        return
+
     config.last_checked_at = datetime.utcnow()
     config.last_status = result.get("status") or "failed"
     config.last_result_json = result
@@ -185,6 +196,10 @@ async def _record_monitor_failure(bot: Bot, db, config: DataAgentMonitorConfig, 
 async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
     db = get_db_session()
     try:
+        config = _load_monitor_config(db, config)
+        if not config:
+            return
+
         system = (
             db.query(DataAgentSystem)
             .filter(
@@ -279,6 +294,10 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
 async def _run_stoplist_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
     db = get_db_session()
     try:
+        config = _load_monitor_config(db, config)
+        if not config:
+            return
+
         user = db.query(User).filter(User.id == config.user_id).first()
         result = await stoplist_tool.collect_for_point(
             url="",
@@ -350,6 +369,10 @@ async def _run_stoplist_monitor(bot: Bot, config: DataAgentMonitorConfig) -> Non
 async def _run_reviews_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
     db = get_db_session()
     try:
+        config = _load_monitor_config(db, config)
+        if not config:
+            return
+
         interval = config.check_interval_minutes or 60
         if interval <= 180:
             window_label = "за последние 3 часов"
