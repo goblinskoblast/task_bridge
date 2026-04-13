@@ -7,6 +7,9 @@ os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 
 from bot.data_agent_handlers import (
+    AGENT_ENTRY_KEYBOARD,
+    _build_agent_reports_menu_keyboard,
+    _build_agent_settings_menu_keyboard,
     _build_point_actions_keyboard,
     _build_report_chat_keyboard,
     _build_slim_main_reply_keyboard,
@@ -16,6 +19,10 @@ from bot.handlers import _build_main_reply_keyboard
 
 def _flatten_button_texts(keyboard) -> list[str]:
     return [button.text for row in keyboard.keyboard for button in row]
+
+
+def _flatten_inline_texts(keyboard) -> list[str]:
+    return [button.text for row in keyboard.inline_keyboard for button in row]
 
 
 def _flatten_callback_data(keyboard) -> list[str]:
@@ -35,6 +42,38 @@ class AgentNavigationTest(unittest.TestCase):
         self.assertIn("🤖 Агент", texts)
         self.assertNotIn("⚡ Быстрые отчёты", texts)
         self.assertNotIn("📡 Мониторы", texts)
+
+    def test_agent_root_keyboard_has_only_top_level_sections(self):
+        texts = _flatten_inline_texts(AGENT_ENTRY_KEYBOARD)
+
+        self.assertEqual(
+            texts,
+            [
+                "📊 Отчёты",
+                "📍 Точки",
+                "🔌 Системы",
+                "⚙️ Настройки",
+            ],
+        )
+
+    def test_reports_submenu_contains_report_actions_and_home(self):
+        keyboard = _build_agent_reports_menu_keyboard()
+        texts = _flatten_inline_texts(keyboard)
+
+        self.assertIn("⭐ Отзывы за сутки", texts)
+        self.assertIn("📈 Отзывы за неделю", texts)
+        self.assertIn("🚫 Стоп-лист", texts)
+        self.assertIn("🧾 Бланки сейчас", texts)
+        self.assertIn("🕒 Бланки 12 часов", texts)
+        self.assertIn("↩️ В меню агента", texts)
+
+    def test_settings_submenu_contains_settings_actions_and_home(self):
+        keyboard = _build_agent_settings_menu_keyboard()
+        texts = _flatten_inline_texts(keyboard)
+
+        self.assertIn("💬 Чаты отчётов", texts)
+        self.assertIn("📡 Мониторинги", texts)
+        self.assertIn("↩️ В меню агента", texts)
 
     def test_point_actions_keyboard_has_agent_home_button(self):
         point = SimpleNamespace(id=7, report_delivery_enabled=False)

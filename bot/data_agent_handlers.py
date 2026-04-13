@@ -41,17 +41,41 @@ QUICK_REPORT_CALLBACK_PREFIX = "agent_quick:"
 POINT_CALLBACK_PREFIX = "agent_point:"
 POINT_REPORT_CALLBACK_PREFIX = "agent_point_report:"
 POINT_DELIVERY_CALLBACK_PREFIX = "agent_point_delivery:"
+REPORTS_MENU_BUTTON_TEXT = "📊 Отчёты"
+SETTINGS_BUTTON_TEXT = "⚙️ Настройки"
+REPORT_CHATS_BUTTON_TEXT = "💬 Чаты отчётов"
+CONNECT_SYSTEM_BUTTON_TEXT = "➕ Подключить систему"
+MONITORS_MENU_BUTTON_TEXT = "📡 Мониторинги"
+
 AGENT_WELCOME = (
     "🤖 <b>Агент TaskBridge</b>\n\n"
-    "Чем могу помочь:\n"
-    "• отзывы по точкам\n"
-    "• стоп-лист и бланки\n"
-    "• сохранённые точки и отчёты по ним\n"
-    "• мониторинги и отчёты в чат\n"
-    "• подключённые веб-системы\n\n"
-    "Можно нажать готовую кнопку ниже или просто написать задачу обычным сообщением."
+    "Здесь всё собрано по разделам:\n"
+    "• отчёты по точкам\n"
+    "• сохранённые точки\n"
+    "• подключённые системы\n"
+    "• настройки чатов и мониторингов\n\n"
+    "Выберите раздел ниже или просто напишите задачу обычным сообщением."
 )
 AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [
+            InlineKeyboardButton(text=REPORTS_MENU_BUTTON_TEXT, callback_data="agent_menu_reports"),
+            InlineKeyboardButton(text=POINTS_BUTTON_TEXT, callback_data="agent_show_points"),
+        ],
+        [
+            InlineKeyboardButton(text=SYSTEMS_BUTTON_TEXT, callback_data="agent_show_systems"),
+            InlineKeyboardButton(text=SETTINGS_BUTTON_TEXT, callback_data="agent_menu_settings"),
+        ],
+    ]
+)
+
+AGENT_HOME_KEYBOARD = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="↩️ В меню агента", callback_data="agent_open")],
+    ]
+)
+
+AGENT_REPORTS_MENU_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
         [
             InlineKeyboardButton(text="⭐ Отзывы за сутки", callback_data="agent_quick_reviews_day"),
@@ -63,22 +87,16 @@ AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
         ],
         [
             InlineKeyboardButton(text="🕒 Бланки 12 часов", callback_data="agent_quick_blanks_12h"),
-            InlineKeyboardButton(text="📡 Мониторы", callback_data="agent_show_monitors"),
         ],
-        [
-            InlineKeyboardButton(text=POINTS_BUTTON_TEXT, callback_data="agent_show_points"),
-        ],
-        [
-            InlineKeyboardButton(text="💬 Чаты отчётов", callback_data="agent_choose_report_chat"),
-            InlineKeyboardButton(text="🔌 Системы", callback_data="agent_show_systems"),
-        ],
-        [InlineKeyboardButton(text="➕ Подключить систему", callback_data="agent_connect_system")],
     ]
 )
 
-AGENT_HOME_KEYBOARD = InlineKeyboardMarkup(
+AGENT_SETTINGS_MENU_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
-        [InlineKeyboardButton(text="↩️ В меню агента", callback_data="agent_open")],
+        [
+            InlineKeyboardButton(text=REPORT_CHATS_BUTTON_TEXT, callback_data="agent_choose_report_chat"),
+            InlineKeyboardButton(text=MONITORS_MENU_BUTTON_TEXT, callback_data="agent_show_monitors"),
+        ],
     ]
 )
 
@@ -158,6 +176,22 @@ def _with_agent_home(keyboard: InlineKeyboardMarkup | None = None) -> InlineKeyb
     if not has_home:
         rows.append([InlineKeyboardButton(text="↩️ В меню агента", callback_data="agent_open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _build_agent_reports_menu_keyboard() -> InlineKeyboardMarkup:
+    return _with_agent_home(AGENT_REPORTS_MENU_KEYBOARD)
+
+
+def _build_agent_settings_menu_keyboard() -> InlineKeyboardMarkup:
+    return _with_agent_home(AGENT_SETTINGS_MENU_KEYBOARD)
+
+
+def _build_agent_systems_keyboard() -> InlineKeyboardMarkup:
+    return _with_agent_home(InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=CONNECT_SYSTEM_BUTTON_TEXT, callback_data="agent_connect_system")],
+        ]
+    ))
 
 
 def _build_slim_main_reply_keyboard(webapp_url: str) -> ReplyKeyboardMarkup:
@@ -823,7 +857,7 @@ async def _send_systems_summary(message: Message, *, telegram_user_id: int | Non
     if not systems:
         await message.answer(
             "🔌 <b>Подключённых систем пока нет</b>\n\nНажмите «Подключить систему», чтобы добавить новую.",
-            reply_markup=AGENT_ENTRY_KEYBOARD,
+            reply_markup=_build_agent_systems_keyboard(),
             parse_mode="HTML",
         )
         return
@@ -831,7 +865,7 @@ async def _send_systems_summary(message: Message, *, telegram_user_id: int | Non
     lines = ["🔌 <b>Подключённые системы</b>", ""]
     for item in systems:
         lines.append(f"• <b>{item.get('system_name', 'web-system')}</b> — {item.get('url')}")
-    await message.answer("\n".join(lines), reply_markup=AGENT_ENTRY_KEYBOARD, parse_mode="HTML")
+    await message.answer("\n".join(lines), reply_markup=_build_agent_systems_keyboard(), parse_mode="HTML")
 
 
 async def _send_monitors_summary(message: Message, *, telegram_user_id: int | None = None) -> None:
@@ -847,7 +881,7 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
         await message.answer(
             "📡 <b>Активных мониторингов пока нет</b>\n\n"
             "Пример: <code>/monitorblanks Артемовский, Гагарина 2А каждый час</code>",
-            reply_markup=AGENT_ENTRY_KEYBOARD,
+            reply_markup=_build_agent_settings_menu_keyboard(),
             parse_mode="HTML",
         )
         return
@@ -859,7 +893,7 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
             f"(каждые {item.get('check_interval_minutes')} мин., статус: {item.get('last_status') or 'new'})"
         )
     lines.extend(["", "Отключение: <code>/unmonitor ID</code>"])
-    await message.answer("\n".join(lines), reply_markup=AGENT_ENTRY_KEYBOARD, parse_mode="HTML")
+    await message.answer("\n".join(lines), reply_markup=_build_agent_settings_menu_keyboard(), parse_mode="HTML")
 
 
 async def _send_points_summary(message: Message, *, telegram_user_id: int | None = None) -> None:
@@ -872,7 +906,7 @@ async def _send_points_summary(message: Message, *, telegram_user_id: int | None
             await message.answer(
                 "📍 <b>Точки пока недоступны</b>\n\n"
                 "Сначала подключите систему Italian Pizza, а затем добавьте точки к этой системе.",
-                reply_markup=AGENT_ENTRY_KEYBOARD,
+                reply_markup=_build_agent_systems_keyboard(),
                 parse_mode="HTML",
             )
             return
@@ -891,6 +925,24 @@ async def _send_points_summary(message: Message, *, telegram_user_id: int | None
         )
     finally:
         db.close()
+
+
+async def _send_agent_reports_menu(message: Message) -> None:
+    await message.answer(
+        "📊 <b>Отчёты</b>\n\n"
+        "Выберите нужный отчёт. Если точки уже сохранены, агент сразу предложит их списком.",
+        reply_markup=_build_agent_reports_menu_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+async def _send_agent_settings_menu(message: Message) -> None:
+    await message.answer(
+        "⚙️ <b>Настройки агента</b>\n\n"
+        "Здесь можно выбрать чаты для отчётов и посмотреть активные мониторинги.",
+        reply_markup=_build_agent_settings_menu_keyboard(),
+        parse_mode="HTML",
+    )
 
 
 async def _send_point_details(message: Message, telegram_user_id: int, point_id: int) -> None:
@@ -1155,13 +1207,14 @@ async def open_agent_from_button(message: Message, state: FSMContext) -> None:
 @router.message(F.chat.type == "private", F.text == QUICK_REPORTS_BUTTON_TEXT)
 async def open_quick_reports_from_button(message: Message, state: FSMContext) -> None:
     await _refresh_private_main_menu(message)
-    await _open_agent_entry(message, state)
+    await state.clear()
+    await _send_agent_reports_menu(message)
 
 
 @router.message(F.chat.type == "private", F.text == MONITORS_BUTTON_TEXT)
 async def open_monitors_from_button(message: Message) -> None:
     await _refresh_private_main_menu(message)
-    await _send_monitors_summary(message)
+    await _send_agent_settings_menu(message)
 
 
 @router.message(F.chat.type == "private", F.text == POINTS_BUTTON_TEXT)
@@ -1174,6 +1227,22 @@ async def callback_agent_open(callback: CallbackQuery, state: FSMContext) -> Non
     await callback.answer()
     if callback.message:
         await _open_agent_entry(callback.message, state, actor_user=callback.from_user)
+
+
+@router.callback_query(F.data == "agent_menu_reports")
+async def callback_agent_menu_reports(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.clear()
+    if callback.message:
+        await _send_agent_reports_menu(callback.message)
+
+
+@router.callback_query(F.data == "agent_menu_settings")
+async def callback_agent_menu_settings(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.clear()
+    if callback.message:
+        await _send_agent_settings_menu(callback.message)
 
 
 @router.callback_query(F.data == "agent_connect_system")
