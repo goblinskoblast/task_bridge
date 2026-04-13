@@ -109,6 +109,40 @@ def _monitor_blanks_period_hint(config: DataAgentMonitorConfig) -> str:
     return f"за последние {hours} {_hours_word(hours)}"
 
 
+def _is_monitor_due(config: DataAgentMonitorConfig, now: datetime) -> bool:
+    interval_minutes = int(config.check_interval_minutes or 0)
+    if interval_minutes <= 0:
+        return True
+
+    if interval_minutes % 60 == 0:
+        interval_hours = max(1, interval_minutes // 60)
+        anchor_hour = config.active_from_hour if config.active_from_hour is not None else 0
+        if now.minute != 0:
+            return False
+        if (now.hour - anchor_hour) % interval_hours != 0:
+            return False
+        if not config.last_checked_at:
+            return True
+
+        last_checked = config.last_checked_at
+        if last_checked.tzinfo is None:
+            last_checked = pytz.UTC.localize(last_checked).astimezone(now.tzinfo)
+        else:
+            last_checked = last_checked.astimezone(now.tzinfo)
+        return not (last_checked.date() == now.date() and last_checked.hour == now.hour)
+
+    if not config.last_checked_at:
+        return True
+
+    last_checked = config.last_checked_at
+    if last_checked.tzinfo is None:
+        last_checked = pytz.UTC.localize(last_checked).astimezone(now.tzinfo)
+    else:
+        last_checked = last_checked.astimezone(now.tzinfo)
+    elapsed_minutes = (now - last_checked).total_seconds() / 60
+    return elapsed_minutes >= interval_minutes
+
+
 async def _record_monitor_failure(bot: Bot, db, config: DataAgentMonitorConfig, result: dict, tool_name: str) -> None:
     config.last_checked_at = datetime.utcnow()
     config.last_status = result.get("status") or "failed"
@@ -394,10 +428,8 @@ async def _run_monitors(bot: Bot) -> None:
         for item in configs:
             if not _is_within_active_window(item, now):
                 continue
-            if item.last_checked_at:
-                elapsed_minutes = (now.replace(tzinfo=None) - item.last_checked_at).total_seconds() / 60
-                if elapsed_minutes < item.check_interval_minutes:
-                    continue
+            if not _is_monitor_due(item, now):
+                continue
 
             if item.monitor_type == "blanks":
                 await _run_blanks_monitor(bot, item)
@@ -416,9 +448,9 @@ def start_data_agent_monitor_scheduler() -> None:
 
     bot = Bot(token=BOT_TOKEN)
     _scheduler = AsyncIOScheduler(timezone=TIMEZONE)
-    _scheduler.add_job(_run_monitors, "interval", minutes=60, args=[bot], id="data_agent_monitors", replace_existing=True)
+    _scheduler.add_job(_run_monitors, "cron", minute=0, args=[bot], id="data_agent_monitors", replace_existing=True)
     _scheduler.start()
-    logger.info("Data-agent monitor scheduler started with interval 60 minutes")
+    logger.info("Data-agent monitor scheduler started with hourly cron at minute 0")
 
 
 def stop_data_agent_monitor_scheduler() -> None:
