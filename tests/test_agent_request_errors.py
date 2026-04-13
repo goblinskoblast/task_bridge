@@ -33,7 +33,10 @@ class AgentRequestErrorsTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             message.answers,
-            ["Агент не успел ответить. Запрос выполняется слишком долго, попробуйте повторить чуть позже."],
+            [
+                "⏳ Принял запрос. Собираю отчёт, это может занять пару минут.",
+                "Агент не успел ответить. Запрос выполняется слишком долго, попробуйте повторить чуть позже.",
+            ],
         )
 
     async def test_unexpected_error_keeps_generic_message(self):
@@ -44,7 +47,10 @@ class AgentRequestErrorsTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             message.answers,
-            ["Агент сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз."],
+            [
+                "⏳ Принял запрос. Собираю отчёт, это может занять пару минут.",
+                "Агент сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз.",
+            ],
         )
 
 

@@ -20,14 +20,18 @@ class _DummyMessage:
 
 
 class AgentRequestDispatchTest(unittest.IsolatedAsyncioTestCase):
-    async def test_long_request_schedules_background_without_start_notice(self):
+    async def test_long_request_sends_start_notice_and_schedules_background(self):
         message = _DummyMessage()
 
         with patch("bot.data_agent_handlers._schedule_background_agent_request") as mocked_schedule:
             await _dispatch_agent_request(message, "проверь стоп-лист по точке Екатеринбург, Ленина 147")
 
-        self.assertEqual(message.answers, [])
-        mocked_schedule.assert_called_once_with(message, "проверь стоп-лист по точке Екатеринбург, Ленина 147")
+        self.assertEqual(message.answers, ["⏳ Принял запрос. Собираю отчёт, это может занять пару минут."])
+        mocked_schedule.assert_called_once_with(
+            message,
+            "проверь стоп-лист по точке Екатеринбург, Ленина 147",
+            send_progress=False,
+        )
 
     async def test_short_request_runs_immediately_without_extra_messages(self):
         message = _DummyMessage()

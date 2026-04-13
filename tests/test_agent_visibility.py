@@ -34,7 +34,10 @@ class AgentVisibilityTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             message.answers,
-            ["Не удалось получить отчет по стоп-листу. Попробуйте позже."],
+            [
+                "⏳ Принял запрос. Собираю отчёт, это может занять пару минут.",
+                "Не удалось получить отчет по стоп-листу. Попробуйте позже.",
+            ],
         )
 
     async def test_completed_report_response_is_duplicated_to_selected_chat(self):
@@ -54,8 +57,9 @@ class AgentVisibilityTest(unittest.IsolatedAsyncioTestCase):
         ) as mocked_delivery:
             await _send_agent_request(message, "собери стоп-лист по точке Верхний Уфалей, Ленина 147")
 
-        self.assertEqual(message.answers[0], result["answer"])
-        self.assertEqual(message.answers[1], "Отчёт также отправлен в чат: Таскбридж")
+        self.assertEqual(message.answers[0], "⏳ Принял запрос. Собираю отчёт, это может занять пару минут.")
+        self.assertEqual(message.answers[1], result["answer"])
+        self.assertEqual(message.answers[2], "Отчёт также отправлен в чат: Таскбридж")
         mocked_delivery.assert_awaited_once()
 
     async def test_completed_report_response_reports_disabled_point_delivery(self):
@@ -77,8 +81,9 @@ class AgentVisibilityTest(unittest.IsolatedAsyncioTestCase):
         ) as mocked_delivery:
             await _send_agent_request(message, "собери стоп-лист по точке Верхний Уфалей, Ленина 147")
 
-        self.assertEqual(message.answers[0], result["answer"])
-        self.assertIn("выключена отправка", message.answers[1])
+        self.assertEqual(message.answers[0], "⏳ Принял запрос. Собираю отчёт, это может занять пару минут.")
+        self.assertEqual(message.answers[1], result["answer"])
+        self.assertIn("выключена отправка", message.answers[2])
         mocked_delivery.assert_not_awaited()
     async def test_non_developer_cannot_use_agentdebug(self):
         message = _DummyMessage(user_id=17)

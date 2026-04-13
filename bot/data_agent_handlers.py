@@ -770,8 +770,17 @@ def _looks_like_long_agent_request(text: str) -> bool:
     )
 
 
-def _schedule_background_agent_request(message: Message, text: str) -> None:
-    task = asyncio.create_task(_send_agent_request(message, text))
+def _build_agent_progress_message(text: str) -> str:
+    lowered = (text or "").lower()
+    if "все" in lowered and any(marker in lowered for marker in ["точк", "добавлен"]):
+        return "⏳ Принял запрос. Собираю отчёт по всем точкам, это может занять пару минут."
+    if any(marker in lowered for marker in ["бланк", "стоп-лист", "стоп лист", "отзыв"]):
+        return "⏳ Принял запрос. Собираю отчёт, это может занять пару минут."
+    return "⏳ Принял запрос. Обрабатываю."
+
+
+def _schedule_background_agent_request(message: Message, text: str, *, send_progress: bool = True) -> None:
+    task = asyncio.create_task(_send_agent_request(message, text, send_progress=send_progress))
     _BACKGROUND_AGENT_TASKS.add(task)
 
     def _cleanup(done_task: asyncio.Task) -> None:
@@ -1097,13 +1106,17 @@ async def _send_saved_points_report(
 
 async def _dispatch_agent_request(message: Message, text: str) -> None:
     if _looks_like_long_agent_request(text):
-        _schedule_background_agent_request(message, text)
+        await message.answer(_build_agent_progress_message(text), reply_markup=AGENT_HOME_KEYBOARD)
+        _schedule_background_agent_request(message, text, send_progress=False)
         return
 
     await _send_agent_request(message, text)
 
 
-async def _send_agent_request(message: Message, text: str) -> None:
+async def _send_agent_request(message: Message, text: str, *, send_progress: bool = True) -> None:
+    if send_progress:
+        await message.answer(_build_agent_progress_message(text), reply_markup=AGENT_HOME_KEYBOARD)
+
     try:
         result = await _call_agent(message, text)
     except DataAgentClientError as exc:
