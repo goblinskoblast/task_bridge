@@ -22,7 +22,13 @@ from .models import (
     SystemConnectRequest,
     SystemConnectResponse,
 )
-from .monitoring import build_monitor_saved_note, scenario_to_monitor_type
+from .monitoring import (
+    build_monitor_saved_note,
+    default_monitor_window_hours,
+    scenario_to_monitor_type,
+    service_monitor_window_to_user_hours,
+    user_monitor_window_to_service_hours,
+)
 from .scenario_engine import scenario_engine
 
 logger = logging.getLogger(__name__)
@@ -278,6 +284,18 @@ class DataAgentService:
                 )
                 .first()
             )
+
+            if start_hour is not None and end_hour is not None:
+                user_window = (start_hour, end_hour)
+            elif existing and existing.active_from_hour is not None and existing.active_to_hour is not None:
+                user_window = service_monitor_window_to_user_hours(
+                    existing.active_from_hour,
+                    existing.active_to_hour,
+                )
+            else:
+                user_window = default_monitor_window_hours()
+
+            service_start_hour, service_end_hour = user_monitor_window_to_service_hours(*user_window)
             if not existing:
                 existing = DataAgentMonitorConfig(
                     user_id=user.id,
@@ -286,17 +304,19 @@ class DataAgentService:
                     point_name=point_name,
                     check_interval_minutes=interval_minutes,
                     is_active=True,
-                    active_from_hour=start_hour,
-                    active_to_hour=end_hour,
+                    active_from_hour=service_start_hour,
+                    active_to_hour=service_end_hour,
                 )
                 db.add(existing)
             else:
                 existing.check_interval_minutes = interval_minutes
                 existing.is_active = True
-                if start_hour is not None:
-                    existing.active_from_hour = start_hour
-                if end_hour is not None:
-                    existing.active_to_hour = end_hour
+                if start_hour is not None and end_hour is not None:
+                    existing.active_from_hour = service_start_hour
+                    existing.active_to_hour = service_end_hour
+                elif existing.active_from_hour is None or existing.active_to_hour is None:
+                    existing.active_from_hour = service_start_hour
+                    existing.active_to_hour = service_end_hour
 
             profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user.id).first()
             chat_title = profile.default_report_chat_title if profile else None
@@ -306,6 +326,8 @@ class DataAgentService:
                 point_name=point_name,
                 interval_minutes=interval_minutes,
                 chat_title=chat_title,
+                start_hour=user_window[0],
+                end_hour=user_window[1],
             )
         except Exception:
             db.rollback()

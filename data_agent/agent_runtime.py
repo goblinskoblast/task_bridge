@@ -340,14 +340,20 @@ class DataAgentRuntime:
 
     def _extract_monitor_window(self, message: str) -> Optional[tuple[int, int]]:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
-        match = re.search(r"с\s*(\d{1,2})(?::\d{2})?\s*до\s*(\d{1,2})(?::\d{2})?", lowered)
-        if not match:
-            return None
-        start_hour = int(match.group(1))
-        end_hour = int(match.group(2))
-        if not (0 <= start_hour <= 23 and 0 <= end_hour <= 23):
-            return None
-        return start_hour, end_hour
+        patterns = (
+            r"с\s*(\d{1,2})(?::\d{2})?\s*(?:утра|дня|вечера|ночи)?\s*(?:до|по)\s*(\d{1,2})(?::\d{2})?\s*(?:утра|дня|вечера|ночи)?",
+            r"(\d{1,2})\s*(?:-|–|—)\s*(\d{1,2})",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, lowered)
+            if not match:
+                continue
+            start_hour = int(match.group(1))
+            end_hour = int(match.group(2))
+            if not (0 <= start_hour <= 23 and 0 <= end_hour <= 23):
+                return None
+            return start_hour, end_hour
+        return None
 
     def _is_all_points_request(self, message: str) -> bool:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()

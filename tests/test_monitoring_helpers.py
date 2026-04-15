@@ -2,8 +2,12 @@ import unittest
 
 from data_agent.monitoring import (
     build_monitor_saved_note,
+    default_monitor_window_hours,
     format_monitor_interval,
+    format_monitor_window,
     scenario_to_monitor_type,
+    service_monitor_window_to_user_hours,
+    user_monitor_window_to_service_hours,
 )
 
 
@@ -24,11 +28,26 @@ class MonitoringHelpersTest(unittest.TestCase):
             point_name="Екатеринбург, Малышева 5",
             interval_minutes=60,
             chat_title="Команда Точки 1",
+            start_hour=10,
+            end_hour=22,
         )
         self.assertIn("Мониторинг сохранён", text)
         self.assertIn("стоп-лист", text)
         self.assertIn("каждый час", text)
+        self.assertIn("с 10:00 до 22:00 по Екатеринбургу", text)
         self.assertIn("Команда Точки 1", text)
+
+    def test_default_monitor_window_hours(self):
+        self.assertEqual(default_monitor_window_hours(), (10, 22))
+
+    def test_user_monitor_window_to_service_hours(self):
+        self.assertEqual(user_monitor_window_to_service_hours(10, 22), (8, 20))
+
+    def test_service_monitor_window_to_user_hours(self):
+        self.assertEqual(service_monitor_window_to_user_hours(8, 20), (10, 22))
+
+    def test_format_monitor_window(self):
+        self.assertEqual(format_monitor_window(10, 22), "с 10:00 до 22:00 по Екатеринбургу")
 
 
 if __name__ == "__main__":

@@ -89,6 +89,19 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
         self.assertEqual(decision.slots.get("period_hint"), "за последние 3 часа")
         self.assertEqual(decision.missing_slots, [])
 
+    def test_rule_based_decision_extracts_monitor_window_from_spoken_phrase(self):
+        decision = self.runtime._rule_based_decision(
+            "Присылай мне бланки по сухой лог Белинского 40 каждые 3 часа с 10 утра по 22 вечера.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "blanks_report")
+        self.assertEqual(decision.slots.get("point_name"), "Сухой Лог, Белинского 40")
+        self.assertEqual(decision.slots.get("monitor_interval_minutes"), 180)
+        self.assertEqual(decision.slots.get("monitor_start_hour"), 10)
+        self.assertEqual(decision.slots.get("monitor_end_hour"), 22)
+
     def test_rule_based_decision_recognizes_stoplist_slang_and_noisy_point(self):
         decision = self.runtime._rule_based_decision(
             "Дай мне отчёт по стопам верхнего фолия Ленина 147.",
