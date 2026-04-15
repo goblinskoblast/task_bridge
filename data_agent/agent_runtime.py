@@ -35,6 +35,14 @@ FOLLOWUP_MARKERS = (
     "это же",
 )
 
+MONITOR_INTENT_MARKERS = (
+    "присылай",
+    "мониторь",
+    "мониторинг",
+    "следи",
+    "уведомляй",
+)
+
 
 @dataclass
 class AgentSessionSnapshot:
@@ -188,6 +196,9 @@ class DataAgentRuntime:
             reasoning = f"Follow-up продолжает сценарий {scenario}"
         slots = self._extract_slots(message, session)
         slots["source_message"] = message
+        if scenario in {"blanks_report", "stoplist_report"} and not slots.get("monitor_interval_minutes"):
+            if self._has_monitor_intent(lowered):
+                slots["monitor_interval_minutes"] = 180
         if scenario == "blanks_report" and not slots.get("period_hint"):
             slots["period_hint"] = "за последние 3 часа"
         required = self._required_slots(scenario)
@@ -337,6 +348,9 @@ class DataAgentRuntime:
         if match:
             return int(match.group(1)) * 60
         return None
+
+    def _has_monitor_intent(self, lowered: str) -> bool:
+        return any(marker in lowered for marker in MONITOR_INTENT_MARKERS)
 
     def _extract_monitor_window(self, message: str) -> Optional[tuple[int, int]]:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()

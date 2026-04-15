@@ -89,6 +89,44 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
         self.assertEqual(decision.slots.get("period_hint"), "за последние 3 часа")
         self.assertEqual(decision.missing_slots, [])
 
+    def test_rule_based_decision_defaults_monitor_interval_for_blanks_monitor_intent(self):
+        expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
+        expected_period = self.runtime._extract_period_hint("за последние 3 часа")
+        decision = self.runtime._rule_based_decision(
+            "Мониторь бланки по Сухой Лог Белинского 40.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "blanks_report")
+        self.assertEqual(decision.slots.get("point_name"), expected_point_name)
+        self.assertEqual(decision.slots.get("monitor_interval_minutes"), 180)
+        self.assertEqual(decision.slots.get("period_hint"), expected_period)
+
+    def test_rule_based_decision_defaults_monitor_interval_for_stoplist_monitor_intent(self):
+        expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
+        decision = self.runtime._rule_based_decision(
+            "Следи за стоп-листом по Сухой Лог Белинского 40.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "stoplist_report")
+        self.assertEqual(decision.slots.get("point_name"), expected_point_name)
+        self.assertEqual(decision.slots.get("monitor_interval_minutes"), 180)
+
+    def test_rule_based_decision_keeps_one_off_blanks_request_without_monitor_interval(self):
+        expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
+        decision = self.runtime._rule_based_decision(
+            "Пришли мне бланки по Сухой Лог Белинского 40.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "blanks_report")
+        self.assertEqual(decision.slots.get("point_name"), expected_point_name)
+        self.assertIsNone(decision.slots.get("monitor_interval_minutes"))
+
     def test_rule_based_decision_extracts_monitor_window_from_spoken_phrase(self):
         decision = self.runtime._rule_based_decision(
             "Присылай мне бланки по сухой лог Белинского 40 каждые 3 часа с 10 утра по 22 вечера.",
