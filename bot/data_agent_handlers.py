@@ -83,6 +83,7 @@ AGENT_REPORTS_MENU_KEYBOARD = InlineKeyboardMarkup(
 
 AGENT_SETTINGS_MENU_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
+        [InlineKeyboardButton(text=CONNECT_SYSTEM_BUTTON_TEXT, callback_data="agent_connect_system")],
         [
             InlineKeyboardButton(text=REPORT_CHATS_BUTTON_TEXT, callback_data="agent_choose_report_chat"),
             InlineKeyboardButton(text=MONITORS_MENU_BUTTON_TEXT, callback_data="agent_show_monitors"),
@@ -197,6 +198,56 @@ def _build_agent_reports_menu_keyboard() -> InlineKeyboardMarkup:
 
 def _build_agent_settings_menu_keyboard() -> InlineKeyboardMarkup:
     return _with_agent_home(AGENT_SETTINGS_MENU_KEYBOARD)
+
+
+def _build_agent_entry_text(*, has_system: bool, has_points: bool) -> str:
+    if not has_system:
+        return (
+            "🤖 <b>Агент TaskBridge</b>\n\n"
+            "Сначала подключите систему Italian Pizza.\n"
+            "После этого можно будет добавлять точки и запускать отчёты обычным сообщением."
+        )
+
+    if not has_points:
+        return (
+            "🤖 <b>Агент TaskBridge</b>\n\n"
+            "Система уже подключена. Теперь добавьте первую точку.\n"
+            "После этого можно будет писать запросы по стоп-листу, бланкам и мониторингу."
+        )
+
+    return (
+        "🤖 <b>Агент TaskBridge</b>\n\n"
+        "Проще всего просто написать запрос обычным сообщением.\n\n"
+        "Например:\n"
+        "• пришли стоп-лист по Сухой Лог, Белинского 40\n"
+        "• покажи бланки по всем добавленным точкам\n"
+        "• присылай бланки по Сухой Лог, Белинского 40 каждые 3 часа"
+    )
+
+
+def _build_agent_entry_keyboard(*, has_system: bool, has_points: bool) -> InlineKeyboardMarkup:
+    if not has_system:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=CONNECT_SYSTEM_BUTTON_TEXT, callback_data="agent_connect_system")],
+            ]
+        )
+
+    if not has_points:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Добавить точку", callback_data="agent_point_add")],
+                [InlineKeyboardButton(text=SETTINGS_BUTTON_TEXT, callback_data="agent_menu_settings")],
+            ]
+        )
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=REPORTS_MENU_BUTTON_TEXT, callback_data="agent_menu_reports")],
+            [InlineKeyboardButton(text=POINTS_BUTTON_TEXT, callback_data="agent_show_points")],
+            [InlineKeyboardButton(text=SETTINGS_BUTTON_TEXT, callback_data="agent_menu_settings")],
+        ]
+    )
 
 
 def _build_agent_systems_keyboard() -> InlineKeyboardMarkup:
@@ -1247,7 +1298,13 @@ async def _open_agent_entry(message: Message, state: FSMContext, *, actor_user: 
         )
         _get_or_create_profile(db, user.id)
         await state.clear()
-        await message.answer(AGENT_WELCOME, reply_markup=AGENT_ENTRY_KEYBOARD, parse_mode="HTML")
+        has_system = saved_point_service.get_system_for_user(db, effective_user.id) is not None
+        has_points = bool(saved_point_service.list_points(db, effective_user.id))
+        await message.answer(
+            _build_agent_entry_text(has_system=has_system, has_points=has_points),
+            reply_markup=_build_agent_entry_keyboard(has_system=has_system, has_points=has_points),
+            parse_mode="HTML",
+        )
     finally:
         db.close()
 
@@ -1306,7 +1363,11 @@ async def callback_agent_menu_settings(callback: CallbackQuery, state: FSMContex
     await callback.answer()
     await state.clear()
     if callback.message:
-        await _send_systems_summary(callback.message, telegram_user_id=callback.from_user.id)
+        await callback.message.answer(
+            "⚙️ <b>Настройки агента</b>\n\nВыберите, что хотите настроить.",
+            reply_markup=_build_agent_settings_menu_keyboard(),
+            parse_mode="HTML",
+        )
 
 
 @router.callback_query(F.data == "agent_connect_system")

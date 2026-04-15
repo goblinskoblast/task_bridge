@@ -7,7 +7,8 @@ os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 
 from bot.data_agent_handlers import (
-    AGENT_ENTRY_KEYBOARD,
+    _build_agent_entry_keyboard,
+    _build_agent_entry_text,
     _build_agent_reports_menu_keyboard,
     _build_agent_settings_menu_keyboard,
     _build_point_actions_keyboard,
@@ -43,17 +44,39 @@ class AgentNavigationTest(unittest.TestCase):
         self.assertNotIn("⚡ Быстрые отчёты", texts)
         self.assertNotIn("📡 Мониторы", texts)
 
-    def test_agent_root_keyboard_has_only_top_level_sections(self):
-        texts = _flatten_inline_texts(AGENT_ENTRY_KEYBOARD)
+    def test_agent_root_keyboard_for_ready_user_has_only_main_sections(self):
+        texts = _flatten_inline_texts(_build_agent_entry_keyboard(has_system=True, has_points=True))
 
         self.assertEqual(
             texts,
             [
                 "📊 Отчёты",
                 "📍 Точки",
-                "🔌 Системы",
+                "⚙️ Настройки",
             ],
         )
+
+    def test_agent_root_keyboard_without_system_leads_only_to_connect(self):
+        texts = _flatten_inline_texts(_build_agent_entry_keyboard(has_system=False, has_points=False))
+        self.assertEqual(texts, ["➕ Подключить систему"])
+
+    def test_agent_root_keyboard_without_points_leads_to_add_point(self):
+        texts = _flatten_inline_texts(_build_agent_entry_keyboard(has_system=True, has_points=False))
+        self.assertEqual(
+            texts,
+            [
+                "➕ Добавить точку",
+                "⚙️ Настройки",
+            ],
+        )
+
+    def test_agent_entry_text_without_system_is_linear(self):
+        text = _build_agent_entry_text(has_system=False, has_points=False)
+        self.assertIn("Сначала подключите систему Italian Pizza.", text)
+
+    def test_agent_entry_text_without_points_is_linear(self):
+        text = _build_agent_entry_text(has_system=True, has_points=False)
+        self.assertIn("Теперь добавьте первую точку.", text)
 
     def test_reports_submenu_contains_report_actions_and_home(self):
         keyboard = _build_agent_reports_menu_keyboard()
@@ -70,6 +93,7 @@ class AgentNavigationTest(unittest.TestCase):
         keyboard = _build_agent_settings_menu_keyboard()
         texts = _flatten_inline_texts(keyboard)
 
+        self.assertIn("➕ Подключить систему", texts)
         self.assertIn("💬 Чаты отчётов", texts)
         self.assertIn("📡 Мониторинги", texts)
         self.assertIn("↩️ В меню агента", texts)
