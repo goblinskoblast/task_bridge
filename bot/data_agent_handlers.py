@@ -986,40 +986,48 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
         monitors = await data_agent_client.list_monitors(effective_user_id)
     except Exception as exc:
         logger.error("Agent monitors error: %s", exc, exc_info=True)
-        await message.answer("Не удалось получить список мониторингов.", reply_markup=AGENT_HOME_KEYBOARD)
+        await message.answer("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0441\u043f\u0438\u0441\u043e\u043a \u043c\u043e\u043d\u0438\u0442\u043e\u0440\u0438\u043d\u0433\u043e\u0432.", reply_markup=AGENT_HOME_KEYBOARD)
         return
 
     if not monitors:
         await message.answer(
-            "📡 <b>Активных мониторингов пока нет</b>\n\n"
-            "Пример: <code>/monitorblanks Артемовский, Гагарина 2А каждый час</code>",
+            "\U0001f4e1 <b>\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u043c\u043e\u043d\u0438\u0442\u043e\u0440\u0438\u043d\u0433\u043e\u0432 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442</b>\n\n"
+            "\u041f\u0440\u0438\u043c\u0435\u0440: <code>\u043f\u0440\u0438\u0441\u044b\u043b\u0430\u0439 \u043c\u043d\u0435 \u0431\u043b\u0430\u043d\u043a\u0438 \u043f\u043e \u0421\u0443\u0445\u043e\u0439 \u041b\u043e\u0433 \u0411\u0435\u043b\u0438\u043d\u0441\u043a\u043e\u0433\u043e 40 \u043a\u0430\u0436\u0434\u044b\u0435 3 \u0447\u0430\u0441\u0430</code>",
             reply_markup=_build_agent_settings_menu_keyboard(),
             parse_mode="HTML",
         )
         return
 
-    lines = ["📡 <b>Активные мониторинги</b>", ""]
+    lines = ["\U0001f4e1 <b>\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435 \u043c\u043e\u043d\u0438\u0442\u043e\u0440\u0438\u043d\u0433\u0438</b>", ""]
     for item in monitors:
         monitor_label = {
-            "blanks": "бланки",
-            "stoplist": "стоп-лист",
-            "reviews": "отзывы",
+            "blanks": "\u0431\u043b\u0430\u043d\u043a\u0438",
+            "stoplist": "\u0441\u0442\u043e\u043f-\u043b\u0438\u0441\u0442",
+            "reviews": "\u043e\u0442\u0437\u044b\u0432\u044b",
         }.get(item.get("monitor_type"), item.get("monitor_type"))
-        interval_label = item.get("interval_label") or f"каждые {item.get('check_interval_minutes')} мин."
+        interval_label = item.get("interval_label") or f"\u043a\u0430\u0436\u0434\u044b\u0435 {item.get('check_interval_minutes')} \u043c\u0438\u043d."
         details = [str(interval_label)]
         if item.get("window_label"):
             details.append(str(item.get("window_label")))
-        status_label = item.get("status_label") or item.get("last_status") or "ещё не было"
-        lines.append(
-            f"• <b>#{item.get('id')}</b> {monitor_label} — {item.get('point_name')} "
-            f"({'; '.join(details)}; статус: {status_label})"
-        )
+
+        status_label = item.get("status_label") or item.get("last_status") or "\u0435\u0449\u0451 \u043d\u0435 \u0431\u044b\u043b\u043e"
+        last_checked_label = item.get("last_checked_label") or "\u0435\u0449\u0451 \u043d\u0435 \u0431\u044b\u043b\u043e"
+        last_event_label = item.get("last_event_label") or "\u043f\u043e\u043a\u0430 \u043d\u0435 \u0431\u044b\u043b\u043e"
+        delivery_label = item.get("delivery_label")
+
+        lines.append(f"\u2022 <b>{monitor_label.title()}</b> \u2014 {item.get('point_name')}")
+        lines.append(f"  {'; '.join(details)}")
+        lines.append(f"  \u0441\u0435\u0439\u0447\u0430\u0441: {status_label}")
+        lines.append(f"  \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u044f\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430: {last_checked_label}")
+        lines.append(f"  \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0435\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435: {last_event_label}")
+        if delivery_label:
+            lines.append(f"  \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0430: {delivery_label}")
+        lines.append("")
+
     lines.extend(
         [
-            "",
-            "Изменить можно текстом: <code>присылай бланки по Сухой Лог, Белинского 40 каждые 2 часа с 11 до 21</code>",
-            "Отключить можно текстом: <code>не присылай бланки по Сухой Лог, Белинского 40</code>",
-            "Команда по ID тоже работает: <code>/unmonitor ID</code>",
+            "\u0418\u0437\u043c\u0435\u043d\u0438\u0442\u044c \u043c\u043e\u0436\u043d\u043e \u0442\u0435\u043a\u0441\u0442\u043e\u043c: <code>\u043f\u0440\u0438\u0441\u044b\u043b\u0430\u0439 \u0431\u043b\u0430\u043d\u043a\u0438 \u043f\u043e \u0421\u0443\u0445\u043e\u0439 \u041b\u043e\u0433 \u0411\u0435\u043b\u0438\u043d\u0441\u043a\u043e\u0433\u043e 40 \u043a\u0430\u0436\u0434\u044b\u0435 2 \u0447\u0430\u0441\u0430 \u0441 11 \u0434\u043e 21</code>",
+            "\u041e\u0442\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u043c\u043e\u0436\u043d\u043e \u0442\u0435\u043a\u0441\u0442\u043e\u043c: <code>\u043d\u0435 \u043f\u0440\u0438\u0441\u044b\u043b\u0430\u0439 \u0431\u043b\u0430\u043d\u043a\u0438 \u043f\u043e \u0421\u0443\u0445\u043e\u0439 \u041b\u043e\u0433 \u0411\u0435\u043b\u0438\u043d\u0441\u043a\u043e\u0433\u043e 40</code>",
         ]
     )
     await message.answer("\n".join(lines), reply_markup=_build_agent_settings_menu_keyboard(), parse_mode="HTML")

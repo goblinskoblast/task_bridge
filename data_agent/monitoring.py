@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -82,6 +82,26 @@ def service_monitor_window_to_user_hours(start_hour: int, end_hour: int) -> tupl
 
 def format_monitor_window(start_hour: int, end_hour: int, *, timezone_label: str = MONITOR_USER_TIMEZONE_LABEL) -> str:
     return f"с {start_hour:02d}:00 до {end_hour:02d}:00 {timezone_label}"
+
+
+def format_monitor_moment(value: datetime | None, *, timezone_name: str = MONITOR_USER_TIMEZONE) -> str:
+    if value is None:
+        return "ещё не было"
+
+    target_tz = ZoneInfo(timezone_name)
+    if value.tzinfo is None:
+        localized = value.replace(tzinfo=timezone.utc).astimezone(target_tz)
+    else:
+        localized = value.astimezone(target_tz)
+
+    now = datetime.now(target_tz)
+    if localized.date() == now.date():
+        return localized.strftime("сегодня в %H:%M")
+    if localized.date() == (now.date() - timedelta(days=1)):
+        return localized.strftime("вчера в %H:%M")
+    if localized.year == now.year:
+        return localized.strftime("%d.%m в %H:%M")
+    return localized.strftime("%d.%m.%Y в %H:%M")
 
 
 def build_monitor_saved_note(

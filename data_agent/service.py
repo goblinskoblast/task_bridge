@@ -7,7 +7,15 @@ from typing import List, Optional
 from uuid import uuid4
 
 from db.database import get_db_session
-from db.models import DataAgentMonitorConfig, DataAgentProfile, DataAgentRequestLog, DataAgentSession, DataAgentSystem, User
+from db.models import (
+    DataAgentMonitorConfig,
+    DataAgentMonitorEvent,
+    DataAgentProfile,
+    DataAgentRequestLog,
+    DataAgentSession,
+    DataAgentSystem,
+    User,
+)
 from email_integration.encryption import encrypt_password
 
 from .agent_runtime import agent_runtime
@@ -27,6 +35,7 @@ from .monitoring import (
     build_monitor_not_found_note,
     build_monitor_saved_note,
     default_monitor_window_hours,
+    format_monitor_moment,
     format_monitor_interval,
     format_monitor_window,
     scenario_to_monitor_type,
@@ -200,9 +209,15 @@ class DataAgentService:
                 )
                 .all()
             )
+            profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user.id).first()
+            latest_events = self._load_latest_user_facing_events(db, items)
             monitors: List[MonitorConfigItem] = []
             for item in items:
-                description = self._describe_monitor_item(item)
+                description = self._describe_monitor_item(
+                    item,
+                    latest_event=latest_events.get(item.id),
+                    delivery_label=self._resolve_monitor_delivery_label(profile, item.monitor_type),
+                )
                 monitors.append(
                     MonitorConfigItem(
                         id=item.id,
@@ -215,6 +230,9 @@ class DataAgentService:
                         interval_label=description["interval_label"],
                         window_label=description["window_label"],
                         status_label=description["status_label"],
+                        last_checked_label=description["last_checked_label"],
+                        last_event_label=description["last_event_label"],
+                        delivery_label=description["delivery_label"],
                         has_active_alert=description["has_active_alert"],
                     )
                 )
@@ -247,9 +265,17 @@ class DataAgentService:
                     "Можно написать: Присылай мне бланки по Сухой Лог Белинского 40 каждые 3 часа."
                 )
 
+            profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user.id).first()
+            latest_events = self._load_latest_user_facing_events(db, items)
             lines = ["Активные мониторинги:"]
             for item in items:
-                lines.append(self._format_monitor_summary_item(item))
+                lines.append(
+                    self._format_monitor_summary_item(
+                        item,
+                        latest_event=latest_events.get(item.id),
+                        delivery_label=self._resolve_monitor_delivery_label(profile, item.monitor_type),
+                    )
+                )
 
             lines.extend(
                 [
@@ -265,17 +291,36 @@ class DataAgentService:
         finally:
             db.close()
 
-    def _format_monitor_summary_item(self, item: DataAgentMonitorConfig) -> str:
-        description = self._describe_monitor_item(item)
+    def _format_monitor_summary_item(
+        self,
+        item: DataAgentMonitorConfig,
+        *,
+        latest_event: DataAgentMonitorEvent | None = None,
+        delivery_label: str | None = None,
+    ) -> str:
+        description = self._describe_monitor_item(item, latest_event=latest_event, delivery_label=delivery_label)
         details = [description["interval_label"]]
         if description["window_label"]:
             details.append(description["window_label"])
-        return (
-            f"- {description['monitor_label']}: {item.point_name} — {', '.join(details)}. "
-            f"Последняя проверка: {description['status_label']}."
-        )
+        lines = [
+            f"- {description['monitor_label']}: {item.point_name}",
+            f"  {'; '.join(details)}",
+            f"  Сейчас: {description['status_label']}",
+            f"  Последняя проверка: {description['last_checked_label']}",
+        ]
+        if description["last_event_label"]:
+            lines.append(f"  Последнее уведомление: {description['last_event_label']}")
+        if description["delivery_label"]:
+            lines.append(f"  Отправка: {description['delivery_label']}")
+        return "\n".join(lines)
 
-    def _describe_monitor_item(self, item: DataAgentMonitorConfig) -> dict[str, object]:
+    def _describe_monitor_item(
+        self,
+        item: DataAgentMonitorConfig,
+        *,
+        latest_event: DataAgentMonitorEvent | None = None,
+        delivery_label: str | None = None,
+    ) -> dict[str, object]:
         labels = {
             "blanks": "Бланки",
             "stoplist": "Стоп-лист",
@@ -292,11 +337,16 @@ class DataAgentService:
             window_label = format_monitor_window(start_hour, end_hour)
         has_active_alert = self._monitor_has_active_alert(item)
         status_label = self._format_monitor_status(item, has_active_alert=has_active_alert)
+        last_checked_label = format_monitor_moment(item.last_checked_at)
+        last_event_label = self._format_monitor_event_label(item, latest_event)
         return {
             "monitor_label": monitor_label,
             "interval_label": interval_label,
             "window_label": window_label,
             "status_label": status_label,
+            "last_checked_label": last_checked_label,
+            "last_event_label": last_event_label,
+            "delivery_label": delivery_label,
             "has_active_alert": has_active_alert,
         }
 
@@ -325,6 +375,91 @@ class DataAgentService:
         if normalized in {"alert", "warning", "changed", "red_alert"}:
             return "есть уведомление"
         return "обновлён"
+
+    def _load_latest_user_facing_events(
+        self,
+        db,
+        items: List[DataAgentMonitorConfig],
+    ) -> dict[int, DataAgentMonitorEvent]:
+        config_ids = [item.id for item in items if item.id]
+        if not config_ids:
+            return {}
+
+        rows = (
+            db.query(DataAgentMonitorEvent)
+            .filter(DataAgentMonitorEvent.config_id.in_(config_ids))
+            .order_by(DataAgentMonitorEvent.config_id.asc(), DataAgentMonitorEvent.created_at.desc())
+            .all()
+        )
+
+        grouped: dict[int, list[DataAgentMonitorEvent]] = {}
+        for row in rows:
+            grouped.setdefault(int(row.config_id), []).append(row)
+
+        latest_events: dict[int, DataAgentMonitorEvent] = {}
+        for item in items:
+            event = self._pick_user_facing_event(grouped.get(int(item.id), []), monitor_type=item.monitor_type)
+            if event is not None:
+                latest_events[int(item.id)] = event
+        return latest_events
+
+    def _pick_user_facing_event(
+        self,
+        events: List[DataAgentMonitorEvent],
+        *,
+        monitor_type: str,
+    ) -> DataAgentMonitorEvent | None:
+        if not events:
+            return None
+
+        if monitor_type == "blanks":
+            for item in events:
+                if (item.severity or "").lower() == "critical":
+                    return item
+            return None
+
+        for item in events:
+            if item.sent_to_telegram and (item.severity or "").lower() != "error":
+                return item
+        for item in events:
+            if (item.severity or "").lower() != "error":
+                return item
+        return None
+
+    def _format_monitor_event_label(
+        self,
+        item: DataAgentMonitorConfig,
+        latest_event: DataAgentMonitorEvent | None,
+    ) -> str | None:
+        if latest_event is None:
+            return "пока не было"
+
+        event_time = format_monitor_moment(latest_event.created_at)
+        if item.monitor_type == "blanks":
+            return f"{event_time}, была красная зона"
+        if item.monitor_type in {"stoplist", "reviews"}:
+            return f"{event_time}, отчёт был отправлен"
+        return f"{event_time}, было уведомление"
+
+    def _resolve_monitor_delivery_label(self, profile: DataAgentProfile | None, monitor_type: str) -> str | None:
+        if profile is None:
+            return None
+
+        title_fields = {
+            "reviews": ("reviews_report_chat_id", "reviews_report_chat_title"),
+            "stoplist": ("stoplist_report_chat_id", "stoplist_report_chat_title"),
+            "blanks": ("blanks_report_chat_id", "blanks_report_chat_title"),
+        }
+        selected = title_fields.get(monitor_type)
+        if selected:
+            category_chat_id = getattr(profile, selected[0], None)
+            category_chat_title = getattr(profile, selected[1], None)
+            if category_chat_id:
+                return f"чат «{category_chat_title or category_chat_id}»"
+
+        if profile.default_report_chat_id:
+            return f"чат «{profile.default_report_chat_title or profile.default_report_chat_id}»"
+        return None
 
     def delete_monitor(self, user_id: int, monitor_id: int) -> MonitorDeleteResponse:
         db = get_db_session()

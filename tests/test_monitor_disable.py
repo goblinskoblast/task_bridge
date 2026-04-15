@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -15,7 +16,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 from data_agent.agent_runtime import AgentDecision
 from data_agent.models import DataAgentChatRequest
 from data_agent.service import DataAgentService
-from db.models import Base, DataAgentMonitorConfig, User
+from db.models import Base, DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentProfile, User
 
 
 class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
@@ -131,7 +132,8 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f"Бланки: {self.point_name}", answer)
         self.assertIn("каждые 3 часа", answer)
         self.assertIn("с 10:00 до 22:00 по Екатеринбургу", answer)
-        self.assertIn("Последняя проверка: ещё не было.", answer)
+        self.assertIn("Последняя проверка: ещё не было", answer)
+        self.assertIn("Последнее уведомление: пока не было", answer)
         self.assertNotIn("/unmonitor", answer)
 
     def test_build_monitors_summary_marks_red_blanks_as_active_alert(self):
@@ -175,6 +177,81 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(monitors[0].has_active_alert)
         self.assertTrue(bool(monitors[0].interval_label))
         self.assertTrue(bool(monitors[0].window_label))
+
+    def test_monitor_summaries_include_delivery_and_latest_user_facing_event(self):
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 137236883).first()
+            config = (
+                session.query(DataAgentMonitorConfig)
+                .filter(DataAgentMonitorConfig.point_name == self.point_name)
+                .first()
+            )
+            session.add(
+                DataAgentProfile(
+                    user_id=user.id,
+                    blanks_report_chat_id=900001,
+                    blanks_report_chat_title="Бланки priority",
+                )
+            )
+            config.last_status = "ok"
+            config.last_checked_at = datetime(2026, 4, 15, 13, 10, 4)
+            config.last_result_json = {"has_red_flags": False, "report_text": "green"}
+            session.add(
+                DataAgentMonitorEvent(
+                    user_id=user.id,
+                    config_id=config.id,
+                    system_name="italian_pizza",
+                    monitor_type="blanks",
+                    point_name=self.point_name,
+                    severity="critical",
+                    title="Найдены красные бланки",
+                    body="red",
+                    event_hash="critical-1",
+                    sent_to_telegram=True,
+                    created_at=datetime(2026, 4, 14, 8, 2, 32),
+                )
+            )
+            session.add(
+                DataAgentMonitorEvent(
+                    user_id=user.id,
+                    config_id=config.id,
+                    system_name="italian_pizza",
+                    monitor_type="blanks",
+                    point_name=self.point_name,
+                    severity="error",
+                    title="Мониторинг завершился с ошибкой",
+                    body="error",
+                    event_hash="error-1",
+                    sent_to_telegram=False,
+                    created_at=datetime(2026, 4, 15, 12, 58, 54),
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch(
+                "data_agent.service.format_monitor_moment",
+                side_effect=["сегодня в 18:10", "14.04 в 13:02"],
+            ):
+                answer = self.service._build_monitors_summary(137236883)
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch(
+                "data_agent.service.format_monitor_moment",
+                side_effect=["сегодня в 18:10", "14.04 в 13:02"],
+            ):
+                monitors = self.service.list_monitors(137236883)
+
+        self.assertIn("Последняя проверка: сегодня в 18:10", answer)
+        self.assertIn("Последнее уведомление: 14.04 в 13:02, была красная зона", answer)
+        self.assertIn("Отправка: чат «Бланки priority»", answer)
+        self.assertEqual(len(monitors), 1)
+        self.assertEqual(monitors[0].last_checked_label, "сегодня в 18:10")
+        self.assertEqual(monitors[0].last_event_label, "14.04 в 13:02, была красная зона")
+        self.assertEqual(monitors[0].delivery_label, "чат «Бланки priority»")
 
     async def test_chat_short_circuits_monitor_list_without_running_scenario_engine(self):
         decision = AgentDecision(
