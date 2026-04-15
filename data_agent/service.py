@@ -310,6 +310,7 @@ class DataAgentService:
         scenario: str,
         point_name: str,
         interval_minutes: int,
+        interval_source: str | None = None,
         start_hour: int | None = None,
         end_hour: int | None = None,
     ) -> str | None:
@@ -336,6 +337,19 @@ class DataAgentService:
                 )
                 .first()
             )
+            had_existing = existing is not None
+            was_active = bool(existing and existing.is_active)
+            previous_interval = existing.check_interval_minutes if existing else None
+            previous_user_window: tuple[int, int] | None = None
+            if existing and existing.active_from_hour is not None and existing.active_to_hour is not None:
+                previous_user_window = service_monitor_window_to_user_hours(
+                    existing.active_from_hour,
+                    existing.active_to_hour,
+                )
+
+            resolved_interval_minutes = interval_minutes
+            if existing and interval_source == "default_intent":
+                resolved_interval_minutes = existing.check_interval_minutes
 
             if start_hour is not None and end_hour is not None:
                 user_window = (start_hour, end_hour)
@@ -354,14 +368,14 @@ class DataAgentService:
                     system_name="italian_pizza",
                     monitor_type=monitor_type,
                     point_name=point_name,
-                    check_interval_minutes=interval_minutes,
+                    check_interval_minutes=resolved_interval_minutes,
                     is_active=True,
                     active_from_hour=service_start_hour,
                     active_to_hour=service_end_hour,
                 )
                 db.add(existing)
             else:
-                existing.check_interval_minutes = interval_minutes
+                existing.check_interval_minutes = resolved_interval_minutes
                 existing.is_active = True
                 if start_hour is not None and end_hour is not None:
                     existing.active_from_hour = service_start_hour
@@ -372,14 +386,20 @@ class DataAgentService:
 
             profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user.id).first()
             chat_title = profile.default_report_chat_title if profile else None
+            note_action = "enabled"
+            if had_existing and was_active:
+                interval_changed = previous_interval != resolved_interval_minutes
+                window_changed = previous_user_window != user_window
+                note_action = "updated" if interval_changed or window_changed else "already_configured"
             db.commit()
             return build_monitor_saved_note(
                 monitor_type=monitor_type,
                 point_name=point_name,
-                interval_minutes=interval_minutes,
+                interval_minutes=resolved_interval_minutes,
                 chat_title=chat_title,
                 start_hour=user_window[0],
                 end_hour=user_window[1],
+                action=note_action,
             )
         except Exception:
             db.rollback()
@@ -514,6 +534,7 @@ class DataAgentService:
                     scenario=decision.scenario,
                     point_name=point_name,
                     interval_minutes=interval_minutes,
+                    interval_source=decision.slots.get("monitor_interval_source"),
                     start_hour=start_hour,
                     end_hour=end_hour,
                 )

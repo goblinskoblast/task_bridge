@@ -1007,6 +1007,7 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
     lines.extend(
         [
             "",
+            "Изменить можно текстом: <code>присылай бланки по Сухой Лог, Белинского 40 каждые 2 часа с 11 до 21</code>",
             "Отключить можно текстом: <code>не присылай бланки по Сухой Лог, Белинского 40</code>",
             "Команда по ID тоже работает: <code>/unmonitor ID</code>",
         ]
@@ -1644,6 +1645,7 @@ async def callback_agent_hint_monitors(callback: CallbackQuery) -> None:
         await callback.message.answer(
             "Для мониторинга можно написать, например:\n"
             "присылай бланки по Сухой Лог, Белинского 40 каждые 3 часа\n"
+            "присылай бланки по Сухой Лог, Белинского 40 каждые 2 часа с 11 до 21\n"
             "не присылай бланки по Сухой Лог, Белинского 40\n\n"
             "/monitorblanks Екатеринбург, Малышева 5 каждый час\n"
             "/monitorstoplist Екатеринбург, Малышева 5 каждые 3 часа\n\n"

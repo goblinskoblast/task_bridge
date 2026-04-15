@@ -98,6 +98,99 @@ class MonitorUpsertTest(unittest.TestCase):
         self.assertEqual(config.active_to_hour, 19)
         self.assertIn("с 11:00 до 21:00 по Екатеринбургу", note or "")
 
+    def test_upsert_monitor_updates_existing_interval_and_uses_update_note(self):
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 137236883).first()
+            session.add(
+                DataAgentMonitorConfig(
+                    user_id=user.id,
+                    system_name="italian_pizza",
+                    monitor_type="blanks",
+                    point_name="РЎСѓС…РѕР№ Р›РѕРі, Р‘РµР»РёРЅСЃРєРѕРіРѕ 40",
+                    check_interval_minutes=180,
+                    is_active=True,
+                    active_from_hour=8,
+                    active_to_hour=20,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            note = self.service._upsert_monitor(
+                user_id=137236883,
+                scenario="blanks_report",
+                point_name="РЎСѓС…РѕР№ Р›РѕРі, Р‘РµР»РёРЅСЃРєРѕРіРѕ 40",
+                interval_minutes=120,
+                interval_source="explicit",
+            )
+
+        session = self.SessionLocal()
+        try:
+            config = (
+                session.query(DataAgentMonitorConfig)
+                .filter(DataAgentMonitorConfig.point_name == "РЎСѓС…РѕР№ Р›РѕРі, Р‘РµР»РёРЅСЃРєРѕРіРѕ 40")
+                .first()
+            )
+        finally:
+            session.close()
+
+        self.assertIsNotNone(config)
+        self.assertEqual(config.check_interval_minutes, 120)
+        self.assertIn("Обновил", note or "")
+        self.assertIn("каждые 2 ч.", note or "")
+
+    def test_upsert_monitor_keeps_existing_interval_when_user_changes_only_window(self):
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 137236883).first()
+            session.add(
+                DataAgentMonitorConfig(
+                    user_id=user.id,
+                    system_name="italian_pizza",
+                    monitor_type="blanks",
+                    point_name="РЎСѓС…РѕР№ Р›РѕРі, Р‘РµР»РёРЅСЃРєРѕРіРѕ 40",
+                    check_interval_minutes=120,
+                    is_active=True,
+                    active_from_hour=8,
+                    active_to_hour=20,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            note = self.service._upsert_monitor(
+                user_id=137236883,
+                scenario="blanks_report",
+                point_name="РЎСѓС…РѕР№ Р›РѕРі, Р‘РµР»РёРЅСЃРєРѕРіРѕ 40",
+                interval_minutes=180,
+                interval_source="default_intent",
+                start_hour=11,
+                end_hour=21,
+            )
+
+        session = self.SessionLocal()
+        try:
+            config = (
+                session.query(DataAgentMonitorConfig)
+                .filter(DataAgentMonitorConfig.point_name == "РЎСѓС…РѕР№ Р›РѕРі, Р‘РµР»РёРЅСЃРєРѕРіРѕ 40")
+                .first()
+            )
+        finally:
+            session.close()
+
+        self.assertIsNotNone(config)
+        self.assertEqual(config.check_interval_minutes, 120)
+        self.assertEqual(config.active_from_hour, 9)
+        self.assertEqual(config.active_to_hour, 19)
+        self.assertIn("Обновил", note or "")
+        self.assertIn("каждые 2 ч.", note or "")
+        self.assertIn("с 11:00 до 21:00 по Екатеринбургу", note or "")
+
 
 if __name__ == "__main__":
     unittest.main()

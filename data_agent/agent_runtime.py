@@ -167,6 +167,8 @@ class DataAgentRuntime:
             merged_slots["period_hint"] = session.slots.get("period_hint")
         if not merged_slots.get("monitor_interval_minutes") and same_scenario and session.slots.get("monitor_interval_minutes"):
             merged_slots["monitor_interval_minutes"] = session.slots.get("monitor_interval_minutes")
+        if merged_slots.get("monitor_interval_minutes") and not merged_slots.get("monitor_interval_source") and session.slots.get("monitor_interval_source"):
+            merged_slots["monitor_interval_source"] = session.slots.get("monitor_interval_source")
         required = self._required_slots(base.scenario)
         if merged_slots.get("all_points") and "point_name" in required:
             required = [slot for slot in required if slot != "point_name"]
@@ -211,6 +213,7 @@ class DataAgentRuntime:
         if scenario in {"blanks_report", "stoplist_report"} and monitor_action != "disable" and not slots.get("monitor_interval_minutes"):
             if self._has_monitor_intent(lowered):
                 slots["monitor_interval_minutes"] = 180
+                slots["monitor_interval_source"] = "default_intent"
         if scenario == "blanks_report" and monitor_action != "disable" and not slots.get("period_hint"):
             slots["period_hint"] = "за последние 3 часа"
         required = self._required_slots(scenario)
@@ -300,6 +303,7 @@ class DataAgentRuntime:
         interval = self._extract_monitor_interval(message)
         if interval:
             slots["monitor_interval_minutes"] = interval
+            slots["monitor_interval_source"] = "explicit"
         window = self._extract_monitor_window(message)
         if window:
             start_hour, end_hour = window

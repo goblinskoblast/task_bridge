@@ -93,17 +93,33 @@ def build_monitor_saved_note(
     start_hour: int | None = None,
     end_hour: int | None = None,
     timezone_label: str = MONITOR_USER_TIMEZONE_LABEL,
+    action: str = "enabled",
 ) -> str:
     monitor_label = MONITOR_TYPE_LABELS.get(monitor_type, monitor_type)
+    lead_labels = {
+        "blanks": "бланков",
+        "stoplist": "стоп-листа",
+        "reviews": "отзывов",
+    }
+    lead_monitor_label = lead_labels.get(monitor_type, monitor_label)
     interval_label = format_monitor_interval(interval_minutes)
     window_label = ""
     if start_hour is not None and end_hour is not None:
         window_label = f", {format_monitor_window(start_hour, end_hour, timezone_label=timezone_label)}"
     suffix = f" Чат доставки: {chat_title}." if chat_title else ""
+    if action == "updated":
+        lead_with_point = f"Обновил мониторинг {lead_monitor_label} по точке {point_name}. "
+        lead_reviews = f"Обновил мониторинг {lead_monitor_label}. "
+    elif action == "already_configured":
+        lead_with_point = f"Мониторинг {lead_monitor_label} по точке {point_name} уже настроен. "
+        lead_reviews = f"Мониторинг {lead_monitor_label} уже настроен. "
+    else:
+        lead_with_point = f"Включил мониторинг {lead_monitor_label} по точке {point_name}. "
+        lead_reviews = f"Включил мониторинг {lead_monitor_label}. "
 
     if monitor_type == "blanks":
         return (
-            f"Включил мониторинг {monitor_label} по точке {point_name}. "
+            f"{lead_with_point}"
             f"Проверка: {interval_label}{window_label}. "
             f"Если появятся красные бланки, сразу пришлю уведомление."
             f"{suffix}"
@@ -111,7 +127,7 @@ def build_monitor_saved_note(
 
     if monitor_type == "stoplist":
         return (
-            f"Включил мониторинг {monitor_label} по точке {point_name}. "
+            f"{lead_with_point}"
             f"Проверка: {interval_label}{window_label}. "
             f"Буду присылать изменения и плановые обновления по стоп-листу."
             f"{suffix}"
@@ -119,7 +135,7 @@ def build_monitor_saved_note(
 
     if monitor_type == "reviews":
         return (
-            f"Включил мониторинг {monitor_label}. "
+            f"{lead_reviews}"
             f"Проверка: {interval_label}{window_label}. "
             f"Буду присылать новые отчёты по отзывам."
             f"{suffix}"
