@@ -17,6 +17,7 @@ class DataAgentMonitorMessageTest(unittest.TestCase):
         )
 
         self.assertTrue(merged.startswith("Включил мониторинг"))
+        self.assertIn("Текущий срез по запросу:", merged)
         self.assertIn("Текущий отчёт по точке готов.", merged)
 
     def test_merge_answer_with_monitor_note_handles_empty_answer(self):

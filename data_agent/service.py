@@ -43,7 +43,7 @@ class DataAgentService:
             return normalized_answer or "Не удалось сформировать ответ."
         if not normalized_answer:
             return normalized_note
-        return f"{normalized_note}\n\n{normalized_answer}"
+        return f"{normalized_note}\n\nТекущий срез по запросу:\n{normalized_answer}"
 
     def health(self) -> dict:
         return {"status": "ok", "service": "data_agent", "mode": "scenario_engine_v2"}
