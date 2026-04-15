@@ -200,17 +200,25 @@ class DataAgentService:
                 )
                 .all()
             )
-            return [
-                MonitorConfigItem(
-                    id=item.id,
-                    monitor_type=item.monitor_type,
-                    point_name=item.point_name,
-                    check_interval_minutes=item.check_interval_minutes,
-                    is_active=item.is_active,
-                    last_status=item.last_status,
+            monitors: List[MonitorConfigItem] = []
+            for item in items:
+                description = self._describe_monitor_item(item)
+                monitors.append(
+                    MonitorConfigItem(
+                        id=item.id,
+                        monitor_type=item.monitor_type,
+                        point_name=item.point_name,
+                        check_interval_minutes=item.check_interval_minutes,
+                        is_active=item.is_active,
+                        last_status=item.last_status,
+                        last_checked_at=item.last_checked_at,
+                        interval_label=description["interval_label"],
+                        window_label=description["window_label"],
+                        status_label=description["status_label"],
+                        has_active_alert=description["has_active_alert"],
+                    )
                 )
-                for item in items
-            ]
+            return monitors
         finally:
             db.close()
 
@@ -258,6 +266,16 @@ class DataAgentService:
             db.close()
 
     def _format_monitor_summary_item(self, item: DataAgentMonitorConfig) -> str:
+        description = self._describe_monitor_item(item)
+        details = [description["interval_label"]]
+        if description["window_label"]:
+            details.append(description["window_label"])
+        return (
+            f"- {description['monitor_label']}: {item.point_name} — {', '.join(details)}. "
+            f"Последняя проверка: {description['status_label']}."
+        )
+
+    def _describe_monitor_item(self, item: DataAgentMonitorConfig) -> dict[str, object]:
         labels = {
             "blanks": "Бланки",
             "stoplist": "Стоп-лист",
@@ -265,21 +283,42 @@ class DataAgentService:
         }
         monitor_label = labels.get(item.monitor_type, "Мониторинг")
         interval_label = format_monitor_interval(item.check_interval_minutes)
-        details = [interval_label]
+        window_label: str | None = None
         if item.active_from_hour is not None and item.active_to_hour is not None:
             start_hour, end_hour = service_monitor_window_to_user_hours(
                 item.active_from_hour,
                 item.active_to_hour,
             )
-            details.append(format_monitor_window(start_hour, end_hour))
-        status_label = self._format_monitor_status(item.last_status)
-        return f"- {monitor_label}: {item.point_name} — {', '.join(details)}. Последняя проверка: {status_label}."
+            window_label = format_monitor_window(start_hour, end_hour)
+        has_active_alert = self._monitor_has_active_alert(item)
+        status_label = self._format_monitor_status(item, has_active_alert=has_active_alert)
+        return {
+            "monitor_label": monitor_label,
+            "interval_label": interval_label,
+            "window_label": window_label,
+            "status_label": status_label,
+            "has_active_alert": has_active_alert,
+        }
 
-    def _format_monitor_status(self, status: str | None) -> str:
-        normalized = (status or "").strip().lower()
+    def _monitor_has_active_alert(self, item: DataAgentMonitorConfig) -> bool:
+        if item.monitor_type != "blanks":
+            return False
+        return bool(isinstance(item.last_result_json, dict) and item.last_result_json.get("has_red_flags"))
+
+    def _format_monitor_status(self, item: DataAgentMonitorConfig, *, has_active_alert: bool = False) -> str:
+        if has_active_alert:
+            return "есть красная зона"
+
+        normalized = (item.last_status or "").strip().lower()
         if not normalized:
             return "ещё не было"
         if normalized in {"ok", "completed"}:
+            if item.monitor_type == "blanks":
+                return "красных зон нет"
+            if item.monitor_type == "stoplist":
+                return "отчёт получен"
+            if item.monitor_type == "reviews":
+                return "отчёт обновлён"
             return "прошла"
         if normalized in {"failed", "error", "system_not_connected"}:
             return "нужна повторная проверка"

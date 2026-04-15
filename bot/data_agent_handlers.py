@@ -1000,9 +1000,19 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
 
     lines = ["📡 <b>Активные мониторинги</b>", ""]
     for item in monitors:
+        monitor_label = {
+            "blanks": "бланки",
+            "stoplist": "стоп-лист",
+            "reviews": "отзывы",
+        }.get(item.get("monitor_type"), item.get("monitor_type"))
+        interval_label = item.get("interval_label") or f"каждые {item.get('check_interval_minutes')} мин."
+        details = [str(interval_label)]
+        if item.get("window_label"):
+            details.append(str(item.get("window_label")))
+        status_label = item.get("status_label") or item.get("last_status") or "ещё не было"
         lines.append(
-            f"• <b>#{item.get('id')}</b> {item.get('monitor_type')} — {item.get('point_name')} "
-            f"(каждые {item.get('check_interval_minutes')} мин., статус: {item.get('last_status') or 'new'})"
+            f"• <b>#{item.get('id')}</b> {monitor_label} — {item.get('point_name')} "
+            f"({'; '.join(details)}; статус: {status_label})"
         )
     lines.extend(
         [

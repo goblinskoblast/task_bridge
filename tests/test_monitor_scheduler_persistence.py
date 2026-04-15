@@ -115,8 +115,126 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertEqual(config.last_alert_hash, "hash-123")
         self.assertEqual(config.last_result_json.get("report_text"), result["report_text"])
         self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].severity, "critical")
         self.assertTrue(events[0].sent_to_telegram)
         self.assertEqual(len(bot.messages), 1)
+
+    def test_run_blanks_monitor_resets_alert_hash_when_red_flags_are_gone(self):
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            config.last_alert_hash = "hash-123"
+            config.last_result_json = {"has_red_flags": True, "alert_hash": "hash-123", "report_text": "old red"}
+            session.commit()
+            session.refresh(config)
+            detached_config = config
+        finally:
+            session.close()
+
+        bot = _DummyBot()
+        result = {
+            "status": "ok",
+            "report_text": "green",
+            "has_red_flags": False,
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                asyncio.run(monitor_scheduler._run_blanks_monitor(bot, detached_config))
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            events = session.query(DataAgentMonitorEvent).filter(DataAgentMonitorEvent.config_id == self.config_id).all()
+        finally:
+            session.close()
+
+        self.assertIsNotNone(config)
+        self.assertIsNone(config.last_alert_hash)
+        self.assertEqual(config.last_result_json.get("report_text"), result["report_text"])
+        self.assertEqual(len(events), 0)
+        self.assertEqual(len(bot.messages), 0)
+
+    def test_run_blanks_monitor_sends_alert_again_after_clear_with_same_hash(self):
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            config.last_alert_hash = "hash-123"
+            config.last_result_json = {"has_red_flags": False, "report_text": "clear"}
+            session.commit()
+            session.refresh(config)
+            detached_config = config
+        finally:
+            session.close()
+
+        bot = _DummyBot()
+        result = {
+            "status": "ok",
+            "report_text": "red again",
+            "has_red_flags": True,
+            "alert_hash": "hash-123",
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                asyncio.run(monitor_scheduler._run_blanks_monitor(bot, detached_config))
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            events = session.query(DataAgentMonitorEvent).filter(DataAgentMonitorEvent.config_id == self.config_id).all()
+        finally:
+            session.close()
+
+        self.assertIsNotNone(config)
+        self.assertEqual(config.last_alert_hash, "hash-123")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(len(bot.messages), 1)
+
+    def test_run_blanks_monitor_does_not_repeat_alert_for_same_active_red_state(self):
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            config.last_alert_hash = "hash-123"
+            config.last_result_json = {"has_red_flags": True, "alert_hash": "hash-123", "report_text": "old red"}
+            session.commit()
+            session.refresh(config)
+            detached_config = config
+        finally:
+            session.close()
+
+        bot = _DummyBot()
+        result = {
+            "status": "ok",
+            "report_text": "same red",
+            "has_red_flags": True,
+            "alert_hash": "hash-123",
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                asyncio.run(monitor_scheduler._run_blanks_monitor(bot, detached_config))
+
+        session = self.SessionLocal()
+        try:
+            events = session.query(DataAgentMonitorEvent).filter(DataAgentMonitorEvent.config_id == self.config_id).all()
+        finally:
+            session.close()
+
+        self.assertEqual(len(events), 0)
+        self.assertEqual(len(bot.messages), 0)
 
 
 if __name__ == "__main__":

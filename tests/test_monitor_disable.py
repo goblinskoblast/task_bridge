@@ -134,6 +134,48 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Последняя проверка: ещё не было.", answer)
         self.assertNotIn("/unmonitor", answer)
 
+    def test_build_monitors_summary_marks_red_blanks_as_active_alert(self):
+        session = self.SessionLocal()
+        try:
+            config = (
+                session.query(DataAgentMonitorConfig)
+                .filter(DataAgentMonitorConfig.point_name == self.point_name)
+                .first()
+            )
+            config.last_status = "ok"
+            config.last_result_json = {"has_red_flags": True, "report_text": "red"}
+            session.commit()
+        finally:
+            session.close()
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            answer = self.service._build_monitors_summary(137236883)
+
+        self.assertIn("есть красная зона", answer)
+
+    def test_list_monitors_returns_user_facing_status_fields(self):
+        session = self.SessionLocal()
+        try:
+            config = (
+                session.query(DataAgentMonitorConfig)
+                .filter(DataAgentMonitorConfig.point_name == self.point_name)
+                .first()
+            )
+            config.last_status = "ok"
+            config.last_result_json = {"has_red_flags": True, "report_text": "red"}
+            session.commit()
+        finally:
+            session.close()
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            monitors = self.service.list_monitors(137236883)
+
+        self.assertEqual(len(monitors), 1)
+        self.assertEqual(monitors[0].status_label, "есть красная зона")
+        self.assertTrue(monitors[0].has_active_alert)
+        self.assertTrue(bool(monitors[0].interval_label))
+        self.assertTrue(bool(monitors[0].window_label))
+
     async def test_chat_short_circuits_monitor_list_without_running_scenario_engine(self):
         decision = AgentDecision(
             scenario="monitor_management",

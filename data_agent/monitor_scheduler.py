@@ -24,6 +24,22 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 
 
+def _result_alert_hash(result: dict | None) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    explicit_hash = str(result.get("alert_hash") or "").strip()
+    if explicit_hash:
+        return explicit_hash
+    report_text = str(result.get("report_text") or "").strip()
+    if not report_text:
+        return None
+    return hashlib.sha256(report_text.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _result_has_red_flags(result: dict | None) -> bool:
+    return bool(isinstance(result, dict) and result.get("has_red_flags"))
+
+
 def _load_monitor_config(db, config: DataAgentMonitorConfig | None) -> DataAgentMonitorConfig | None:
     config_id = getattr(config, "id", None)
     if not config_id:
@@ -236,11 +252,19 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
             await _record_monitor_failure(bot, db, config, result, "blanks_tool")
             return
 
+        previous_result = config.last_result_json if isinstance(config.last_result_json, dict) else {}
+        previous_had_red_flags = _result_has_red_flags(previous_result)
+        alert_hash = _result_alert_hash(result)
+        has_red_flags = _result_has_red_flags(result)
+
         config.last_checked_at = datetime.utcnow()
         config.last_status = result_status
         config.last_result_json = result
 
-        if result.get("has_red_flags") and result.get("alert_hash") != config.last_alert_hash:
+        should_send_alert = has_red_flags and (
+            not previous_had_red_flags or bool(alert_hash and alert_hash != config.last_alert_hash)
+        )
+        if should_send_alert:
             report_text = (result.get("report_text") or "").strip()
             red_summary = report_text
             event = DataAgentMonitorEvent(
@@ -249,10 +273,10 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
                 system_name=config.system_name,
                 monitor_type=config.monitor_type,
                 point_name=config.point_name,
-                severity="warning",
+                severity="critical",
                 title=f"Найдены красные бланки: {config.point_name}",
                 body=red_summary,
-                event_hash=result.get("alert_hash"),
+                event_hash=alert_hash,
                 sent_to_telegram=False,
             )
             db.add(event)
@@ -277,11 +301,14 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
                     config.user_id,
                     config.point_name,
                     delivery_chat_id,
-                    result.get("alert_hash"),
+                    alert_hash,
                 )
                 event.sent_to_telegram = True
-                config.last_alert_hash = result.get("alert_hash")
-                db.commit()
+            config.last_alert_hash = alert_hash
+            db.commit()
+        elif not has_red_flags:
+            config.last_alert_hash = None
+            db.commit()
         else:
             db.commit()
     except Exception as exc:

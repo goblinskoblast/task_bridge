@@ -57,6 +57,11 @@ class MonitorConfigItem(BaseModel):
     check_interval_minutes: int
     is_active: bool = True
     last_status: Optional[str] = None
+    last_checked_at: Optional[datetime] = None
+    interval_label: Optional[str] = None
+    window_label: Optional[str] = None
+    status_label: Optional[str] = None
+    has_active_alert: bool = False
 
 
 class MonitorsListResponse(BaseModel):
