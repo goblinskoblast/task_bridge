@@ -31,11 +31,23 @@ class MonitoringHelpersTest(unittest.TestCase):
             start_hour=10,
             end_hour=22,
         )
-        self.assertIn("Мониторинг сохранён", text)
+        self.assertIn("Включил мониторинг", text)
         self.assertIn("стоп-лист", text)
-        self.assertIn("каждый час", text)
+        self.assertIn("Проверка: каждый час", text)
         self.assertIn("с 10:00 до 22:00 по Екатеринбургу", text)
         self.assertIn("Команда Точки 1", text)
+
+    def test_build_monitor_saved_note_for_blanks_explains_red_alert_behavior(self):
+        text = build_monitor_saved_note(
+            monitor_type="blanks",
+            point_name="Сухой Лог, Белинского 40",
+            interval_minutes=180,
+            start_hour=10,
+            end_hour=22,
+        )
+        self.assertIn("Включил мониторинг бланки", text)
+        self.assertIn("каждые 3 часа", text)
+        self.assertIn("Если появятся красные бланки, сразу пришлю уведомление.", text)
 
     def test_default_monitor_window_hours(self):
         self.assertEqual(default_monitor_window_hours(), (10, 22))

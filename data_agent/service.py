@@ -35,6 +35,16 @@ logger = logging.getLogger(__name__)
 
 
 class DataAgentService:
+    @staticmethod
+    def _merge_answer_with_monitor_note(answer: str, monitor_note: str | None) -> str:
+        normalized_answer = (answer or "").strip()
+        normalized_note = (monitor_note or "").strip()
+        if not normalized_note:
+            return normalized_answer or "Не удалось сформировать ответ."
+        if not normalized_answer:
+            return normalized_note
+        return f"{normalized_note}\n\n{normalized_answer}"
+
     def health(self) -> dict:
         return {"status": "ok", "service": "data_agent", "mode": "scenario_engine_v2"}
 
@@ -432,7 +442,7 @@ class DataAgentService:
                     end_hour=end_hour,
                 )
                 if monitor_note:
-                    answer = f"{answer}{monitor_note}"
+                    answer = self._merge_answer_with_monitor_note(answer, monitor_note)
             agent_runtime.save_session(
                 payload.user_id,
                 decision,

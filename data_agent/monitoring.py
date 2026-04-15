@@ -97,8 +97,34 @@ def build_monitor_saved_note(
     window_label = ""
     if start_hour is not None and end_hour is not None:
         window_label = f", {format_monitor_window(start_hour, end_hour, timezone_label=timezone_label)}"
-    suffix = f" Доставка: {chat_title}." if chat_title else ""
+    suffix = f" Чат доставки: {chat_title}." if chat_title else ""
+
+    if monitor_type == "blanks":
+        return (
+            f"Включил мониторинг {monitor_label} по точке {point_name}. "
+            f"Проверка: {interval_label}{window_label}. "
+            f"Если появятся красные бланки, сразу пришлю уведомление."
+            f"{suffix}"
+        )
+
+    if monitor_type == "stoplist":
+        return (
+            f"Включил мониторинг {monitor_label} по точке {point_name}. "
+            f"Проверка: {interval_label}{window_label}. "
+            f"Буду присылать изменения и плановые обновления по стоп-листу."
+            f"{suffix}"
+        )
+
+    if monitor_type == "reviews":
+        return (
+            f"Включил мониторинг {monitor_label}. "
+            f"Проверка: {interval_label}{window_label}. "
+            f"Буду присылать новые отчёты по отзывам."
+            f"{suffix}"
+        )
+
     return (
-        f"\n\nМониторинг сохранён: {monitor_label} по точке {point_name}, {interval_label}{window_label}."
+        f"Мониторинг сохранён: {monitor_label} по точке {point_name}. "
+        f"Проверка: {interval_label}{window_label}."
         f"{suffix}"
     )
