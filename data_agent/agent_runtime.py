@@ -43,6 +43,17 @@ MONITOR_INTENT_MARKERS = (
     "уведомляй",
 )
 
+MONITOR_DISABLE_MARKERS = (
+    "не присылай",
+    "больше не присылай",
+    "перестань присылать",
+    "отключи",
+    "выключи",
+    "останови мониторинг",
+    "убери мониторинг",
+    "отмени мониторинг",
+)
+
 
 @dataclass
 class AgentSessionSnapshot:
@@ -196,10 +207,11 @@ class DataAgentRuntime:
             reasoning = f"Follow-up продолжает сценарий {scenario}"
         slots = self._extract_slots(message, session)
         slots["source_message"] = message
-        if scenario in {"blanks_report", "stoplist_report"} and not slots.get("monitor_interval_minutes"):
+        monitor_action = slots.get("monitor_action")
+        if scenario in {"blanks_report", "stoplist_report"} and monitor_action != "disable" and not slots.get("monitor_interval_minutes"):
             if self._has_monitor_intent(lowered):
                 slots["monitor_interval_minutes"] = 180
-        if scenario == "blanks_report" and not slots.get("period_hint"):
+        if scenario == "blanks_report" and monitor_action != "disable" and not slots.get("period_hint"):
             slots["period_hint"] = "за последние 3 часа"
         required = self._required_slots(scenario)
         if slots.get("all_points") and "point_name" in required:
@@ -294,6 +306,9 @@ class DataAgentRuntime:
             slots["monitor_start_hour"] = start_hour
             slots["monitor_end_hour"] = end_hour
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
+        monitor_action = self._extract_monitor_action(lowered)
+        if monitor_action:
+            slots["monitor_action"] = monitor_action
         if any(marker in lowered for marker in FOLLOWUP_MARKERS) and session.slots.get("point_name") and not slots.get("all_points"):
             slots.setdefault("point_name", session.slots.get("point_name"))
         return slots
@@ -353,6 +368,11 @@ class DataAgentRuntime:
 
     def _has_monitor_intent(self, lowered: str) -> bool:
         return any(marker in lowered for marker in MONITOR_INTENT_MARKERS)
+
+    def _extract_monitor_action(self, lowered: str) -> Optional[str]:
+        if any(marker in lowered for marker in MONITOR_DISABLE_MARKERS):
+            return "disable"
+        return None
 
     def _extract_monitor_window(self, message: str) -> Optional[tuple[int, int]]:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()

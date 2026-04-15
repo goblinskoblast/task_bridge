@@ -33,6 +33,7 @@
 - Формулировки вида `присылай`, `каждые 3 часа`, `каждый день`, `мониторь` должны трактоваться как настройка мониторинга, а не как разовый отчёт
 
 - For `blanks` and `stoplist`, if the user explicitly says `prisylay`, `monitor`, `sledi`, or `uvedomlyay` without an interval, default interval = `180` minutes.
+- For `blanks` and `stoplist`, free-text phrases like `не присылай`, `отключи`, `выключи`, and `останови мониторинг` should disable the existing monitor by point without asking for monitor ID.
 
 ### Blanks
 - Для запроса по всем добавленным точкам, если период не указан, дефолт = последние `3 часа`

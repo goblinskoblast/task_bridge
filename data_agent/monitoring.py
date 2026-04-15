@@ -130,3 +130,23 @@ def build_monitor_saved_note(
         f"Проверка: {interval_label}{window_label}."
         f"{suffix}"
     )
+
+
+def build_monitor_disabled_note(*, monitor_type: str, point_name: str) -> str:
+    labels = {
+        "blanks": "бланков",
+        "stoplist": "стоп-листа",
+        "reviews": "отзывов",
+    }
+    monitor_label = labels.get(monitor_type, MONITOR_TYPE_LABELS.get(monitor_type, monitor_type))
+    return f"Отключил мониторинг {monitor_label} по точке {point_name}."
+
+
+def build_monitor_not_found_note(*, monitor_type: str, point_name: str) -> str:
+    labels = {
+        "blanks": "бланков",
+        "stoplist": "стоп-листа",
+        "reviews": "отзывов",
+    }
+    monitor_label = labels.get(monitor_type, MONITOR_TYPE_LABELS.get(monitor_type, monitor_type))
+    return f"Активный мониторинг {monitor_label} по точке {point_name} сейчас не найден."

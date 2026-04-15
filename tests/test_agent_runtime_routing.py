@@ -127,6 +127,33 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
         self.assertEqual(decision.slots.get("point_name"), expected_point_name)
         self.assertEqual(decision.slots.get("monitor_interval_minutes"), 1440)
 
+    def test_rule_based_decision_extracts_disable_action_for_blanks_monitor(self):
+        expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
+        decision = self.runtime._rule_based_decision(
+            "Не присылай мне бланки по Сухой Лог Белинского 40.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "blanks_report")
+        self.assertEqual(decision.slots.get("point_name"), expected_point_name)
+        self.assertEqual(decision.slots.get("monitor_action"), "disable")
+        self.assertIsNone(decision.slots.get("monitor_interval_minutes"))
+        self.assertIsNone(decision.slots.get("period_hint"))
+
+    def test_rule_based_decision_extracts_disable_action_for_stoplist_monitor(self):
+        expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
+        decision = self.runtime._rule_based_decision(
+            "Отключи стоп-лист по Сухой Лог Белинского 40.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "stoplist_report")
+        self.assertEqual(decision.slots.get("point_name"), expected_point_name)
+        self.assertEqual(decision.slots.get("monitor_action"), "disable")
+        self.assertIsNone(decision.slots.get("monitor_interval_minutes"))
+
     def test_rule_based_decision_keeps_one_off_blanks_request_without_monitor_interval(self):
         expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
         decision = self.runtime._rule_based_decision(

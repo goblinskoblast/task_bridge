@@ -1004,7 +1004,13 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
             f"• <b>#{item.get('id')}</b> {item.get('monitor_type')} — {item.get('point_name')} "
             f"(каждые {item.get('check_interval_minutes')} мин., статус: {item.get('last_status') or 'new'})"
         )
-    lines.extend(["", "Отключение: <code>/unmonitor ID</code>"])
+    lines.extend(
+        [
+            "",
+            "Отключить можно текстом: <code>не присылай бланки по Сухой Лог, Белинского 40</code>",
+            "Команда по ID тоже работает: <code>/unmonitor ID</code>",
+        ]
+    )
     await message.answer("\n".join(lines), reply_markup=_build_agent_settings_menu_keyboard(), parse_mode="HTML")
 
 
@@ -1637,11 +1643,13 @@ async def callback_agent_hint_monitors(callback: CallbackQuery) -> None:
     if callback.message:
         await callback.message.answer(
             "Для мониторинга можно написать, например:\n"
+            "присылай бланки по Сухой Лог, Белинского 40 каждые 3 часа\n"
+            "не присылай бланки по Сухой Лог, Белинского 40\n\n"
             "/monitorblanks Екатеринбург, Малышева 5 каждый час\n"
             "/monitorstoplist Екатеринбург, Малышева 5 каждые 3 часа\n\n"
             "/monitorreviews каждый час\n"
             "Посмотреть активные мониторинги: /monitors\n"
-            "Отключить: /unmonitor 12"
+            "Команда по ID тоже работает: /unmonitor 12"
         )
 
 

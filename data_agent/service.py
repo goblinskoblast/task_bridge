@@ -23,6 +23,8 @@ from .models import (
     SystemConnectResponse,
 )
 from .monitoring import (
+    build_monitor_disabled_note,
+    build_monitor_not_found_note,
     build_monitor_saved_note,
     default_monitor_window_hours,
     scenario_to_monitor_type,
@@ -44,6 +46,46 @@ class DataAgentService:
         if not normalized_answer:
             return normalized_note
         return f"{normalized_note}\n\nТекущий срез по запросу:\n{normalized_answer}"
+
+    def _disable_monitor(
+        self,
+        *,
+        user_id: int,
+        scenario: str,
+        point_name: str,
+    ) -> str:
+        monitor_type = scenario_to_monitor_type(scenario)
+        if not monitor_type or not point_name:
+            return "Не удалось определить мониторинг для отключения."
+
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return build_monitor_not_found_note(monitor_type=monitor_type, point_name=point_name)
+
+            item = (
+                db.query(DataAgentMonitorConfig)
+                .filter(
+                    DataAgentMonitorConfig.user_id == user.id,
+                    DataAgentMonitorConfig.monitor_type == monitor_type,
+                    DataAgentMonitorConfig.point_name == point_name,
+                    DataAgentMonitorConfig.is_active == True,
+                )
+                .first()
+            )
+            if not item:
+                return build_monitor_not_found_note(monitor_type=monitor_type, point_name=point_name)
+
+            item.is_active = False
+            db.commit()
+            return build_monitor_disabled_note(monitor_type=monitor_type, point_name=point_name)
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to disable monitor")
+            return "Не удалось отключить мониторинг. Попробуйте позже."
+        finally:
+            db.close()
 
     def health(self) -> dict:
         return {"status": "ok", "service": "data_agent", "mode": "scenario_engine_v2"}
@@ -398,6 +440,40 @@ class DataAgentService:
                     trace_id=trace_id,
                     scenario=decision.scenario,
                     status="awaiting_user_input",
+                    debug_summary=debug_summary,
+                )
+
+            monitor_action = str(decision.slots.get("monitor_action") or "").strip().lower()
+            point_name = decision.slots.get("point_name")
+            if monitor_action == "disable" and point_name:
+                answer = self._disable_monitor(
+                    user_id=payload.user_id,
+                    scenario=decision.scenario,
+                    point_name=point_name,
+                )
+                debug_payload, debug_summary = build_debug_artifacts(
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="completed",
+                    selected_tools=selected_tools,
+                    tool_results={},
+                )
+                agent_runtime.save_session(
+                    payload.user_id,
+                    decision,
+                    user_message=normalized_message,
+                    answer=answer,
+                    status="completed",
+                    trace_id=trace_id,
+                    debug_summary=debug_summary,
+                    debug_payload=debug_payload,
+                )
+                return DataAgentChatResponse(
+                    answer=answer,
+                    selected_tools=selected_tools,
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="completed",
                     debug_summary=debug_summary,
                 )
 
