@@ -2,6 +2,7 @@ import asyncio
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -235,6 +236,92 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
 
         self.assertEqual(len(events), 0)
         self.assertEqual(len(bot.messages), 0)
+
+    def test_run_blanks_monitor_failure_notifies_user_once(self):
+        bot = _DummyBot()
+        result = {
+            "status": "failed",
+            "message": "Login failed",
+            "diagnostics": {"stage": "login_submit"},
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                asyncio.run(monitor_scheduler._run_blanks_monitor(bot, self.detached_config))
+
+        session = self.SessionLocal()
+        try:
+            events = (
+                session.query(DataAgentMonitorEvent)
+                .filter(DataAgentMonitorEvent.config_id == self.config_id)
+                .order_by(DataAgentMonitorEvent.created_at.asc())
+                .all()
+            )
+        finally:
+            session.close()
+
+        self.assertEqual(len(bot.messages), 1)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].severity, "error")
+        self.assertTrue(events[0].sent_to_telegram)
+
+    def test_run_blanks_monitor_failure_is_throttled_when_recent_failure_was_already_sent(self):
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 555001).first()
+            session.add(
+                DataAgentMonitorEvent(
+                    user_id=user.id,
+                    config_id=self.config_id,
+                    system_name="italian_pizza",
+                    monitor_type="blanks",
+                    point_name="РЎСѓС…РѕР№ Р›РѕРі, Р‘РµР»РёРЅСЃРєРѕРіРѕ 40",
+                    severity="error",
+                    title="РњРѕРЅРёС‚РѕСЂРёРЅРі Р·Р°РІРµСЂС€РёР»СЃСЏ СЃ РѕС€РёР±РєРѕР№",
+                    body="old failure",
+                    event_hash="old-failure",
+                    sent_to_telegram=True,
+                    created_at=datetime.utcnow(),
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        bot = _DummyBot()
+        result = {
+            "status": "failed",
+            "message": "Login failed again",
+            "diagnostics": {"stage": "login_submit"},
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                asyncio.run(monitor_scheduler._run_blanks_monitor(bot, self.detached_config))
+
+        session = self.SessionLocal()
+        try:
+            events = (
+                session.query(DataAgentMonitorEvent)
+                .filter(DataAgentMonitorEvent.config_id == self.config_id)
+                .order_by(DataAgentMonitorEvent.created_at.asc())
+                .all()
+            )
+        finally:
+            session.close()
+
+        self.assertEqual(len(bot.messages), 0)
+        self.assertEqual(len(events), 2)
+        self.assertTrue(events[0].sent_to_telegram)
+        self.assertFalse(events[1].sent_to_telegram)
 
     def test_probe_blanks_monitor_failure_does_not_write_or_notify(self):
         bot = _DummyBot()

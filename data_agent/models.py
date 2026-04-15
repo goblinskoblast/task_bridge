@@ -62,6 +62,7 @@ class MonitorConfigItem(BaseModel):
     window_label: Optional[str] = None
     status_label: Optional[str] = None
     last_checked_label: Optional[str] = None
+    next_check_label: Optional[str] = None
     last_event_label: Optional[str] = None
     delivery_label: Optional[str] = None
     has_active_alert: bool = False

@@ -3,7 +3,7 @@
 import logging
 import json
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
 from aiogram import Bot
@@ -89,6 +89,29 @@ def _build_monitor_failure_message(config: DataAgentMonitorConfig, summary: str)
         "reviews": "Не удалось получить отчет по отзывам. Попробуйте позже.",
     }
     return templates.get(config.monitor_type, "Не удалось получить отчет. Попробуйте позже.")
+
+
+def _should_send_monitor_failure_notification(
+    db,
+    config: DataAgentMonitorConfig,
+    *,
+    now_utc: datetime,
+    cooldown_minutes: int = 60,
+) -> bool:
+    since = now_utc - timedelta(minutes=cooldown_minutes)
+    recent_sent_event = (
+        db.query(DataAgentMonitorEvent.id)
+        .filter(
+            DataAgentMonitorEvent.user_id == config.user_id,
+            DataAgentMonitorEvent.monitor_type == config.monitor_type,
+            DataAgentMonitorEvent.severity == "error",
+            DataAgentMonitorEvent.sent_to_telegram == True,
+            DataAgentMonitorEvent.created_at >= since,
+        )
+        .order_by(DataAgentMonitorEvent.created_at.desc())
+        .first()
+    )
+    return recent_sent_event is None
 
 
 def _is_within_active_window(config: DataAgentMonitorConfig, now: datetime) -> bool:
@@ -193,6 +216,7 @@ async def _record_monitor_failure(
     )
 
     event = None
+    event_created_at = datetime.utcnow()
     if persist_state:
         event = DataAgentMonitorEvent(
             user_id=config.user_id,
@@ -205,21 +229,28 @@ async def _record_monitor_failure(
             body=summary,
             event_hash=failure_hash,
             sent_to_telegram=False,
+            created_at=event_created_at,
         )
         db.add(event)
         db.commit()
         db.refresh(event)
 
     if notify_user:
-        user = db.query(User).filter(User.id == config.user_id).first()
-        delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, config.monitor_type)
-        if delivery_chat_id:
-            await bot.send_message(
-                chat_id=delivery_chat_id,
-                text=_build_monitor_failure_message(config, summary),
-            )
-            if event:
-                event.sent_to_telegram = True
+        should_notify_user = _should_send_monitor_failure_notification(
+            db,
+            config,
+            now_utc=event_created_at,
+        )
+        if should_notify_user:
+            user = db.query(User).filter(User.id == config.user_id).first()
+            delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, config.monitor_type)
+            if delivery_chat_id:
+                await bot.send_message(
+                    chat_id=delivery_chat_id,
+                    text=_build_monitor_failure_message(config, summary),
+                )
+                if event:
+                    event.sent_to_telegram = True
 
     if persist_state:
         config.last_alert_hash = failure_hash

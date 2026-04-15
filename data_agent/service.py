@@ -36,6 +36,7 @@ from .monitoring import (
     build_monitor_saved_note,
     default_monitor_window_hours,
     format_monitor_moment,
+    format_monitor_next_check,
     format_monitor_interval,
     format_monitor_window,
     scenario_to_monitor_type,
@@ -231,6 +232,7 @@ class DataAgentService:
                         window_label=description["window_label"],
                         status_label=description["status_label"],
                         last_checked_label=description["last_checked_label"],
+                        next_check_label=description["next_check_label"],
                         last_event_label=description["last_event_label"],
                         delivery_label=description["delivery_label"],
                         has_active_alert=description["has_active_alert"],
@@ -307,6 +309,7 @@ class DataAgentService:
             f"  {'; '.join(details)}",
             f"  Сейчас: {description['status_label']}",
             f"  Последняя проверка: {description['last_checked_label']}",
+            f"  Следующая проверка: {description['next_check_label']}",
         ]
         if description["last_event_label"]:
             lines.append(f"  Последнее уведомление: {description['last_event_label']}")
@@ -338,6 +341,12 @@ class DataAgentService:
         has_active_alert = self._monitor_has_active_alert(item)
         status_label = self._format_monitor_status(item, has_active_alert=has_active_alert)
         last_checked_label = format_monitor_moment(item.last_checked_at)
+        next_check_label = format_monitor_next_check(
+            check_interval_minutes=item.check_interval_minutes,
+            active_from_hour=item.active_from_hour,
+            active_to_hour=item.active_to_hour,
+            last_checked_at=item.last_checked_at,
+        )
         last_event_label = self._format_monitor_event_label(item, latest_event)
         return {
             "monitor_label": monitor_label,
@@ -345,6 +354,7 @@ class DataAgentService:
             "window_label": window_label,
             "status_label": status_label,
             "last_checked_label": last_checked_label,
+            "next_check_label": next_check_label,
             "last_event_label": last_event_label,
             "delivery_label": delivery_label,
             "has_active_alert": has_active_alert,

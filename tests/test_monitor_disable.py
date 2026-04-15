@@ -127,6 +127,7 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
     def test_build_monitors_summary_uses_user_timezone_and_plain_text(self):
         with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
             answer = self.service._build_monitors_summary(137236883)
+        self.assertIn("\u0421\u043b\u0435\u0434\u0443\u044e\u0449\u0430\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430:", answer)
 
         self.assertIn("Активные мониторинги:", answer)
         self.assertIn(f"Бланки: {self.point_name}", answer)
@@ -171,6 +172,7 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
 
         with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
             monitors = self.service.list_monitors(137236883)
+        self.assertTrue(bool(monitors[0].next_check_label))
 
         self.assertEqual(len(monitors), 1)
         self.assertEqual(monitors[0].status_label, "есть красная зона")
@@ -236,14 +238,22 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
                 "data_agent.service.format_monitor_moment",
                 side_effect=["сегодня в 18:10", "14.04 в 13:02"],
             ):
-                answer = self.service._build_monitors_summary(137236883)
+                with patch(
+                    "data_agent.service.format_monitor_next_check",
+                    return_value="\u0441\u0435\u0433\u043e\u0434\u043d\u044f \u0432 22:00",
+                ):
+                    answer = self.service._build_monitors_summary(137236883)
 
         with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
             with patch(
                 "data_agent.service.format_monitor_moment",
                 side_effect=["сегодня в 18:10", "14.04 в 13:02"],
             ):
-                monitors = self.service.list_monitors(137236883)
+                with patch(
+                    "data_agent.service.format_monitor_next_check",
+                    return_value="\u0441\u0435\u0433\u043e\u0434\u043d\u044f \u0432 22:00",
+                ):
+                    monitors = self.service.list_monitors(137236883)
 
         self.assertIn("Последняя проверка: сегодня в 18:10", answer)
         self.assertIn("Последнее уведомление: 14.04 в 13:02, была красная зона", answer)
@@ -252,6 +262,8 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(monitors[0].last_checked_label, "сегодня в 18:10")
         self.assertEqual(monitors[0].last_event_label, "14.04 в 13:02, была красная зона")
         self.assertEqual(monitors[0].delivery_label, "чат «Бланки priority»")
+
+        self.assertEqual(monitors[0].next_check_label, "\u0441\u0435\u0433\u043e\u0434\u043d\u044f \u0432 22:00")
 
     async def test_chat_short_circuits_monitor_list_without_running_scenario_engine(self):
         decision = AgentDecision(

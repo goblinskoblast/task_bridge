@@ -99,9 +99,95 @@ def format_monitor_moment(value: datetime | None, *, timezone_name: str = MONITO
         return localized.strftime("сегодня в %H:%M")
     if localized.date() == (now.date() - timedelta(days=1)):
         return localized.strftime("вчера в %H:%M")
+    if localized.date() == (now.date() + timedelta(days=1)):
+        return localized.strftime("\u0437\u0430\u0432\u0442\u0440\u0430 \u0432 %H:%M")
     if localized.year == now.year:
         return localized.strftime("%d.%m в %H:%M")
     return localized.strftime("%d.%m.%Y в %H:%M")
+
+
+def _normalize_monitor_reference_time(value: datetime | None, *, timezone_name: str) -> datetime:
+    target_tz = ZoneInfo(timezone_name)
+    if value is None:
+        return datetime.now(target_tz)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc).astimezone(target_tz)
+    return value.astimezone(target_tz)
+
+
+def _is_hour_within_window(hour: int, start_hour: int | None, end_hour: int | None) -> bool:
+    if start_hour is None or end_hour is None:
+        return True
+    if start_hour == end_hour:
+        return True
+    if start_hour < end_hour:
+        return start_hour <= hour <= end_hour
+    return hour >= start_hour or hour <= end_hour
+
+
+def get_next_monitor_check_at(
+    *,
+    check_interval_minutes: int,
+    active_from_hour: int | None = None,
+    active_to_hour: int | None = None,
+    last_checked_at: datetime | None = None,
+    now: datetime | None = None,
+    service_timezone_name: str = TIMEZONE,
+    user_timezone_name: str = MONITOR_USER_TIMEZONE,
+) -> datetime | None:
+    interval_minutes = int(check_interval_minutes or 0)
+    if interval_minutes <= 0 or interval_minutes % 60 != 0:
+        return None
+
+    service_now = _normalize_monitor_reference_time(now, timezone_name=service_timezone_name)
+    last_checked_service: datetime | None = None
+    if last_checked_at is not None:
+        last_checked_service = _normalize_monitor_reference_time(
+            last_checked_at,
+            timezone_name=service_timezone_name,
+        )
+
+    interval_hours = max(1, interval_minutes // 60)
+    anchor_hour = active_from_hour if active_from_hour is not None else 0
+    candidate = service_now.replace(minute=0, second=0, microsecond=0)
+    if service_now.minute != 0 or service_now.second != 0 or service_now.microsecond != 0:
+        candidate += timedelta(hours=1)
+
+    for _ in range(24 * 8):
+        if _is_hour_within_window(candidate.hour, active_from_hour, active_to_hour):
+            if (candidate.hour - anchor_hour) % interval_hours == 0:
+                if last_checked_service is None or not (
+                    last_checked_service.date() == candidate.date()
+                    and last_checked_service.hour == candidate.hour
+                ):
+                    return candidate.astimezone(ZoneInfo(user_timezone_name))
+        candidate += timedelta(hours=1)
+
+    return None
+
+
+def format_monitor_next_check(
+    *,
+    check_interval_minutes: int,
+    active_from_hour: int | None = None,
+    active_to_hour: int | None = None,
+    last_checked_at: datetime | None = None,
+    now: datetime | None = None,
+    service_timezone_name: str = TIMEZONE,
+    user_timezone_name: str = MONITOR_USER_TIMEZONE,
+) -> str:
+    next_check_at = get_next_monitor_check_at(
+        check_interval_minutes=check_interval_minutes,
+        active_from_hour=active_from_hour,
+        active_to_hour=active_to_hour,
+        last_checked_at=last_checked_at,
+        now=now,
+        service_timezone_name=service_timezone_name,
+        user_timezone_name=user_timezone_name,
+    )
+    if next_check_at is None:
+        return "\u0432 \u0431\u043b\u0438\u0436\u0430\u0439\u0448\u0438\u0439 \u0446\u0438\u043a\u043b"
+    return format_monitor_moment(next_check_at, timezone_name=user_timezone_name)
 
 
 def build_monitor_saved_note(

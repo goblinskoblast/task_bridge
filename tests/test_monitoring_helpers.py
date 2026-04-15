@@ -1,10 +1,14 @@
 import unittest
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from data_agent.monitoring import (
     build_monitor_saved_note,
     default_monitor_window_hours,
     format_monitor_interval,
+    format_monitor_next_check,
     format_monitor_window,
+    get_next_monitor_check_at,
     scenario_to_monitor_type,
     service_monitor_window_to_user_hours,
     user_monitor_window_to_service_hours,
@@ -73,6 +77,45 @@ class MonitoringHelpersTest(unittest.TestCase):
 
     def test_format_monitor_window(self):
         self.assertEqual(format_monitor_window(10, 22), "с 10:00 до 22:00 по Екатеринбургу")
+
+
+    def test_get_next_monitor_check_at_uses_user_timezone(self):
+        next_at = get_next_monitor_check_at(
+            check_interval_minutes=180,
+            active_from_hour=8,
+            active_to_hour=20,
+            now=datetime(2026, 4, 15, 14, 17, tzinfo=ZoneInfo("Europe/Moscow")),
+        )
+        self.assertEqual(next_at.strftime("%Y-%m-%d %H:%M"), "2026-04-15 19:00")
+        self.assertEqual(next_at.tzinfo, ZoneInfo("Asia/Yekaterinburg"))
+
+    def test_get_next_monitor_check_at_rolls_to_next_day_after_window(self):
+        next_at = get_next_monitor_check_at(
+            check_interval_minutes=180,
+            active_from_hour=8,
+            active_to_hour=20,
+            now=datetime(2026, 4, 15, 20, 30, tzinfo=ZoneInfo("Europe/Moscow")),
+        )
+        self.assertEqual(next_at.strftime("%Y-%m-%d %H:%M"), "2026-04-16 10:00")
+
+    def test_get_next_monitor_check_at_skips_current_slot_when_it_was_already_checked(self):
+        next_at = get_next_monitor_check_at(
+            check_interval_minutes=180,
+            active_from_hour=8,
+            active_to_hour=20,
+            last_checked_at=datetime(2026, 4, 15, 17, 0, tzinfo=ZoneInfo("Europe/Moscow")),
+            now=datetime(2026, 4, 15, 17, 0, tzinfo=ZoneInfo("Europe/Moscow")),
+        )
+        self.assertEqual(next_at.strftime("%Y-%m-%d %H:%M"), "2026-04-15 22:00")
+
+    def test_format_monitor_next_check_falls_back_to_generic_label_for_non_hourly_interval(self):
+        label = format_monitor_next_check(
+            check_interval_minutes=90,
+            active_from_hour=8,
+            active_to_hour=20,
+            now=datetime(2026, 4, 15, 14, 17, tzinfo=ZoneInfo("Europe/Moscow")),
+        )
+        self.assertEqual(label, "\u0432 \u0431\u043b\u0438\u0436\u0430\u0439\u0448\u0438\u0439 \u0446\u0438\u043a\u043b")
 
 
 if __name__ == "__main__":
