@@ -29,6 +29,18 @@ UNSAFE_FAILURE_MESSAGE_MARKERS = (
     "техническая ошибка",
 )
 
+TOOL_COLLECTION_PROMPTS = {
+    "review_tool": "Чтобы собрать отчёт по отзывам, нужна точка.",
+    "stoplist_tool": "Чтобы собрать стоп-лист, нужна точка.",
+    "blanks_tool": "Чтобы проверить бланки, нужна точка.",
+}
+
+TOOL_FRIENDLY_NAMES = {
+    "review_tool": "отчёта по отзывам",
+    "stoplist_tool": "стоп-листа",
+    "blanks_tool": "бланков",
+}
+
 
 @dataclass
 class OrchestratorPlan:
@@ -193,32 +205,58 @@ class DataAgentOrchestrator:
             if review_result.get("status") == "ok":
                 parts.append(review_result.get("report_text", "Отчёт по отзывам собран."))
             elif review_result.get("status") in {"needs_point", "needs_period", "awaiting_user_input"}:
-                parts.append(review_result.get("message", "Нужно уточнить параметры для отчёта по отзывам."))
+                parts.append(self._guided_tool_message("review_tool", review_result))
             else:
-                parts.append(_safe_failure_message(review_result, "Отчёт по отзывам сейчас недоступен. Попробуйте позже."))
+                parts.append(self._guided_tool_message("review_tool", review_result))
 
         stoplist_result = tool_results.get("stoplist_tool")
         if stoplist_result:
             if stoplist_result.get("status") == "ok":
                 parts.append(stoplist_result.get("report_text", "Отчёт по стоп-листу собран."))
             elif stoplist_result.get("status") in {"needs_point", "needs_period", "awaiting_user_input"}:
-                parts.append(stoplist_result.get("message", "Нужно уточнить параметры для стоп-листа."))
+                parts.append(self._guided_tool_message("stoplist_tool", stoplist_result))
             else:
-                parts.append(_safe_failure_message(stoplist_result, "Стоп-лист сейчас не удалось собрать. Попробуйте позже."))
+                parts.append(self._guided_tool_message("stoplist_tool", stoplist_result))
 
         blanks_result = tool_results.get("blanks_tool")
         if blanks_result:
             if blanks_result.get("status") == "ok":
                 parts.append(blanks_result.get("report_text", "Проверка бланков выполнена."))
             elif blanks_result.get("status") in {"needs_point", "needs_period", "awaiting_user_input"}:
-                parts.append(blanks_result.get("message", "Нужно уточнить параметры для отчёта по бланкам."))
+                parts.append(self._guided_tool_message("blanks_tool", blanks_result))
             else:
-                parts.append(_safe_failure_message(blanks_result, "Проверку бланков сейчас не удалось выполнить. Попробуйте позже."))
+                parts.append(self._guided_tool_message("blanks_tool", blanks_result))
 
         if not parts:
             parts.append("Пока не удалось собрать полезные данные по этому запросу. Нужен более конкретный источник или уточнение задачи.")
 
         return "\n\n".join(parts)
+
+    def _guided_tool_message(self, tool_name: str, result: Dict[str, Any]) -> str:
+        status = str(result.get("status") or "").strip().lower()
+        if status in {"needs_point", "needs_period", "awaiting_user_input"}:
+            return self._missing_point_message(tool_name)
+        if status in {"system_not_connected", "no_systems_connected", "system_not_found"}:
+            return self._system_not_connected_message(tool_name)
+        fallback_text = {
+            "review_tool": "Отчёт по отзывам сейчас недоступен. Попробуйте позже.",
+            "stoplist_tool": "Стоп-лист сейчас не удалось собрать. Попробуйте позже.",
+            "blanks_tool": "Проверку бланков сейчас не удалось выполнить. Попробуйте позже.",
+        }.get(tool_name, "Сейчас не удалось выполнить запрос. Попробуйте позже.")
+        return _safe_failure_message(result, fallback_text)
+
+    def _missing_point_message(self, tool_name: str) -> str:
+        return (
+            f"{TOOL_COLLECTION_PROMPTS.get(tool_name, 'Чтобы выполнить запрос, нужна точка.')} "
+            "Напишите одним сообщением город и адрес. Например: Сухой Лог, Белинского 40."
+        )
+
+    def _system_not_connected_message(self, tool_name: str) -> str:
+        target_label = TOOL_FRIENDLY_NAMES.get(tool_name, "этого сценария")
+        return (
+            f"Чтобы собрать данные для {target_label}, сначала подключите систему Italian Pizza, "
+            "потом добавьте точку и повторите запрос."
+        )
 
 
 orchestrator = DataAgentOrchestrator()
