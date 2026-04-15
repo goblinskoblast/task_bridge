@@ -157,19 +157,32 @@ def _is_monitor_due(config: DataAgentMonitorConfig, now: datetime) -> bool:
     return elapsed_minutes >= interval_minutes
 
 
-async def _record_monitor_failure(bot: Bot, db, config: DataAgentMonitorConfig, result: dict, tool_name: str) -> None:
+async def _record_monitor_failure(
+    bot: Bot,
+    db,
+    config: DataAgentMonitorConfig,
+    result: dict,
+    tool_name: str,
+    *,
+    notify_user: bool = True,
+    persist_state: bool = True,
+) -> dict:
     config = _load_monitor_config(db, config)
     if not config:
-        return
+        return result
 
-    config.last_checked_at = datetime.utcnow()
-    config.last_status = result.get("status") or "failed"
-    config.last_result_json = result
+    if not persist_state and not notify_user:
+        return result
+
+    if persist_state:
+        config.last_checked_at = datetime.utcnow()
+        config.last_status = result.get("status") or "failed"
+        config.last_result_json = result
 
     failure_hash = result.get("alert_hash") or _build_monitor_failure_hash(config, result)
-    if failure_hash == config.last_alert_hash:
+    if persist_state and failure_hash == config.last_alert_hash:
         db.commit()
-        return
+        return result
 
     payload, summary = build_debug_artifacts(
         trace_id=f"monitor-{config.id}",
@@ -179,42 +192,54 @@ async def _record_monitor_failure(bot: Bot, db, config: DataAgentMonitorConfig, 
         tool_results={tool_name: result},
     )
 
-    event = DataAgentMonitorEvent(
-        user_id=config.user_id,
-        config_id=config.id,
-        system_name=config.system_name,
-        monitor_type=config.monitor_type,
-        point_name=config.point_name,
-        severity="error",
-        title=f"Мониторинг завершился с ошибкой: {config.point_name}",
-        body=summary,
-        event_hash=failure_hash,
-        sent_to_telegram=False,
-    )
-    db.add(event)
-    db.commit()
-    db.refresh(event)
-
-    user = db.query(User).filter(User.id == config.user_id).first()
-    delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, config.monitor_type)
-    if delivery_chat_id:
-        await bot.send_message(
-            chat_id=delivery_chat_id,
-            text=_build_monitor_failure_message(config, summary),
+    event = None
+    if persist_state:
+        event = DataAgentMonitorEvent(
+            user_id=config.user_id,
+            config_id=config.id,
+            system_name=config.system_name,
+            monitor_type=config.monitor_type,
+            point_name=config.point_name,
+            severity="error",
+            title=f"Мониторинг завершился с ошибкой: {config.point_name}",
+            body=summary,
+            event_hash=failure_hash,
+            sent_to_telegram=False,
         )
-        event.sent_to_telegram = True
+        db.add(event)
+        db.commit()
+        db.refresh(event)
 
-    config.last_alert_hash = failure_hash
-    config.last_result_json = payload
-    db.commit()
+    if notify_user:
+        user = db.query(User).filter(User.id == config.user_id).first()
+        delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, config.monitor_type)
+        if delivery_chat_id:
+            await bot.send_message(
+                chat_id=delivery_chat_id,
+                text=_build_monitor_failure_message(config, summary),
+            )
+            if event:
+                event.sent_to_telegram = True
+
+    if persist_state:
+        config.last_alert_hash = failure_hash
+        config.last_result_json = payload
+        db.commit()
+    return result
 
 
-async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
+async def _run_blanks_monitor(
+    bot: Bot,
+    config: DataAgentMonitorConfig,
+    *,
+    notify_user: bool = True,
+    persist_state: bool = True,
+) -> dict | None:
     db = get_db_session()
     try:
         config = _load_monitor_config(db, config)
         if not config:
-            return
+            return None
 
         system = (
             db.query(DataAgentSystem)
@@ -227,7 +252,7 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
             .first()
         )
         if not system:
-            await _record_monitor_failure(
+            return await _record_monitor_failure(
                 bot,
                 db,
                 config,
@@ -236,8 +261,9 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
                     "message": "Italian Pizza портал не подключён для мониторинга бланков.",
                 },
                 "blanks_tool",
+                notify_user=notify_user,
+                persist_state=persist_state,
             )
-            return
 
         result = await blanks_tool.inspect_point(
             url=system.url,
@@ -249,8 +275,18 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
 
         result_status = result.get("status") or "ok"
         if result_status in {"failed", "error", "system_not_connected"}:
-            await _record_monitor_failure(bot, db, config, result, "blanks_tool")
-            return
+            return await _record_monitor_failure(
+                bot,
+                db,
+                config,
+                result,
+                "blanks_tool",
+                notify_user=notify_user,
+                persist_state=persist_state,
+            )
+
+        if not persist_state:
+            return result
 
         previous_result = config.last_result_json if isinstance(config.last_result_json, dict) else {}
         previous_had_red_flags = _result_has_red_flags(previous_result)
@@ -285,7 +321,7 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
 
             user = db.query(User).filter(User.id == config.user_id).first()
             delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "blanks")
-            if delivery_chat_id:
+            if notify_user and delivery_chat_id:
                 await bot.send_message(
                     chat_id=delivery_chat_id,
                     text=(
@@ -311,19 +347,27 @@ async def _run_blanks_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
             db.commit()
         else:
             db.commit()
+        return result
     except Exception as exc:
         db.rollback()
         logger.error("Blanks monitor failed for config %s: %s", config.id, exc, exc_info=True)
+        return None
     finally:
         db.close()
 
 
-async def _run_stoplist_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
+async def _run_stoplist_monitor(
+    bot: Bot,
+    config: DataAgentMonitorConfig,
+    *,
+    notify_user: bool = True,
+    persist_state: bool = True,
+) -> dict | None:
     db = get_db_session()
     try:
         config = _load_monitor_config(db, config)
         if not config:
-            return
+            return None
 
         user = db.query(User).filter(User.id == config.user_id).first()
         result = await stoplist_tool.collect_for_point(
@@ -337,8 +381,18 @@ async def _run_stoplist_monitor(bot: Bot, config: DataAgentMonitorConfig) -> Non
 
         result_status = result.get("status") or "ok"
         if result_status in {"failed", "error", "system_not_connected"}:
-            await _record_monitor_failure(bot, db, config, result, "stoplist_tool")
-            return
+            return await _record_monitor_failure(
+                bot,
+                db,
+                config,
+                result,
+                "stoplist_tool",
+                notify_user=notify_user,
+                persist_state=persist_state,
+            )
+
+        if not persist_state:
+            return result
 
         config.last_checked_at = datetime.utcnow()
         config.last_status = result_status
@@ -371,7 +425,7 @@ async def _run_stoplist_monitor(bot: Bot, config: DataAgentMonitorConfig) -> Non
             db.refresh(event)
 
             delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "stoplist")
-            if delivery_chat_id:
+            if notify_user and delivery_chat_id:
                 await bot.send_message(
                     chat_id=delivery_chat_id,
                     text=(
@@ -386,19 +440,27 @@ async def _run_stoplist_monitor(bot: Bot, config: DataAgentMonitorConfig) -> Non
             db.commit()
         else:
             db.commit()
+        return result
     except Exception as exc:
         db.rollback()
         logger.error("Stoplist monitor failed for config %s: %s", config.id, exc, exc_info=True)
+        return None
     finally:
         db.close()
 
 
-async def _run_reviews_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None:
+async def _run_reviews_monitor(
+    bot: Bot,
+    config: DataAgentMonitorConfig,
+    *,
+    notify_user: bool = True,
+    persist_state: bool = True,
+) -> dict | None:
     db = get_db_session()
     try:
         config = _load_monitor_config(db, config)
         if not config:
-            return
+            return None
 
         interval = config.check_interval_minutes or 60
         if interval <= 180:
@@ -412,8 +474,18 @@ async def _run_reviews_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None
 
         result_status = result.get("status") or "ok"
         if result_status in {"failed", "error", "system_not_connected"}:
-            await _record_monitor_failure(bot, db, config, result, "review_tool")
-            return
+            return await _record_monitor_failure(
+                bot,
+                db,
+                config,
+                result,
+                "review_tool",
+                notify_user=notify_user,
+                persist_state=persist_state,
+            )
+
+        if not persist_state:
+            return result
 
         config.last_checked_at = datetime.utcnow()
         config.last_status = result_status
@@ -443,7 +515,7 @@ async def _run_reviews_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None
 
             user = db.query(User).filter(User.id == config.user_id).first()
             delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "reviews")
-            if delivery_chat_id:
+            if notify_user and delivery_chat_id:
                 await bot.send_message(
                     chat_id=delivery_chat_id,
                     text=(
@@ -457,14 +529,16 @@ async def _run_reviews_monitor(bot: Bot, config: DataAgentMonitorConfig) -> None
                 db.commit()
         else:
             db.commit()
+        return result
     except Exception as exc:
         db.rollback()
         logger.error("Reviews monitor failed for config %s: %s", config.id, exc, exc_info=True)
+        return None
     finally:
         db.close()
 
 
-async def _run_monitors(bot: Bot) -> None:
+async def _run_monitors(bot: Bot, *, notify_user: bool = True, persist_state: bool = True) -> None:
     db = get_db_session()
     try:
         tz = pytz.timezone(TIMEZONE)
@@ -479,11 +553,11 @@ async def _run_monitors(bot: Bot) -> None:
                 continue
 
             if item.monitor_type == "blanks":
-                await _run_blanks_monitor(bot, item)
+                await _run_blanks_monitor(bot, item, notify_user=notify_user, persist_state=persist_state)
             elif item.monitor_type == "stoplist":
-                await _run_stoplist_monitor(bot, item)
+                await _run_stoplist_monitor(bot, item, notify_user=notify_user, persist_state=persist_state)
             elif item.monitor_type == "reviews":
-                await _run_reviews_monitor(bot, item)
+                await _run_reviews_monitor(bot, item, notify_user=notify_user, persist_state=persist_state)
     finally:
         db.close()
 

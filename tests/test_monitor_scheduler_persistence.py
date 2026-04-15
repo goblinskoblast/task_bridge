@@ -236,6 +236,85 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertEqual(len(events), 0)
         self.assertEqual(len(bot.messages), 0)
 
+    def test_probe_blanks_monitor_failure_does_not_write_or_notify(self):
+        bot = _DummyBot()
+        result = {
+            "status": "failed",
+            "message": "probe failure",
+            "diagnostics": {"stage": "login_submit"},
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                returned = asyncio.run(
+                    monitor_scheduler._run_blanks_monitor(
+                        bot,
+                        self.detached_config,
+                        notify_user=False,
+                        persist_state=False,
+                    )
+                )
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            events = session.query(DataAgentMonitorEvent).filter(DataAgentMonitorEvent.config_id == self.config_id).all()
+        finally:
+            session.close()
+
+        self.assertEqual(returned, result)
+        self.assertIsNotNone(config)
+        self.assertIsNone(config.last_checked_at)
+        self.assertIsNone(config.last_status)
+        self.assertIsNone(config.last_result_json)
+        self.assertIsNone(config.last_alert_hash)
+        self.assertEqual(len(events), 0)
+        self.assertEqual(len(bot.messages), 0)
+
+    def test_probe_blanks_monitor_red_result_does_not_write_or_notify(self):
+        bot = _DummyBot()
+        result = {
+            "status": "ok",
+            "report_text": "red probe",
+            "has_red_flags": True,
+            "alert_hash": "probe-red-hash",
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                returned = asyncio.run(
+                    monitor_scheduler._run_blanks_monitor(
+                        bot,
+                        self.detached_config,
+                        notify_user=False,
+                        persist_state=False,
+                    )
+                )
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            events = session.query(DataAgentMonitorEvent).filter(DataAgentMonitorEvent.config_id == self.config_id).all()
+        finally:
+            session.close()
+
+        self.assertEqual(returned, result)
+        self.assertIsNotNone(config)
+        self.assertIsNone(config.last_checked_at)
+        self.assertIsNone(config.last_status)
+        self.assertIsNone(config.last_result_json)
+        self.assertIsNone(config.last_alert_hash)
+        self.assertEqual(len(events), 0)
+        self.assertEqual(len(bot.messages), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
