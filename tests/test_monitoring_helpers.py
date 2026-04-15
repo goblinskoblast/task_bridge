@@ -20,6 +20,7 @@ class MonitoringHelpersTest(unittest.TestCase):
     def test_format_monitor_interval(self):
         self.assertEqual(format_monitor_interval(60), "каждый час")
         self.assertEqual(format_monitor_interval(180), "каждые 3 часа")
+        self.assertEqual(format_monitor_interval(1440), "каждый день")
         self.assertEqual(format_monitor_interval(120), "каждые 2 ч.")
 
     def test_build_monitor_saved_note(self):

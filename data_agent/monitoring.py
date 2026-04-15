@@ -34,6 +34,8 @@ def format_monitor_interval(minutes: int) -> str:
         return "каждый час"
     if minutes == 180:
         return "каждые 3 часа"
+    if minutes == 1440:
+        return "каждый день"
     hours = minutes / 60
     if hours.is_integer():
         whole_hours = int(hours)

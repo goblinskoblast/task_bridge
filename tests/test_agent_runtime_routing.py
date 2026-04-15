@@ -115,6 +115,18 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
         self.assertEqual(decision.slots.get("point_name"), expected_point_name)
         self.assertEqual(decision.slots.get("monitor_interval_minutes"), 180)
 
+    def test_rule_based_decision_extracts_daily_monitor_interval(self):
+        expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
+        decision = self.runtime._rule_based_decision(
+            "Присылай стоп-лист по Сухой Лог Белинского 40 каждый день.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "stoplist_report")
+        self.assertEqual(decision.slots.get("point_name"), expected_point_name)
+        self.assertEqual(decision.slots.get("monitor_interval_minutes"), 1440)
+
     def test_rule_based_decision_keeps_one_off_blanks_request_without_monitor_interval(self):
         expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
         decision = self.runtime._rule_based_decision(

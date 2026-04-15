@@ -344,6 +344,8 @@ class DataAgentRuntime:
             return 60
         if "раз в три часа" in lowered or "каждые три часа" in lowered:
             return 180
+        if any(marker in lowered for marker in ["каждый день", "ежедневно", "раз в день", "раз в сутки", "каждые сутки"]):
+            return 1440
         match = re.search(r"каждые\s+(\d+)\s+час", lowered)
         if match:
             return int(match.group(1)) * 60
