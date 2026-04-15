@@ -47,6 +47,7 @@
 - Для приоритетного пользователя сценарий по `Сухой Лог, Белинского 40` считается золотым регрессионным кейсом
 
 ### Monitor flow
+- Free-text phrases like `покажи мониторинги`, `какие мониторинги`, `активные мониторинги`, `что у меня включено` must show the active monitor summary without requiring `/monitors` or monitor IDs.
 - После каждого запуска мониторинга должны корректно обновляться:
   - `last_checked_at`
   - `last_status`

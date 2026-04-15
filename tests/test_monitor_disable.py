@@ -123,6 +123,70 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(config)
         self.assertFalse(config.is_active)
 
+    def test_build_monitors_summary_uses_user_timezone_and_plain_text(self):
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            answer = self.service._build_monitors_summary(137236883)
+
+        self.assertIn("Активные мониторинги:", answer)
+        self.assertIn(f"Бланки: {self.point_name}", answer)
+        self.assertIn("каждые 3 часа", answer)
+        self.assertIn("с 10:00 до 22:00 по Екатеринбургу", answer)
+        self.assertIn("Последняя проверка: ещё не было.", answer)
+        self.assertNotIn("/unmonitor", answer)
+
+    async def test_chat_short_circuits_monitor_list_without_running_scenario_engine(self):
+        decision = AgentDecision(
+            scenario="monitor_management",
+            selected_tools=["orchestrator"],
+            slots={"monitor_action": "list", "source_message": "покажи мониторинги"},
+            missing_slots=[],
+            reasoning="test",
+        )
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch("data_agent.agent_runtime.get_db_session", side_effect=self.SessionLocal):
+                with patch("data_agent.service.agent_runtime.decide", AsyncMock(return_value=decision)):
+                    with patch("data_agent.service.scenario_engine.execute", AsyncMock()) as mocked_execute:
+                        response = await self.service.chat(
+                            DataAgentChatRequest(
+                                user_id=137236883,
+                                message="Покажи мои активные мониторинги.",
+                            )
+                        )
+
+        mocked_execute.assert_not_awaited()
+        self.assertTrue(response.ok)
+        self.assertEqual(response.status, "completed")
+        self.assertEqual(response.scenario, "monitor_management")
+        self.assertIn("Активные мониторинги:", response.answer)
+        self.assertIn(self.point_name, response.answer)
+
+    async def test_chat_failure_response_is_neutral_without_internal_error(self):
+        fallback_decision = AgentDecision(
+            scenario="general",
+            selected_tools=["orchestrator"],
+            slots={"source_message": "покажи мониторинги"},
+            missing_slots=[],
+            reasoning="fallback",
+        )
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch("data_agent.agent_runtime.get_db_session", side_effect=self.SessionLocal):
+                with patch("data_agent.service.logger.exception"):
+                    with patch("data_agent.service.agent_runtime.decide", AsyncMock(side_effect=RuntimeError("Page.evaluate failed"))):
+                        with patch("data_agent.service.agent_runtime.decide_fast", return_value=fallback_decision):
+                            response = await self.service.chat(
+                                DataAgentChatRequest(
+                                    user_id=137236883,
+                                    message="Покажи мои активные мониторинги.",
+                                )
+                            )
+
+        self.assertFalse(response.ok)
+        self.assertEqual(response.answer, "Не удалось выполнить запрос. Попробуйте повторить чуть позже.")
+        self.assertNotIn("Page.evaluate", response.answer)
+        self.assertNotIn("failed", response.answer.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

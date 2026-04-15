@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 SCENARIO_TOOL_MAP = {
     "general": ["orchestrator"],
+    "monitor_management": ["orchestrator"],
     "browser_report": ["browser_tool"],
     "reviews_report": ["review_tool"],
     "stoplist_report": ["stoplist_tool"],
@@ -52,6 +53,16 @@ MONITOR_DISABLE_MARKERS = (
     "останови мониторинг",
     "убери мониторинг",
     "отмени мониторинг",
+)
+
+MONITOR_LIST_MARKERS = (
+    "какие мониторинги",
+    "покажи мониторинги",
+    "список мониторингов",
+    "активные мониторинги",
+    "мои мониторинги",
+    "что у меня включено",
+    "что включено по мониторингам",
 )
 
 
@@ -189,7 +200,10 @@ class DataAgentRuntime:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
         scenario = "general"
         reasoning = "Rule-based routing"
-        if self._contains_stoplist_intent(lowered):
+        if self._has_monitor_list_intent(lowered):
+            scenario = "monitor_management"
+            reasoning = "Запрошен список мониторингов"
+        elif self._contains_stoplist_intent(lowered):
             scenario = "stoplist_report"
             reasoning = "Определен сценарий стоп-листа"
         elif any(token in lowered for token in ["бланк загрузки", "бланки загрузки", "бланк", "бланки", "перегруз", "красн", "лимит", "норматив"]):
@@ -373,7 +387,12 @@ class DataAgentRuntime:
     def _has_monitor_intent(self, lowered: str) -> bool:
         return any(marker in lowered for marker in MONITOR_INTENT_MARKERS)
 
+    def _has_monitor_list_intent(self, lowered: str) -> bool:
+        return any(marker in lowered for marker in MONITOR_LIST_MARKERS)
+
     def _extract_monitor_action(self, lowered: str) -> Optional[str]:
+        if self._has_monitor_list_intent(lowered):
+            return "list"
         if any(marker in lowered for marker in MONITOR_DISABLE_MARKERS):
             return "disable"
         return None

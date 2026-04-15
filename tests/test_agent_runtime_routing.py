@@ -156,6 +156,29 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
         self.assertEqual(decision.slots.get("monitor_action"), "disable")
         self.assertIsNone(decision.slots.get("monitor_interval_minutes"))
 
+    def test_rule_based_decision_lists_active_monitors_from_free_text(self):
+        decision = self.runtime._rule_based_decision(
+            "Покажи мои активные мониторинги.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "monitor_management")
+        self.assertEqual(decision.selected_tools, ["orchestrator"])
+        self.assertEqual(decision.slots.get("monitor_action"), "list")
+        self.assertEqual(decision.missing_slots, [])
+
+    def test_rule_based_decision_understands_what_is_enabled_as_monitor_list(self):
+        decision = self.runtime._rule_based_decision(
+            "Что у меня включено?",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "monitor_management")
+        self.assertEqual(decision.slots.get("monitor_action"), "list")
+        self.assertEqual(decision.missing_slots, [])
+
     def test_rule_based_decision_keeps_one_off_blanks_request_without_monitor_interval(self):
         expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
         decision = self.runtime._rule_based_decision(

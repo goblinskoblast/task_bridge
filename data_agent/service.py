@@ -27,6 +27,8 @@ from .monitoring import (
     build_monitor_not_found_note,
     build_monitor_saved_note,
     default_monitor_window_hours,
+    format_monitor_interval,
+    format_monitor_window,
     scenario_to_monitor_type,
     service_monitor_window_to_user_hours,
     user_monitor_window_to_service_hours,
@@ -211,6 +213,79 @@ class DataAgentService:
             ]
         finally:
             db.close()
+
+    def _build_monitors_summary(self, user_id: int) -> str:
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return "Активных мониторингов сейчас нет."
+
+            items = (
+                db.query(DataAgentMonitorConfig)
+                .filter(
+                    DataAgentMonitorConfig.user_id == user.id,
+                    DataAgentMonitorConfig.is_active == True,
+                )
+                .order_by(
+                    DataAgentMonitorConfig.monitor_type.asc(),
+                    DataAgentMonitorConfig.point_name.asc(),
+                )
+                .all()
+            )
+            if not items:
+                return (
+                    "Активных мониторингов сейчас нет.\n\n"
+                    "Можно написать: Присылай мне бланки по Сухой Лог Белинского 40 каждые 3 часа."
+                )
+
+            lines = ["Активные мониторинги:"]
+            for item in items:
+                lines.append(self._format_monitor_summary_item(item))
+
+            lines.extend(
+                [
+                    "",
+                    "Изменить можно обычным текстом: присылай бланки по Сухой Лог Белинского 40 каждые 3 часа с 10 до 22.",
+                    "Отключить можно так: не присылай бланки по Сухой Лог Белинского 40.",
+                ]
+            )
+            return "\n".join(lines)
+        except Exception:
+            logger.exception("Failed to build monitors summary")
+            return "Не удалось получить список мониторингов. Попробуйте позже."
+        finally:
+            db.close()
+
+    def _format_monitor_summary_item(self, item: DataAgentMonitorConfig) -> str:
+        labels = {
+            "blanks": "Бланки",
+            "stoplist": "Стоп-лист",
+            "reviews": "Отзывы",
+        }
+        monitor_label = labels.get(item.monitor_type, "Мониторинг")
+        interval_label = format_monitor_interval(item.check_interval_minutes)
+        details = [interval_label]
+        if item.active_from_hour is not None and item.active_to_hour is not None:
+            start_hour, end_hour = service_monitor_window_to_user_hours(
+                item.active_from_hour,
+                item.active_to_hour,
+            )
+            details.append(format_monitor_window(start_hour, end_hour))
+        status_label = self._format_monitor_status(item.last_status)
+        return f"- {monitor_label}: {item.point_name} — {', '.join(details)}. Последняя проверка: {status_label}."
+
+    def _format_monitor_status(self, status: str | None) -> str:
+        normalized = (status or "").strip().lower()
+        if not normalized:
+            return "ещё не было"
+        if normalized in {"ok", "completed"}:
+            return "прошла"
+        if normalized in {"failed", "error", "system_not_connected"}:
+            return "нужна повторная проверка"
+        if normalized in {"alert", "warning", "changed", "red_alert"}:
+            return "есть уведомление"
+        return "обновлён"
 
     def delete_monitor(self, user_id: int, monitor_id: int) -> MonitorDeleteResponse:
         db = get_db_session()
@@ -465,6 +540,34 @@ class DataAgentService:
 
             monitor_action = str(decision.slots.get("monitor_action") or "").strip().lower()
             point_name = decision.slots.get("point_name")
+            if monitor_action == "list":
+                answer = self._build_monitors_summary(payload.user_id)
+                debug_payload, debug_summary = build_debug_artifacts(
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="completed",
+                    selected_tools=selected_tools,
+                    tool_results={},
+                )
+                agent_runtime.save_session(
+                    payload.user_id,
+                    decision,
+                    user_message=normalized_message,
+                    answer=answer,
+                    status="completed",
+                    trace_id=trace_id,
+                    debug_summary=debug_summary,
+                    debug_payload=debug_payload,
+                )
+                return DataAgentChatResponse(
+                    answer=answer,
+                    selected_tools=selected_tools,
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="completed",
+                    debug_summary=debug_summary,
+                )
+
             if monitor_action == "disable" and point_name:
                 answer = self._disable_monitor(
                     user_id=payload.user_id,
@@ -564,7 +667,7 @@ class DataAgentService:
             error_message = str(exc)
             logger.exception("DataAgent chat failed trace=%s", trace_id)
             fallback_decision = agent_runtime.decide_fast(payload.user_id, normalized_message, systems_count=0)
-            fallback_answer = f"DataAgent не смог обработать запрос: {exc}"
+            fallback_answer = "Не удалось выполнить запрос. Попробуйте повторить чуть позже."
             debug_payload, debug_summary = build_debug_artifacts(
                 trace_id=trace_id,
                 scenario=fallback_decision.scenario,
