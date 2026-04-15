@@ -237,7 +237,7 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertEqual(len(events), 0)
         self.assertEqual(len(bot.messages), 0)
 
-    def test_run_blanks_monitor_failure_notifies_user_once(self):
+    def test_run_blanks_monitor_failure_stays_internal(self):
         bot = _DummyBot()
         result = {
             "status": "failed",
@@ -264,12 +264,12 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         finally:
             session.close()
 
-        self.assertEqual(len(bot.messages), 1)
+        self.assertEqual(len(bot.messages), 0)
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].severity, "error")
-        self.assertTrue(events[0].sent_to_telegram)
+        self.assertFalse(events[0].sent_to_telegram)
 
-    def test_run_blanks_monitor_failure_is_throttled_when_recent_failure_was_already_sent(self):
+    def test_run_blanks_monitor_failure_preserves_existing_sent_event(self):
         session = self.SessionLocal()
         try:
             user = session.query(User).filter(User.telegram_id == 555001).first()
