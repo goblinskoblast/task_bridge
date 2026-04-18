@@ -1,5 +1,7 @@
 import unittest
 from datetime import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from data_agent.adapters.italian_pizza_portal_adapter import ItalianPizzaPortalAdapter
 
@@ -378,6 +380,70 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
                 "Upper Ufaley, Lenina 147",
             )
         )
+
+class BlanksAdapterAsyncHelpersTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.adapter = ItalianPizzaPortalAdapter()
+
+    async def test_submit_login_and_wait_retries_after_staying_on_login_page(self):
+        page = object()
+        with patch.object(self.adapter, "_trigger_login_submit", AsyncMock(return_value=True)) as mocked_submit:
+            with patch.object(
+                self.adapter,
+                "_wait_for_post_login_state",
+                AsyncMock(side_effect=[("login_page", "Логин"), ("ok", "Портал")]),
+            ) as mocked_wait:
+                state, text = await self.adapter._submit_login_and_wait(page)
+
+        self.assertEqual((state, text), ("ok", "Портал"))
+        self.assertEqual(mocked_submit.await_count, 2)
+        self.assertEqual(mocked_wait.await_count, 2)
+        self.assertFalse(mocked_submit.await_args_list[0].kwargs["use_force"])
+        self.assertFalse(mocked_submit.await_args_list[0].kwargs["use_enter"])
+        self.assertTrue(mocked_submit.await_args_list[1].kwargs["use_force"])
+        self.assertTrue(mocked_submit.await_args_list[1].kwargs["use_enter"])
+
+    async def test_load_report_context_retries_until_period_controls_appear(self):
+        page = SimpleNamespace(wait_for_timeout=AsyncMock())
+        with patch.object(
+            self.adapter,
+            "_open_report_context_if_needed",
+            AsyncMock(
+                side_effect=[
+                    {
+                        "body": "Главная\nПрофиль",
+                        "visible_period_controls": [],
+                        "visible_report_controls": [],
+                        "route_label": None,
+                    },
+                    {
+                        "body": "Бланк загрузки\nОтчет по перегрузкам",
+                        "visible_period_controls": ["3", "6"],
+                        "visible_report_controls": ["Бланк загрузки"],
+                        "route_label": "Бланк загрузки",
+                    },
+                ]
+            ),
+        ) as mocked_context:
+            result = await self.adapter._load_report_context(page, "Сухой Лог, Белинского 40")
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["visible_period_controls"], ["3", "6"])
+        self.assertEqual(mocked_context.await_count, 2)
+        page.wait_for_timeout.assert_awaited_once()
+
+    async def test_click_blank_hour_chip_retries_after_transient_failure(self):
+        page = SimpleNamespace(wait_for_timeout=AsyncMock())
+        with patch.object(
+            self.adapter,
+            "_click_blank_hour_chip_once",
+            AsyncMock(side_effect=[False, True]),
+        ) as mocked_click:
+            result = await self.adapter._click_blank_hour_chip(page, "3")
+
+        self.assertTrue(result)
+        self.assertEqual(mocked_click.await_count, 2)
+        page.wait_for_timeout.assert_awaited_once()
 
 
 if __name__ == "__main__":

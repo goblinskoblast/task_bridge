@@ -65,6 +65,7 @@ class MonitorConfigItem(BaseModel):
     next_check_label: Optional[str] = None
     last_event_label: Optional[str] = None
     delivery_label: Optional[str] = None
+    behavior_label: Optional[str] = None
     has_active_alert: bool = False
 
 

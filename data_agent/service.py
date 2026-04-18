@@ -235,6 +235,7 @@ class DataAgentService:
                         next_check_label=description["next_check_label"],
                         last_event_label=description["last_event_label"],
                         delivery_label=description["delivery_label"],
+                        behavior_label=description["behavior_label"],
                         has_active_alert=description["has_active_alert"],
                     )
                 )
@@ -308,6 +309,7 @@ class DataAgentService:
             f"- {description['monitor_label']}: {item.point_name}",
             f"  {'; '.join(details)}",
             f"  Сейчас: {description['status_label']}",
+            f"  Что придёт: {description['behavior_label']}",
             f"  Последняя проверка: {description['last_checked_label']}",
             f"  Следующая проверка: {description['next_check_label']}",
         ]
@@ -340,6 +342,7 @@ class DataAgentService:
             window_label = format_monitor_window(start_hour, end_hour)
         has_active_alert = self._monitor_has_active_alert(item)
         status_label = self._format_monitor_status(item, has_active_alert=has_active_alert)
+        behavior_label = self._format_monitor_behavior(item)
         last_checked_label = format_monitor_moment(item.last_checked_at)
         next_check_label = format_monitor_next_check(
             check_interval_minutes=item.check_interval_minutes,
@@ -353,6 +356,7 @@ class DataAgentService:
             "interval_label": interval_label,
             "window_label": window_label,
             "status_label": status_label,
+            "behavior_label": behavior_label,
             "last_checked_label": last_checked_label,
             "next_check_label": next_check_label,
             "last_event_label": last_event_label,
@@ -385,6 +389,15 @@ class DataAgentService:
         if normalized in {"alert", "warning", "changed", "red_alert"}:
             return "есть уведомление"
         return "обновлён"
+
+    def _format_monitor_behavior(self, item: DataAgentMonitorConfig) -> str:
+        if item.monitor_type == "blanks":
+            return "сразу сообщу, если появится красная зона"
+        if item.monitor_type == "stoplist":
+            return "пришлю изменения по стоп-листу и плановые сводки"
+        if item.monitor_type == "reviews":
+            return "пришлю новые отзывы и плановые сводки"
+        return "пришлю новые события по мониторингу"
 
     def _load_latest_user_facing_events(
         self,

@@ -1015,10 +1015,13 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
         next_check_label = item.get("next_check_label") or "\u0432 \u0431\u043b\u0438\u0436\u0430\u0439\u0448\u0438\u0439 \u0446\u0438\u043a\u043b"
         last_event_label = item.get("last_event_label") or "\u043f\u043e\u043a\u0430 \u043d\u0435 \u0431\u044b\u043b\u043e"
         delivery_label = item.get("delivery_label")
+        behavior_label = item.get("behavior_label")
 
         lines.append(f"\u2022 <b>{monitor_label.title()}</b> \u2014 {item.get('point_name')}")
         lines.append(f"  {'; '.join(details)}")
         lines.append(f"  \u0441\u0435\u0439\u0447\u0430\u0441: {status_label}")
+        if behavior_label:
+            lines.append(f"  \u0447\u0442\u043e \u043f\u0440\u0438\u0434\u0451\u0442: {behavior_label}")
         lines.append(f"  \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u044f\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430: {last_checked_label}")
         lines.append(f"  \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0430\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430: {next_check_label}")
         lines.append(f"  \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0435\u0435 \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0435: {last_event_label}")

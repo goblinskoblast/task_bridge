@@ -134,6 +134,7 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("каждые 3 часа", answer)
         self.assertIn("с 10:00 до 22:00 по Екатеринбургу", answer)
         self.assertIn("Последняя проверка: ещё не было", answer)
+        self.assertIn("Что придёт: сразу сообщу, если появится красная зона", answer)
         self.assertIn("Последнее уведомление: пока не было", answer)
         self.assertNotIn("/unmonitor", answer)
 
@@ -179,6 +180,7 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(monitors[0].has_active_alert)
         self.assertTrue(bool(monitors[0].interval_label))
         self.assertTrue(bool(monitors[0].window_label))
+        self.assertEqual(monitors[0].behavior_label, "сразу сообщу, если появится красная зона")
 
     def test_monitor_summaries_include_delivery_and_latest_user_facing_event(self):
         session = self.SessionLocal()
@@ -256,12 +258,14 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
                     monitors = self.service.list_monitors(137236883)
 
         self.assertIn("Последняя проверка: сегодня в 18:10", answer)
+        self.assertIn("Что придёт: сразу сообщу, если появится красная зона", answer)
         self.assertIn("Последнее уведомление: 14.04 в 13:02, была красная зона", answer)
         self.assertIn("Отправка: чат «Бланки priority»", answer)
         self.assertEqual(len(monitors), 1)
         self.assertEqual(monitors[0].last_checked_label, "сегодня в 18:10")
         self.assertEqual(monitors[0].last_event_label, "14.04 в 13:02, была красная зона")
         self.assertEqual(monitors[0].delivery_label, "чат «Бланки priority»")
+        self.assertEqual(monitors[0].behavior_label, "сразу сообщу, если появится красная зона")
 
         self.assertEqual(monitors[0].next_check_label, "\u0441\u0435\u0433\u043e\u0434\u043d\u044f \u0432 22:00")
 

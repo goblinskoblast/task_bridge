@@ -940,6 +940,58 @@ class ItalianPizzaPortalAdapter:
                 return "ok", last_text
         return "login_page", last_text
 
+    async def _trigger_login_submit(self, page, *, use_force: bool = False, use_enter: bool = False) -> bool:
+        for selector in ["button[type='submit']", "button:has-text('Войти')", "button:has-text('Login')"]:
+            locator = page.locator(selector)
+            if await locator.count() <= 0:
+                continue
+            button = locator.first
+            try:
+                if not await button.is_visible():
+                    continue
+                await button.click(timeout=3500, force=use_force)
+                return True
+            except Exception as exc:
+                logger.info("Blanks login submit click failed selector=%s error=%s", selector, exc)
+
+        if not use_enter:
+            return False
+
+        for selector in ["input[type='password']", "input[name='password']"]:
+            locator = page.locator(selector)
+            if await locator.count() <= 0:
+                continue
+            field = locator.first
+            try:
+                if not await field.is_visible():
+                    continue
+                await field.press("Enter")
+                return True
+            except Exception as exc:
+                logger.info("Blanks login submit via Enter failed selector=%s error=%s", selector, exc)
+        return False
+
+    async def _submit_login_and_wait(self, page, attempts: int = 3) -> tuple[str, str]:
+        last_state = "login_page"
+        last_text = ""
+        total_attempts = max(1, attempts)
+        for attempt in range(total_attempts):
+            await self._trigger_login_submit(
+                page,
+                use_force=attempt > 0,
+                use_enter=attempt > 0,
+            )
+            last_state, last_text = await self._wait_for_post_login_state(
+                page,
+                attempts=5 if attempt else 6,
+                delay_ms=700,
+            )
+            if last_state != "login_page":
+                return last_state, last_text
+            if attempt < total_attempts - 1:
+                logger.info("Blanks login still on auth page, retrying submit attempt=%s", attempt + 2)
+        return last_state, last_text
+
     async def _wait_for_portal_ready(self, page, point_name: str, attempts: int = 8, delay_ms: int = 700) -> tuple[list[str], str]:
         last_text = ""
         last_controls: list[str] = []
@@ -956,6 +1008,29 @@ class ItalianPizzaPortalAdapter:
                 last_text = ""
             await page.wait_for_timeout(delay_ms)
         return last_controls, last_text
+
+    async def _load_report_context(self, page, point_name: str, attempts: int = 3, delay_ms: int = 900) -> dict:
+        last_context = {
+            "body": "",
+            "visible_period_controls": [],
+            "visible_report_controls": [],
+            "route_label": None,
+        }
+        total_attempts = max(1, attempts)
+        for attempt in range(total_attempts):
+            context = await self._open_report_context_if_needed(page, point_name)
+            last_context = context
+            body = context.get("body") or ""
+            issue = self._detect_terminal_issue(body)
+            if issue:
+                return {**context, "status": "issue", "issue": issue}
+            if self._looks_like_login_page(body):
+                return {**context, "status": "login_page"}
+            if self._contains_report_context(body) or (context.get("visible_period_controls") or []):
+                return {**context, "status": "ok"}
+            if attempt < total_attempts - 1:
+                await page.wait_for_timeout(delay_ms)
+        return {**last_context, "status": "missing_context"}
 
     def _contains_report_context(self, text: str) -> bool:
         lowered = self._normalize_text(text)
@@ -1084,22 +1159,23 @@ class ItalianPizzaPortalAdapter:
             await page.wait_for_timeout(350)
         return False
 
-    async def _click_blank_hour_chip(self, page, hour_value: str) -> bool:
+    async def _click_blank_hour_chip_once(self, page, hour_value: str) -> bool:
         direct = page.locator(f"button[data-cy='hour-{hour_value}']")
         if await direct.count() > 0:
             button = direct.first
             try:
                 if not await button.is_visible():
-                    return False
-                class_name = (await button.get_attribute("class") or "").lower()
-                if "disabled" in class_name or await button.is_disabled():
-                    logger.info("Blanks blank-hour chip already active value=%s selector=data-cy", hour_value)
-                    return True
-                await button.click(timeout=3500, force=True)
-                if await self._wait_for_blank_hour_applied(page, hour_value):
-                    await page.wait_for_timeout(500)
-                    logger.info("Blanks blank-hour chip clicked value=%s selector=data-cy", hour_value)
-                    return True
+                    logger.info("Blanks blank-hour chip not visible yet value=%s selector=data-cy", hour_value)
+                else:
+                    class_name = (await button.get_attribute("class") or "").lower()
+                    if "disabled" in class_name or await button.is_disabled():
+                        logger.info("Blanks blank-hour chip already active value=%s selector=data-cy", hour_value)
+                        return True
+                    await button.click(timeout=3500, force=True)
+                    if await self._wait_for_blank_hour_applied(page, hour_value):
+                        await page.wait_for_timeout(500)
+                        logger.info("Blanks blank-hour chip clicked value=%s selector=data-cy", hour_value)
+                        return True
             except Exception as exc:
                 logger.info("Blanks blank-hour chip click failed value=%s selector=data-cy error=%s", hour_value, exc)
 
@@ -1129,6 +1205,15 @@ class ItalianPizzaPortalAdapter:
                     return True
             except Exception as exc:
                 logger.info("Blanks blank-hour chip click failed value=%s idx=%s error=%s", hour_value, idx, exc)
+        return False
+
+    async def _click_blank_hour_chip(self, page, hour_value: str, attempts: int = 3) -> bool:
+        total_attempts = max(1, attempts)
+        for attempt in range(total_attempts):
+            if await self._click_blank_hour_chip_once(page, hour_value):
+                return True
+            if attempt < total_attempts - 1:
+                await page.wait_for_timeout(500 + (attempt * 250))
         return False
 
     def _rolling_blank_hours(self, period_hint: str) -> int | None:
@@ -1959,12 +2044,8 @@ class ItalianPizzaPortalAdapter:
                         await page.fill(selector, password)
                         break
                 stage = "login_submit"
-                for selector in ["button[type='submit']", "button:has-text('Войти')", "button:has-text('Login')"]:
-                    if await page.locator(selector).count() > 0:
-                        await page.locator(selector).first.click()
-                        break
                 current_url = page.url
-                login_state, post_login_text = await self._wait_for_post_login_state(page)
+                login_state, post_login_text = await self._submit_login_and_wait(page)
                 current_url = page.url
                 if login_state == "issue":
                     issue = self._detect_terminal_issue(post_login_text) or "Не удалось войти в портал."
@@ -2021,15 +2102,14 @@ class ItalianPizzaPortalAdapter:
                         ),
                     )
                 stage = "report_navigation"
-                report_context = await self._open_report_context_if_needed(page, point_name)
-                current_url = page.url
                 stage = "period_selection"
-                body = (await page.locator("body").inner_text())[:12000]
-                issue = self._detect_terminal_issue(body)
-                if issue:
+                report_context = await self._load_report_context(page, point_name)
+                current_url = page.url
+                body = report_context.get("body") or ""
+                if report_context.get("status") == "issue":
                     return self._build_failed_result(
                         point_name,
-                        issue,
+                        report_context.get("issue") or "Не удалось открыть отчет по бланкам.",
                         period_hint,
                         diagnostics=self._build_diagnostics(
                             stage,
@@ -2048,7 +2128,7 @@ class ItalianPizzaPortalAdapter:
                             page_excerpt=self._normalize_text(body)[:400],
                         ),
                     )
-                if self._looks_like_login_page(body):
+                if report_context.get("status") == "login_page":
                     return self._build_failed_result(
                         point_name,
                         "Не удалось открыть отчет по бланкам: портал вернул на страницу входа.",
@@ -2070,7 +2150,7 @@ class ItalianPizzaPortalAdapter:
                             page_excerpt=self._normalize_text(body)[:400],
                         ),
                     )
-                if not self._contains_report_context(body):
+                if report_context.get("status") != "ok":
                     return self._build_failed_result(
                         point_name,
                         "Не удалось подтвердить открытие отчета по бланкам на портале.",
