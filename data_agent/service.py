@@ -423,7 +423,11 @@ class DataAgentService:
 
         latest_events: dict[int, DataAgentMonitorEvent] = {}
         for item in items:
-            event = self._pick_user_facing_event(grouped.get(int(item.id), []), monitor_type=item.monitor_type)
+            event = self._pick_user_facing_event(
+                grouped.get(int(item.id), []),
+                monitor_type=item.monitor_type,
+                last_status=item.last_status,
+            )
             if event is not None:
                 latest_events[int(item.id)] = event
         return latest_events
@@ -433,9 +437,17 @@ class DataAgentService:
         events: List[DataAgentMonitorEvent],
         *,
         monitor_type: str,
+        last_status: str | None = None,
     ) -> DataAgentMonitorEvent | None:
         if not events:
             return None
+
+        latest_event = events[0]
+        normalized_status = (last_status or "").lower()
+        if normalized_status in {"failed", "error", "system_not_connected"} and (
+            (latest_event.severity or "").lower() == "error"
+        ):
+            return latest_event
 
         if monitor_type == "blanks":
             for item in events:
@@ -458,6 +470,12 @@ class DataAgentService:
 
         event_time = format_monitor_moment(latest_event.created_at)
         sent_to_telegram = bool(latest_event.sent_to_telegram)
+        severity = (latest_event.severity or "").lower()
+        if severity == "error":
+            return {
+                "title": "Последнее событие",
+                "label": f"{event_time}, проверка не завершилась, повторим автоматически",
+            }
         title = "Последнее уведомление" if sent_to_telegram else "Последнее событие"
         if item.monitor_type == "blanks":
             label = f"{event_time}, {'была красная зона' if sent_to_telegram else 'зафиксирована красная зона'}"
