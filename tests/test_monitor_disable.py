@@ -503,6 +503,62 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
             "15.04 в 14:04, проверка не завершилась, повторим автоматически",
         )
 
+    def test_monitor_summaries_show_needs_period_as_retry_needed(self):
+        blanks_point = "Сухой Лог, Белинского 40 needs period"
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 137236883).first()
+            config = DataAgentMonitorConfig(
+                user_id=user.id,
+                system_name="italian_pizza",
+                monitor_type="blanks",
+                point_name=blanks_point,
+                check_interval_minutes=180,
+                is_active=True,
+                active_from_hour=8,
+                active_to_hour=20,
+                last_status="needs_period",
+                last_checked_at=datetime(2026, 4, 15, 13, 10, 4),
+                last_result_json={"status": "needs_period", "message": "Choose period"},
+            )
+            session.add(config)
+            session.flush()
+            session.add(
+                DataAgentMonitorEvent(
+                    user_id=user.id,
+                    config_id=config.id,
+                    system_name="italian_pizza",
+                    monitor_type="blanks",
+                    point_name=blanks_point,
+                    severity="error",
+                    title="Мониторинг завершился с ошибкой",
+                    body="Trace: internal\nЭтап: period_selection",
+                    event_hash="needs-period",
+                    sent_to_telegram=False,
+                    created_at=datetime(2026, 4, 15, 9, 4, 10),
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        def _format_moment(value):
+            if value == datetime(2026, 4, 15, 13, 10, 4):
+                return "сегодня в 18:10"
+            if value == datetime(2026, 4, 15, 9, 4, 10):
+                return "15.04 в 14:04"
+            return "пока не было"
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch("data_agent.service.format_monitor_moment", side_effect=_format_moment):
+                with patch("data_agent.service.format_monitor_next_check", return_value="сегодня в 22:00"):
+                    answer = self.service._build_monitors_summary(137236883)
+
+        self.assertIn("Сейчас: нужна повторная проверка", answer)
+        self.assertIn("Последнее событие: 15.04 в 14:04, проверка не завершилась, повторим автоматически", answer)
+        self.assertNotIn("period_selection", answer)
+        self.assertNotIn("Trace:", answer)
+
     async def test_chat_short_circuits_monitor_list_without_running_scenario_engine(self):
         decision = AgentDecision(
             scenario="monitor_management",

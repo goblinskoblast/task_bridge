@@ -22,6 +22,17 @@ from .stoplist_tool import stoplist_tool
 logger = logging.getLogger(__name__)
 
 _scheduler = None
+_MONITOR_FAILURE_STATUSES = {
+    "failed",
+    "error",
+    "system_not_connected",
+    "no_systems_connected",
+    "system_not_found",
+    "needs_point",
+    "needs_period",
+    "awaiting_user_input",
+    "not_configured",
+}
 
 
 def _result_alert_hash(result: dict | None, *, config: DataAgentMonitorConfig | None = None) -> str | None:
@@ -345,7 +356,7 @@ async def _run_blanks_monitor(
         )
 
         result_status = result.get("status") or "ok"
-        if result_status in {"failed", "error", "system_not_connected"}:
+        if result_status in _MONITOR_FAILURE_STATUSES:
             return await _record_monitor_failure(
                 bot,
                 db,
@@ -455,7 +466,7 @@ async def _run_stoplist_monitor(
             result = point_statistics_service.enrich_stoplist_report(user.telegram_id, config.point_name, result)
 
         result_status = result.get("status") or "ok"
-        if result_status in {"failed", "error", "system_not_connected"}:
+        if result_status in _MONITOR_FAILURE_STATUSES:
             return await _record_monitor_failure(
                 bot,
                 db,
@@ -548,7 +559,7 @@ async def _run_reviews_monitor(
         result = await review_report_service.build_report_for_window_label(window_label)
 
         result_status = result.get("status") or "ok"
-        if result_status in {"failed", "error", "system_not_connected"}:
+        if result_status in _MONITOR_FAILURE_STATUSES:
             return await _record_monitor_failure(
                 bot,
                 db,

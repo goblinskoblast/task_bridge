@@ -47,6 +47,17 @@ from .monitoring import (
 from .scenario_engine import scenario_engine
 
 logger = logging.getLogger(__name__)
+_MONITOR_RETRY_STATUSES = {
+    "failed",
+    "error",
+    "system_not_connected",
+    "no_systems_connected",
+    "system_not_found",
+    "needs_point",
+    "needs_period",
+    "awaiting_user_input",
+    "not_configured",
+}
 
 
 class DataAgentService:
@@ -387,7 +398,7 @@ class DataAgentService:
             if item.monitor_type == "reviews":
                 return "отчёт обновлён"
             return "прошла"
-        if normalized in {"failed", "error", "system_not_connected"}:
+        if normalized in _MONITOR_RETRY_STATUSES:
             return "нужна повторная проверка"
         if normalized in {"alert", "warning", "changed", "red_alert"}:
             return "есть уведомление"
@@ -445,7 +456,7 @@ class DataAgentService:
 
         latest_event = events[0]
         normalized_status = (last_status or "").lower()
-        if normalized_status in {"failed", "error", "system_not_connected"} and (
+        if normalized_status in _MONITOR_RETRY_STATUSES and (
             (latest_event.severity or "").lower() == "error"
         ):
             return latest_event

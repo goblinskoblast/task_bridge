@@ -346,6 +346,56 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertEqual(len(events), 0)
         self.assertEqual(len(bot.messages), 0)
 
+    def test_run_blanks_monitor_treats_needs_period_as_internal_failure(self):
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            config.last_alert_hash = "hash-123"
+            config.last_result_json = {"has_red_flags": True, "alert_hash": "hash-123", "report_text": "old red"}
+            session.commit()
+            session.refresh(config)
+            detached_config = config
+        finally:
+            session.close()
+
+        bot = _DummyBot()
+        result = {
+            "status": "needs_period",
+            "message": "Choose period",
+            "report_text": "Точка: тест\nСтатус: нужно уточнить период",
+            "has_red_flags": False,
+            "visible_period_controls": ["3 ч", "6 ч"],
+            "diagnostics": {"stage": "period_selection", "visible_period_controls": ["3 ч", "6 ч"]},
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                returned = asyncio.run(monitor_scheduler._run_blanks_monitor(bot, detached_config))
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            events = (
+                session.query(DataAgentMonitorEvent)
+                .filter(DataAgentMonitorEvent.config_id == self.config_id)
+                .order_by(DataAgentMonitorEvent.created_at.asc(), DataAgentMonitorEvent.id.asc())
+                .all()
+            )
+        finally:
+            session.close()
+
+        self.assertEqual(returned, result)
+        self.assertIsNotNone(config)
+        self.assertEqual(config.last_status, "needs_period")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].severity, "error")
+        self.assertFalse(events[0].sent_to_telegram)
+        self.assertEqual(len(bot.messages), 0)
+
     def test_run_blanks_monitor_clears_active_red_state_on_trusted_green_result(self):
         session = self.SessionLocal()
         try:
