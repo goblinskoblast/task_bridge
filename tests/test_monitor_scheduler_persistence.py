@@ -275,6 +275,8 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
             "status": "ok",
             "report_text": "green",
             "has_red_flags": False,
+            "slot_count": 3,
+            "table_count": 1,
         }
 
         with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
@@ -295,6 +297,96 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertIsNotNone(config)
         self.assertIsNone(config.last_alert_hash)
         self.assertEqual(config.last_result_json.get("report_text"), result["report_text"])
+        self.assertEqual(len(events), 0)
+        self.assertEqual(len(bot.messages), 0)
+
+    def test_run_blanks_monitor_keeps_active_red_state_on_untrusted_green_result(self):
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            config.last_alert_hash = "hash-123"
+            config.last_result_json = {"has_red_flags": True, "alert_hash": "hash-123", "report_text": "old red"}
+            session.commit()
+            session.refresh(config)
+            detached_config = config
+        finally:
+            session.close()
+
+        bot = _DummyBot()
+        result = {
+            "status": "ok",
+            "report_text": "green but no scan evidence",
+            "has_red_flags": False,
+            "slot_count": 0,
+            "table_count": 0,
+            "inspected_slots": [],
+            "inspected_hours": [],
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                asyncio.run(monitor_scheduler._run_blanks_monitor(bot, detached_config))
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            events = session.query(DataAgentMonitorEvent).filter(DataAgentMonitorEvent.config_id == self.config_id).all()
+        finally:
+            session.close()
+
+        self.assertIsNotNone(config)
+        self.assertIsNotNone(config.last_checked_at)
+        self.assertEqual(config.last_alert_hash, "hash-123")
+        self.assertTrue(config.last_result_json.get("has_red_flags"))
+        self.assertEqual(config.last_result_json.get("report_text"), "old red")
+        self.assertEqual(len(events), 0)
+        self.assertEqual(len(bot.messages), 0)
+
+    def test_run_blanks_monitor_clears_active_red_state_on_trusted_green_result(self):
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            config.last_alert_hash = "hash-123"
+            config.last_result_json = {"has_red_flags": True, "alert_hash": "hash-123", "report_text": "old red"}
+            session.commit()
+            session.refresh(config)
+            detached_config = config
+        finally:
+            session.close()
+
+        bot = _DummyBot()
+        result = {
+            "status": "ok",
+            "report_text": "trusted green",
+            "has_red_flags": False,
+            "slot_count": 4,
+            "table_count": 1,
+            "inspected_slots": ["10:00 - 10:15"],
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                asyncio.run(monitor_scheduler._run_blanks_monitor(bot, detached_config))
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            events = session.query(DataAgentMonitorEvent).filter(DataAgentMonitorEvent.config_id == self.config_id).all()
+        finally:
+            session.close()
+
+        self.assertIsNotNone(config)
+        self.assertIsNone(config.last_alert_hash)
+        self.assertFalse(config.last_result_json.get("has_red_flags"))
+        self.assertEqual(config.last_result_json.get("report_text"), "trusted green")
         self.assertEqual(len(events), 0)
         self.assertEqual(len(bot.messages), 0)
 

@@ -51,6 +51,41 @@ def _result_has_red_flags(result: dict | None) -> bool:
     return bool(isinstance(result, dict) and result.get("has_red_flags"))
 
 
+def _positive_int(value) -> bool:
+    try:
+        return int(value or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _result_has_blank_scan_evidence(result: dict | None) -> bool:
+    if not isinstance(result, dict):
+        return False
+    if result.get("has_red_flags"):
+        return True
+
+    diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), dict) else {}
+    count_keys = ("slot_count", "table_count", "red_signal_count")
+    for key in count_keys:
+        if _positive_int(result.get(key) or diagnostics.get(key)):
+            return True
+
+    list_keys = (
+        "inspected_slots",
+        "inspected_hours",
+        "visible_period_controls",
+        "visible_report_controls",
+        "styled_cell_samples",
+        "table_samples",
+    )
+    for key in list_keys:
+        value = result.get(key)
+        diagnostic_value = diagnostics.get(key)
+        if (isinstance(value, list) and value) or (isinstance(diagnostic_value, list) and diagnostic_value):
+            return True
+    return False
+
+
 def _load_monitor_config(db, config: DataAgentMonitorConfig | None) -> DataAgentMonitorConfig | None:
     config_id = getattr(config, "id", None)
     if not config_id:
@@ -328,10 +363,12 @@ async def _run_blanks_monitor(
         previous_had_red_flags = _result_has_red_flags(previous_result)
         alert_hash = _result_alert_hash(result, config=config)
         has_red_flags = _result_has_red_flags(result)
+        has_scan_evidence = _result_has_blank_scan_evidence(result)
 
         config.last_checked_at = datetime.utcnow()
         config.last_status = result_status
-        config.last_result_json = result
+        if has_red_flags or not previous_had_red_flags or has_scan_evidence:
+            config.last_result_json = result
 
         should_send_alert = has_red_flags and (
             not previous_had_red_flags or bool(alert_hash and alert_hash != config.last_alert_hash)
@@ -380,7 +417,7 @@ async def _run_blanks_monitor(
                 event.sent_to_telegram = True
             config.last_alert_hash = alert_hash
             db.commit()
-        elif not has_red_flags:
+        elif not has_red_flags and (not previous_had_red_flags or has_scan_evidence):
             config.last_alert_hash = None
             db.commit()
         else:
