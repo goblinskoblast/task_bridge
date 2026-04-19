@@ -39,6 +39,15 @@ class _FailFirstBot:
         self.messages.append(kwargs)
 
 
+class _AlwaysFailBot:
+    def __init__(self) -> None:
+        self.attempts: list[dict] = []
+
+    async def send_message(self, **kwargs) -> None:
+        self.attempts.append(kwargs)
+        raise RuntimeError("telegram unavailable")
+
+
 class MonitorSchedulerPersistenceTest(unittest.TestCase):
     def setUp(self) -> None:
         fd, path = tempfile.mkstemp(suffix=".db")
@@ -182,6 +191,72 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertEqual(config.last_alert_hash, "hash-fallback")
         self.assertEqual(len(events), 1)
         self.assertTrue(events[0].sent_to_telegram)
+
+    def test_run_blanks_monitor_retries_hashless_red_alert_after_delivery_failure(self):
+        failing_bot = _AlwaysFailBot()
+        result = {
+            "status": "ok",
+            "has_red_flags": True,
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                returned = asyncio.run(monitor_scheduler._run_blanks_monitor(failing_bot, self.detached_config))
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            events = (
+                session.query(DataAgentMonitorEvent)
+                .filter(DataAgentMonitorEvent.config_id == self.config_id)
+                .order_by(DataAgentMonitorEvent.created_at.asc(), DataAgentMonitorEvent.id.asc())
+                .all()
+            )
+            detached_config = config
+        finally:
+            session.close()
+
+        self.assertIsNone(returned)
+        self.assertEqual(len(failing_bot.attempts), 1)
+        self.assertIsNotNone(config)
+        self.assertIsNone(config.last_alert_hash)
+        self.assertEqual(len(events), 1)
+        self.assertFalse(events[0].sent_to_telegram)
+        self.assertTrue(events[0].event_hash)
+        self.assertIn("Детали красной зоны", events[0].body)
+
+        successful_bot = _DummyBot()
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                asyncio.run(monitor_scheduler._run_blanks_monitor(successful_bot, detached_config))
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            events = (
+                session.query(DataAgentMonitorEvent)
+                .filter(DataAgentMonitorEvent.config_id == self.config_id)
+                .order_by(DataAgentMonitorEvent.created_at.asc(), DataAgentMonitorEvent.id.asc())
+                .all()
+            )
+        finally:
+            session.close()
+
+        self.assertIsNotNone(config)
+        self.assertTrue(config.last_alert_hash)
+        self.assertEqual(len(events), 2)
+        self.assertTrue(events[1].sent_to_telegram)
+        self.assertEqual(events[0].event_hash, events[1].event_hash)
+        self.assertEqual(len(successful_bot.messages), 1)
+        self.assertIn("Детали красной зоны", successful_bot.messages[0].get("text", ""))
 
     def test_run_blanks_monitor_resets_alert_hash_when_red_flags_are_gone(self):
         session = self.SessionLocal()

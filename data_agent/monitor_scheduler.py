@@ -24,16 +24,27 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 
 
-def _result_alert_hash(result: dict | None) -> str | None:
+def _result_alert_hash(result: dict | None, *, config: DataAgentMonitorConfig | None = None) -> str | None:
     if not isinstance(result, dict):
         return None
     explicit_hash = str(result.get("alert_hash") or "").strip()
     if explicit_hash:
         return explicit_hash
     report_text = str(result.get("report_text") or "").strip()
-    if not report_text:
-        return None
-    return hashlib.sha256(report_text.encode("utf-8", errors="ignore")).hexdigest()
+    if report_text:
+        return hashlib.sha256(report_text.encode("utf-8", errors="ignore")).hexdigest()
+    if result.get("has_red_flags") and config is not None:
+        payload = {
+            "monitor_type": config.monitor_type,
+            "point_name": config.point_name,
+            "status": result.get("status") or "ok",
+            "has_red_flags": True,
+            "red_signal_count": result.get("red_signal_count")
+            or (result.get("diagnostics") or {}).get("red_signal_count"),
+        }
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()
+    return None
 
 
 def _result_has_red_flags(result: dict | None) -> bool:
@@ -315,7 +326,7 @@ async def _run_blanks_monitor(
 
         previous_result = config.last_result_json if isinstance(config.last_result_json, dict) else {}
         previous_had_red_flags = _result_has_red_flags(previous_result)
-        alert_hash = _result_alert_hash(result)
+        alert_hash = _result_alert_hash(result, config=config)
         has_red_flags = _result_has_red_flags(result)
 
         config.last_checked_at = datetime.utcnow()
@@ -327,7 +338,7 @@ async def _run_blanks_monitor(
         )
         if should_send_alert:
             report_text = (result.get("report_text") or "").strip()
-            red_summary = report_text
+            red_summary = report_text or "Детали красной зоны не удалось получить, нужна ручная проверка точки."
             event = DataAgentMonitorEvent(
                 user_id=config.user_id,
                 config_id=config.id,
