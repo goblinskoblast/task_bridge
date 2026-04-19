@@ -402,6 +402,97 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertEqual(len(events), 0)
         self.assertEqual(len(bot.messages), 0)
 
+    def test_run_reviews_monitor_persists_hash_even_without_delivery(self):
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 555001).first()
+            review_config = DataAgentMonitorConfig(
+                user_id=user.id,
+                system_name="italian_pizza",
+                monitor_type="reviews",
+                point_name="Все точки",
+                check_interval_minutes=1440,
+                is_active=True,
+            )
+            session.add(review_config)
+            session.commit()
+            session.refresh(review_config)
+            detached_review_config = review_config
+            review_config_id = review_config.id
+        finally:
+            session.close()
+
+        bot = _DummyBot()
+        result = {
+            "status": "ok",
+            "report_text": "Отзывы обновились",
+            "alert_hash": "review-hash-1",
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.review_report_service,
+                "build_report_for_window_label",
+                new=AsyncMock(return_value=result),
+            ):
+                asyncio.run(
+                    monitor_scheduler._run_reviews_monitor(
+                        bot,
+                        detached_review_config,
+                        notify_user=False,
+                    )
+                )
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == review_config_id).first()
+            events = (
+                session.query(DataAgentMonitorEvent)
+                .filter(DataAgentMonitorEvent.config_id == review_config_id)
+                .order_by(DataAgentMonitorEvent.created_at.asc(), DataAgentMonitorEvent.id.asc())
+                .all()
+            )
+            detached_review_config = config
+        finally:
+            session.close()
+
+        self.assertIsNotNone(config)
+        self.assertEqual(config.last_alert_hash, "review-hash-1")
+        self.assertEqual(len(events), 1)
+        self.assertFalse(events[0].sent_to_telegram)
+        self.assertEqual(len(bot.messages), 0)
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.review_report_service,
+                "build_report_for_window_label",
+                new=AsyncMock(return_value=result),
+            ):
+                asyncio.run(
+                    monitor_scheduler._run_reviews_monitor(
+                        bot,
+                        detached_review_config,
+                        notify_user=False,
+                    )
+                )
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == review_config_id).first()
+            events = (
+                session.query(DataAgentMonitorEvent)
+                .filter(DataAgentMonitorEvent.config_id == review_config_id)
+                .order_by(DataAgentMonitorEvent.created_at.asc(), DataAgentMonitorEvent.id.asc())
+                .all()
+            )
+        finally:
+            session.close()
+
+        self.assertIsNotNone(config)
+        self.assertEqual(config.last_alert_hash, "review-hash-1")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(len(bot.messages), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

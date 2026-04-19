@@ -520,8 +520,8 @@ async def _run_reviews_monitor(
                     parse_mode="HTML",
                 )
                 event.sent_to_telegram = True
-                config.last_alert_hash = report_hash
-                db.commit()
+            config.last_alert_hash = report_hash
+            db.commit()
         else:
             db.commit()
         return result
