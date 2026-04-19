@@ -269,6 +269,29 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(monitors[0].next_check_label, "\u0441\u0435\u0433\u043e\u0434\u043d\u044f \u0432 22:00")
 
+    def test_monitor_summary_hides_corrupted_delivery_chat_title(self):
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 137236883).first()
+            session.add(
+                DataAgentProfile(
+                    user_id=user.id,
+                    blanks_report_chat_id=900001,
+                    blanks_report_chat_title="????????",
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            answer = self.service._build_monitors_summary(137236883)
+            monitors = self.service.list_monitors(137236883)
+
+        self.assertIn("Отправка: привязанный чат", answer)
+        self.assertNotIn("????", answer)
+        self.assertEqual(monitors[0].delivery_label, "привязанный чат")
+
     def test_monitor_summaries_distinguish_unsent_stoplist_event_from_notification(self):
         stoplist_point = "Сухой Лог, Белинского 40 stoplist"
         session = self.SessionLocal()

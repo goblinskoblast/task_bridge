@@ -46,6 +46,17 @@ class ReportChatPreferencesTest(unittest.TestCase):
         self.assertEqual(fallback_id, -100123)
         self.assertEqual(fallback_title, "Общий чат")
 
+    def test_profile_report_chat_hides_corrupted_title(self):
+        profile = DataAgentProfile(
+            default_report_chat_id=-100123,
+            default_report_chat_title="????????",
+        )
+
+        chat_id, chat_title = _get_profile_report_chat(profile, "stoplist")
+
+        self.assertEqual(chat_id, -100123)
+        self.assertEqual(chat_title, "привязанный чат")
+
     def test_report_category_resolution(self):
         self.assertEqual(_resolve_report_category_from_action("stoplist"), "stoplist")
         self.assertEqual(_resolve_report_category_from_action("blanks_current"), "blanks")

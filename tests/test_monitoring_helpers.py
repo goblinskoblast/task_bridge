@@ -5,10 +5,12 @@ from zoneinfo import ZoneInfo
 from data_agent.monitoring import (
     build_monitor_saved_note,
     default_monitor_window_hours,
+    format_user_facing_chat_label,
     format_monitor_interval,
     format_monitor_next_check,
     format_monitor_window,
     get_next_monitor_check_at,
+    resolve_user_facing_chat_title,
     scenario_to_monitor_type,
     service_monitor_window_to_user_hours,
     user_monitor_window_to_service_hours,
@@ -53,6 +55,21 @@ class MonitoringHelpersTest(unittest.TestCase):
         self.assertIn("Включил мониторинг бланков", text)
         self.assertIn("каждые 3 часа", text)
         self.assertIn("Если появятся красные бланки, сразу пришлю уведомление.", text)
+
+    def test_user_facing_chat_title_falls_back_from_corrupted_text(self):
+        self.assertIsNone(resolve_user_facing_chat_title("????????"))
+        self.assertEqual(format_user_facing_chat_label("????????"), "привязанный чат")
+
+        text = build_monitor_saved_note(
+            monitor_type="blanks",
+            point_name="Сухой Лог, Белинского 40",
+            interval_minutes=180,
+            chat_title="????????",
+            start_hour=10,
+            end_hour=22,
+        )
+        self.assertIn("Чат доставки: привязанный чат.", text)
+        self.assertNotIn("????", text)
 
     def test_build_monitor_saved_note_supports_update_action(self):
         text = build_monitor_saved_note(

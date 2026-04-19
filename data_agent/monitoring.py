@@ -7,6 +7,18 @@ from zoneinfo import ZoneInfo
 from config import TIMEZONE
 
 
+REPORT_CHAT_FALLBACK_LABEL = "привязанный чат"
+_USER_TEXT_MOJIBAKE_MARKERS = (
+    "????",
+    "Р С",
+    "РЎ",
+    "СЃ",
+    "С‚",
+    "Ð",
+    "Ñ",
+)
+
+
 MONITOR_SCENARIO_TO_TYPE = {
     "reviews_report": "reviews",
     "blanks_report": "blanks",
@@ -45,6 +57,33 @@ def format_monitor_interval(minutes: int) -> str:
 
 def default_monitor_window_hours() -> tuple[int, int]:
     return DEFAULT_MONITOR_START_HOUR, DEFAULT_MONITOR_END_HOUR
+
+
+def looks_corrupted_user_text(text: str | None) -> bool:
+    normalized = (text or "").strip()
+    if not normalized:
+        return False
+    if any(marker in normalized for marker in _USER_TEXT_MOJIBAKE_MARKERS):
+        return True
+    question_marks = normalized.count("?")
+    letters = sum(1 for char in normalized if char.isalpha())
+    return question_marks >= 4 and question_marks >= max(letters // 2, 4)
+
+
+def resolve_user_facing_chat_title(chat_title: str | None) -> str | None:
+    normalized = (chat_title or "").strip()
+    if not normalized:
+        return None
+    if looks_corrupted_user_text(normalized):
+        return None
+    return normalized
+
+
+def format_user_facing_chat_label(chat_title: str | None) -> str:
+    resolved_title = resolve_user_facing_chat_title(chat_title)
+    if resolved_title:
+        return f"чат «{resolved_title}»"
+    return REPORT_CHAT_FALLBACK_LABEL
 
 
 def convert_monitor_window_hours(
@@ -212,7 +251,8 @@ def build_monitor_saved_note(
     window_label = ""
     if start_hour is not None and end_hour is not None:
         window_label = f", {format_monitor_window(start_hour, end_hour, timezone_label=timezone_label)}"
-    suffix = f" Чат доставки: {chat_title}." if chat_title else ""
+    resolved_chat_title = resolve_user_facing_chat_title(chat_title)
+    suffix = f" Чат доставки: {resolved_chat_title or REPORT_CHAT_FALLBACK_LABEL}." if chat_title else ""
     if action == "updated":
         lead_with_point = f"Обновил мониторинг {lead_monitor_label} по точке {point_name}. "
         lead_reviews = f"Обновил мониторинг {lead_monitor_label}. "

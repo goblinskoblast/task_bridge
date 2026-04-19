@@ -35,6 +35,7 @@ from .monitoring import (
     build_monitor_not_found_note,
     build_monitor_saved_note,
     default_monitor_window_hours,
+    format_user_facing_chat_label,
     format_monitor_moment,
     format_monitor_next_check,
     format_monitor_interval,
@@ -500,10 +501,10 @@ class DataAgentService:
             category_chat_id = getattr(profile, selected[0], None)
             category_chat_title = getattr(profile, selected[1], None)
             if category_chat_id:
-                return f"чат «{category_chat_title or category_chat_id}»"
+                return format_user_facing_chat_label(category_chat_title)
 
         if profile.default_report_chat_id:
-            return f"чат «{profile.default_report_chat_title or profile.default_report_chat_id}»"
+            return format_user_facing_chat_label(profile.default_report_chat_title)
         return None
 
     def delete_monitor(self, user_id: int, monitor_id: int) -> MonitorDeleteResponse:

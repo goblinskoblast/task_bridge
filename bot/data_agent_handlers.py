@@ -23,6 +23,7 @@ from config import DEVELOPER_TELEGRAM_ID
 from db.database import get_db_session
 from db.models import Chat, DataAgentProfile, Message as MessageModel, SavedPoint, User
 from data_agent.italian_pizza import resolve_italian_pizza_point
+from data_agent.monitoring import REPORT_CHAT_FALLBACK_LABEL, resolve_user_facing_chat_title
 from data_agent.saved_points import SavedPointError, saved_point_service
 
 logger = logging.getLogger(__name__)
@@ -382,9 +383,12 @@ def _get_profile_report_chat(profile: DataAgentProfile, category: str) -> tuple[
         chat_id = getattr(profile, fields[0], None)
         chat_title = getattr(profile, fields[1], None)
         if chat_id:
-            return int(chat_id), chat_title
+            return int(chat_id), resolve_user_facing_chat_title(chat_title) or REPORT_CHAT_FALLBACK_LABEL
     if profile.default_report_chat_id:
-        return int(profile.default_report_chat_id), profile.default_report_chat_title
+        return (
+            int(profile.default_report_chat_id),
+            resolve_user_facing_chat_title(profile.default_report_chat_title) or REPORT_CHAT_FALLBACK_LABEL,
+        )
     return None, None
 
 
