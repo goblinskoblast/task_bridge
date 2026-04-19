@@ -16,6 +16,7 @@ from bot.data_agent_handlers import (
     _build_point_actions_keyboard,
     _build_report_chat_keyboard,
     _build_slim_main_reply_keyboard,
+    _send_monitors_summary,
     cmd_delpoint,
     cmd_unmonitor,
 )
@@ -165,9 +166,11 @@ class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
             self.text = text
             self.from_user = SimpleNamespace(id=17)
             self.answers: list[str] = []
+            self.reply_markups: list[object] = []
 
-        async def answer(self, text: str, **_: object) -> None:
+        async def answer(self, text: str, **kwargs: object) -> None:
             self.answers.append(text)
+            self.reply_markups.append(kwargs.get("reply_markup"))
 
     async def test_unmonitor_without_id_points_to_free_text_disable(self):
         message = self.DummyMessage("/unmonitor")
@@ -200,6 +203,38 @@ class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(message.answers, ["Не удалось отключить мониторинг. Попробуйте отключить его обычным текстом."])
         self.assertNotIn("Page.evaluate", message.answers[0])
+
+    async def test_monitors_summary_has_only_home_action_when_empty(self):
+        message = self.DummyMessage("покажи мониторинги")
+
+        with patch("bot.data_agent_handlers.data_agent_client.list_monitors", AsyncMock(return_value=[])):
+            await _send_monitors_summary(message)
+
+        self.assertEqual(_flatten_inline_texts(message.reply_markups[-1]), ["↩️ В меню агента"])
+        self.assertNotIn("➕ Подключить систему", _flatten_inline_texts(message.reply_markups[-1]))
+
+    async def test_monitors_summary_has_only_home_action_when_present(self):
+        message = self.DummyMessage("покажи мониторинги")
+        monitor = {
+            "monitor_type": "blanks",
+            "point_name": "Сухой Лог, Белинского 40",
+            "interval_label": "каждые 3 часа",
+            "window_label": "с 10:00 до 22:00 по Екатеринбургу",
+            "status_label": "красных зон нет",
+            "last_checked_label": "сегодня в 22:00",
+            "next_check_label": "завтра в 10:00",
+            "last_event_title": "Последнее уведомление",
+            "last_event_label": "пока не было",
+            "behavior_label": "сразу сообщу, если появится красная зона",
+        }
+
+        with patch("bot.data_agent_handlers.data_agent_client.list_monitors", AsyncMock(return_value=[monitor])):
+            await _send_monitors_summary(message)
+
+        self.assertIn("Активные мониторинги", message.answers[-1])
+        self.assertIn("Сухой Лог, Белинского 40", message.answers[-1])
+        self.assertEqual(_flatten_inline_texts(message.reply_markups[-1]), ["↩️ В меню агента"])
+        self.assertNotIn("💬 Чаты отчётов", _flatten_inline_texts(message.reply_markups[-1]))
 
 
 if __name__ == "__main__":

@@ -980,7 +980,7 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
         await message.answer(
             "\U0001f4e1 <b>\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u043c\u043e\u043d\u0438\u0442\u043e\u0440\u0438\u043d\u0433\u043e\u0432 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442</b>\n\n"
             "\u041f\u0440\u0438\u043c\u0435\u0440: <code>\u043f\u0440\u0438\u0441\u044b\u043b\u0430\u0439 \u043c\u043d\u0435 \u0431\u043b\u0430\u043d\u043a\u0438 \u043f\u043e \u0421\u0443\u0445\u043e\u0439 \u041b\u043e\u0433 \u0411\u0435\u043b\u0438\u043d\u0441\u043a\u043e\u0433\u043e 40 \u043a\u0430\u0436\u0434\u044b\u0435 3 \u0447\u0430\u0441\u0430</code>",
-            reply_markup=_build_agent_settings_menu_keyboard(),
+            reply_markup=AGENT_HOME_KEYBOARD,
             parse_mode="HTML",
         )
         return
@@ -1023,7 +1023,7 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
             "\u041e\u0442\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u043c\u043e\u0436\u043d\u043e \u0442\u0435\u043a\u0441\u0442\u043e\u043c: <code>\u043d\u0435 \u043f\u0440\u0438\u0441\u044b\u043b\u0430\u0439 \u0431\u043b\u0430\u043d\u043a\u0438 \u043f\u043e \u0421\u0443\u0445\u043e\u0439 \u041b\u043e\u0433 \u0411\u0435\u043b\u0438\u043d\u0441\u043a\u043e\u0433\u043e 40</code>",
         ]
     )
-    await message.answer("\n".join(lines), reply_markup=_build_agent_settings_menu_keyboard(), parse_mode="HTML")
+    await message.answer("\n".join(lines), reply_markup=AGENT_HOME_KEYBOARD, parse_mode="HTML")
 
 
 async def _send_points_summary(message: Message, *, telegram_user_id: int | None = None) -> None:
