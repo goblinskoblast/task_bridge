@@ -444,9 +444,6 @@ class DataAgentService:
             return None
 
         for item in events:
-            if item.sent_to_telegram and (item.severity or "").lower() != "error":
-                return item
-        for item in events:
             if (item.severity or "").lower() != "error":
                 return item
         return None
