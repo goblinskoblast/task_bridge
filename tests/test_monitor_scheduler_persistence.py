@@ -14,7 +14,7 @@ os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 
-from db.models import Base, DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentSystem, User
+from db.models import Base, DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentProfile, DataAgentSystem, User
 from data_agent import monitor_scheduler
 
 
@@ -23,6 +23,19 @@ class _DummyBot:
         self.messages: list[dict] = []
 
     async def send_message(self, **kwargs) -> None:
+        self.messages.append(kwargs)
+
+
+class _FailFirstBot:
+    def __init__(self, failing_chat_id: int) -> None:
+        self.failing_chat_id = failing_chat_id
+        self.attempts: list[dict] = []
+        self.messages: list[dict] = []
+
+    async def send_message(self, **kwargs) -> None:
+        self.attempts.append(kwargs)
+        if kwargs.get("chat_id") == self.failing_chat_id:
+            raise RuntimeError("primary chat unavailable")
         self.messages.append(kwargs)
 
 
@@ -119,6 +132,56 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertEqual(events[0].severity, "critical")
         self.assertTrue(events[0].sent_to_telegram)
         self.assertEqual(len(bot.messages), 1)
+        self.assertIsNone(bot.messages[0].get("parse_mode"))
+        self.assertNotIn("<b>", bot.messages[0].get("text", ""))
+
+    def test_run_blanks_monitor_falls_back_to_direct_chat_when_delivery_chat_fails(self):
+        primary_chat_id = -100777001
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 555001).first()
+            session.add(
+                DataAgentProfile(
+                    user_id=user.id,
+                    blanks_report_chat_id=primary_chat_id,
+                    blanks_report_chat_title="Blanks room",
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        bot = _FailFirstBot(failing_chat_id=primary_chat_id)
+        result = {
+            "status": "ok",
+            "report_text": "red <unsafe> & still must be delivered",
+            "has_red_flags": True,
+            "alert_hash": "hash-fallback",
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                asyncio.run(monitor_scheduler._run_blanks_monitor(bot, self.detached_config))
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == self.config_id).first()
+            events = session.query(DataAgentMonitorEvent).filter(DataAgentMonitorEvent.config_id == self.config_id).all()
+        finally:
+            session.close()
+
+        self.assertEqual([item.get("chat_id") for item in bot.attempts], [primary_chat_id, 555001])
+        self.assertEqual(len(bot.messages), 1)
+        self.assertIsNone(bot.messages[0].get("parse_mode"))
+        self.assertIn("red <unsafe> & still must be delivered", bot.messages[0].get("text", ""))
+        self.assertIsNotNone(config)
+        self.assertEqual(config.last_alert_hash, "hash-fallback")
+        self.assertEqual(len(events), 1)
+        self.assertTrue(events[0].sent_to_telegram)
 
     def test_run_blanks_monitor_resets_alert_hash_when_red_flags_are_gone(self):
         session = self.SessionLocal()

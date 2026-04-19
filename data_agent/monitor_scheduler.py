@@ -72,6 +72,36 @@ def _resolve_monitor_delivery_chat_id(db, user: User | None, category: str | Non
     return None
 
 
+def _resolve_direct_user_chat_id(user: User | None) -> int | None:
+    if user and user.telegram_id and user.telegram_id != -1:
+        return int(user.telegram_id)
+    return None
+
+
+async def _send_with_direct_fallback(
+    bot: Bot,
+    *,
+    primary_chat_id: int,
+    fallback_chat_id: int | None,
+    text: str,
+    parse_mode: str | None = None,
+) -> int:
+    try:
+        await bot.send_message(chat_id=primary_chat_id, text=text, parse_mode=parse_mode)
+        return primary_chat_id
+    except Exception as exc:
+        if not fallback_chat_id or fallback_chat_id == primary_chat_id:
+            raise
+        logger.warning(
+            "Monitor delivery failed, retrying direct fallback primary_chat_id=%s fallback_chat_id=%s error=%s",
+            primary_chat_id,
+            fallback_chat_id,
+            exc,
+        )
+        await bot.send_message(chat_id=fallback_chat_id, text=text, parse_mode=parse_mode)
+        return fallback_chat_id
+
+
 def _build_monitor_failure_hash(config: DataAgentMonitorConfig, result: dict) -> str:
     payload = {
         "monitor_type": config.monitor_type,
@@ -317,21 +347,23 @@ async def _run_blanks_monitor(
             user = db.query(User).filter(User.id == config.user_id).first()
             delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "blanks")
             if notify_user and delivery_chat_id:
-                await bot.send_message(
-                    chat_id=delivery_chat_id,
+                delivered_chat_id = await _send_with_direct_fallback(
+                    bot,
+                    primary_chat_id=delivery_chat_id,
+                    fallback_chat_id=_resolve_direct_user_chat_id(user),
                     text=(
-                        f"Обнаружены красные бланки\n\n"
-                        f"<b>Точка:</b> {config.point_name}\n"
-                        f"<b>Статус:</b> найдены красные бланки\n\n"
+                        "Обнаружены красные бланки\n\n"
+                        f"Точка: {config.point_name}\n"
+                        "Статус: найдены красные бланки\n\n"
                         f"{red_summary[:3500]}"
                     ),
-                    parse_mode="HTML",
+                    parse_mode=None,
                 )
                 logger.info(
                     "Blanks monitor alert sent user_id=%s point=%s chat_id=%s alert_hash=%s",
                     config.user_id,
                     config.point_name,
-                    delivery_chat_id,
+                    delivered_chat_id,
                     alert_hash,
                 )
                 event.sent_to_telegram = True
