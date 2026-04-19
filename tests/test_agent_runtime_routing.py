@@ -168,6 +168,18 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
         self.assertEqual(decision.slots.get("monitor_action"), "list")
         self.assertEqual(decision.missing_slots, [])
 
+    def test_rule_based_decision_understands_short_show_monitors_phrase(self):
+        decision = self.runtime._rule_based_decision(
+            "покажи мониторинги",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "monitor_management")
+        self.assertEqual(decision.selected_tools, ["orchestrator"])
+        self.assertEqual(decision.slots.get("monitor_action"), "list")
+        self.assertEqual(decision.missing_slots, [])
+
     def test_rule_based_decision_understands_what_is_enabled_as_monitor_list(self):
         decision = self.runtime._rule_based_decision(
             "Что у меня включено?",
@@ -244,6 +256,18 @@ class AgentRuntimePeriodHintTest(unittest.TestCase):
             AgentSessionSnapshot(user_id=1),
             1,
         )
+        self.assertEqual(decision.slots.get("period_hint"), "за последние 3 часа")
+
+    def test_rule_based_blanks_for_all_saved_points_defaults_to_three_hours(self):
+        runtime = DataAgentRuntime()
+        decision = runtime._rule_based_decision(
+            "покажи бланки по всем добавленным точкам",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "blanks_report")
+        self.assertTrue(decision.slots.get("all_points"))
         self.assertEqual(decision.slots.get("period_hint"), "за последние 3 часа")
 
     def test_extract_period_hint_supports_six_hours(self):
