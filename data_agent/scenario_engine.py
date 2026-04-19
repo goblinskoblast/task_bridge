@@ -272,6 +272,43 @@ def _result_text_or_fallback(result: dict, *, failure_text: str) -> str:
     return failure_text
 
 
+def _blanks_result_text_or_fallback(result: dict, *, failure_text: str) -> str:
+    status = str(result.get("status") or "").lower()
+    if status not in {"ok", "completed"}:
+        return failure_text
+
+    text = str(result.get("report_text") or "").strip()
+    if text:
+        return text
+    if result.get("has_red_flags"):
+        return "Есть красные бланки. Детали сейчас не удалось получить полностью, проверьте точку в Italian Pizza."
+    return "Красных бланков не видно."
+
+
+def _build_saved_points_blanks_text(
+    *,
+    period_hint: str,
+    sections: list[str],
+    checked_count: int,
+    failed_points: list[str],
+    red_points: list[str],
+    total_count: int,
+) -> str:
+    header = [
+        "Бланки по сохранённым точкам",
+        f"Период: {period_hint}",
+        f"Проверено: {checked_count} из {total_count}",
+        f"Красные зоны: {len(red_points)}" if red_points else "Красные зоны: нет",
+    ]
+    if red_points:
+        header.append("С красными бланками: " + "; ".join(red_points))
+    if failed_points:
+        header.append("Не удалось проверить: " + "; ".join(failed_points))
+
+    body = "\n\n".join(sections).strip()
+    return "\n".join(header).strip() + ("\n\n" + body if body else "")
+
+
 async def _run_saved_points_stoplist_report(*, user_id: int) -> dict:
     db = get_db_session()
     try:
@@ -318,8 +355,9 @@ async def _run_saved_points_blanks_report(*, user_id: int, period_hint: str) -> 
             }
 
         sections: list[str] = []
-        has_ok_results = False
-        has_red_flags = False
+        checked_count = 0
+        failed_points: list[str] = []
+        red_points: list[str] = []
         for point in points:
             system = _find_italian_pizza_system(db, user_id, point_name=point.display_name)
             if not system:
@@ -334,18 +372,32 @@ async def _run_saved_points_blanks_report(*, user_id: int, period_hint: str) -> 
                     point_name=point.display_name,
                     period_hint=period_hint,
                 )
-            if str(result.get("status") or "").lower() in {"ok", "completed"}:
-                has_ok_results = True
+            is_ok_result = str(result.get("status") or "").lower() in {"ok", "completed"}
+            if is_ok_result:
+                checked_count += 1
+            else:
+                failed_points.append(point.display_name)
             if result.get("has_red_flags"):
-                has_red_flags = True
-            text = _result_text_or_fallback(result, failure_text="Не удалось получить отчёт по этой точке.")
+                red_points.append(point.display_name)
+            text = _blanks_result_text_or_fallback(result, failure_text="Не удалось проверить эту точку. Попробуйте позже.")
             sections.append(f"{point.display_name}\n{text}")
 
-        final_text = "\n\n".join(sections).strip()
+        final_text = _build_saved_points_blanks_text(
+            period_hint=period_hint,
+            sections=sections,
+            checked_count=checked_count,
+            failed_points=failed_points,
+            red_points=red_points,
+            total_count=len(points),
+        )
         return {
-            "status": "ok" if has_ok_results else "failed",
+            "status": "ok" if checked_count else "failed",
             "report_text": final_text or "Не удалось получить общий отчёт по точкам.",
-            "has_red_flags": has_red_flags,
+            "has_red_flags": bool(red_points),
+            "checked_points": checked_count,
+            "failed_points": failed_points,
+            "red_points": red_points,
+            "total_points": len(points),
         }
     finally:
         db.close()
