@@ -40,6 +40,29 @@ class AgentVisibilityTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+    async def test_completed_report_response_strips_reason_and_stage_lines(self):
+        message = _DummyMessage()
+        result = {
+            "status": "completed",
+            "scenario": "general",
+            "answer": (
+                "Отчёт готов.\n"
+                "Этап: period_selection\n"
+                "Подробности собраны. Причина: внутренний комментарий"
+            ),
+        }
+
+        with patch("bot.data_agent_handlers.data_agent_client.chat", AsyncMock(return_value=result)):
+            await _send_agent_request(message, "покажи отчет")
+
+        self.assertEqual(
+            message.answers,
+            [
+                "⏳ Принял запрос. Обрабатываю.",
+                "Отчёт готов.\nПодробности собраны.",
+            ],
+        )
+
     async def test_completed_report_response_is_duplicated_to_selected_chat(self):
         message = _DummyMessage()
         result = {

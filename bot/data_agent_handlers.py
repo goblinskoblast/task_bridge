@@ -291,19 +291,17 @@ def _sanitize_user_facing_answer(answer: str) -> str:
     if not text:
         return ""
 
+    hidden_prefixes = ("причина:", "причины:", "этап:", "этапы:")
     cleaned_lines: list[str] = []
     for raw_line in text.splitlines():
         stripped = raw_line.strip()
         lowered = stripped.lower()
-        if lowered.startswith("причина:") or lowered.startswith("причины:"):
+        if lowered.startswith(hidden_prefixes):
             continue
         if any(marker in lowered for marker in _INTERNAL_ERROR_MARKERS):
             continue
 
-        if " Причина:" in raw_line:
-            raw_line = raw_line.split(" Причина:", 1)[0].rstrip()
-        if " Причины:" in raw_line:
-            raw_line = raw_line.split(" Причины:", 1)[0].rstrip()
+        raw_line = re.split(r"\s+(?:Причина|Причины|Этап|Этапы):", raw_line, maxsplit=1, flags=re.IGNORECASE)[0].rstrip()
 
         if raw_line.strip():
             cleaned_lines.append(raw_line)

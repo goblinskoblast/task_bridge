@@ -41,6 +41,22 @@ class UserFacingSafetyTest(unittest.TestCase):
             "Не удалось получить отчет по стоп-листу. Попробуйте позже.",
         )
 
+    def test_failed_stoplist_hides_internal_stage_line(self):
+        result = {
+            "status": "failed",
+            "scenario": "stoplist_report",
+            "answer": (
+                "Стоп-лист не получен\n"
+                "Этап: login_submit\n"
+                "Причина: Не удалось подтвердить выбор точки."
+            ),
+        }
+
+        self.assertEqual(
+            _build_user_safe_agent_answer(result),
+            "Не удалось получить отчет по стоп-листу. Попробуйте позже.",
+        )
+
     def test_orchestrator_failed_stoplist_ignores_tool_message(self):
         answer = orchestrator._fallback_answer(
             {
