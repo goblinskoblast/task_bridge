@@ -233,6 +233,7 @@ class DataAgentService:
                         status_label=description["status_label"],
                         last_checked_label=description["last_checked_label"],
                         next_check_label=description["next_check_label"],
+                        last_event_title=description["last_event_title"],
                         last_event_label=description["last_event_label"],
                         delivery_label=description["delivery_label"],
                         behavior_label=description["behavior_label"],
@@ -314,7 +315,7 @@ class DataAgentService:
             f"  Следующая проверка: {description['next_check_label']}",
         ]
         if description["last_event_label"]:
-            lines.append(f"  Последнее уведомление: {description['last_event_label']}")
+            lines.append(f"  {description['last_event_title']}: {description['last_event_label']}")
         if description["delivery_label"]:
             lines.append(f"  Отправка: {description['delivery_label']}")
         return "\n".join(lines)
@@ -350,7 +351,7 @@ class DataAgentService:
             active_to_hour=item.active_to_hour,
             last_checked_at=item.last_checked_at,
         )
-        last_event_label = self._format_monitor_event_label(item, latest_event)
+        last_event_meta = self._describe_monitor_event(item, latest_event)
         return {
             "monitor_label": monitor_label,
             "interval_label": interval_label,
@@ -359,7 +360,8 @@ class DataAgentService:
             "behavior_label": behavior_label,
             "last_checked_label": last_checked_label,
             "next_check_label": next_check_label,
-            "last_event_label": last_event_label,
+            "last_event_title": last_event_meta["title"],
+            "last_event_label": last_event_meta["label"],
             "delivery_label": delivery_label,
             "has_active_alert": has_active_alert,
         }
@@ -449,20 +451,25 @@ class DataAgentService:
                 return item
         return None
 
-    def _format_monitor_event_label(
+    def _describe_monitor_event(
         self,
         item: DataAgentMonitorConfig,
         latest_event: DataAgentMonitorEvent | None,
-    ) -> str | None:
+    ) -> dict[str, str]:
         if latest_event is None:
-            return "пока не было"
+            return {"title": "Последнее уведомление", "label": "пока не было"}
 
         event_time = format_monitor_moment(latest_event.created_at)
+        sent_to_telegram = bool(latest_event.sent_to_telegram)
+        title = "Последнее уведомление" if sent_to_telegram else "Последнее событие"
         if item.monitor_type == "blanks":
-            return f"{event_time}, была красная зона"
+            label = f"{event_time}, {'была красная зона' if sent_to_telegram else 'зафиксирована красная зона'}"
+            return {"title": title, "label": label}
         if item.monitor_type in {"stoplist", "reviews"}:
-            return f"{event_time}, отчёт был отправлен"
-        return f"{event_time}, было уведомление"
+            label = f"{event_time}, {'отчёт был отправлен' if sent_to_telegram else 'отчёт сформирован'}"
+            return {"title": title, "label": label}
+        label = f"{event_time}, {'было уведомление' if sent_to_telegram else 'событие зафиксировано'}"
+        return {"title": title, "label": label}
 
     def _resolve_monitor_delivery_label(self, profile: DataAgentProfile | None, monitor_type: str) -> str | None:
         if profile is None:

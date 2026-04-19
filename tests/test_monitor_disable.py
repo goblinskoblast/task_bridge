@@ -269,6 +269,63 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(monitors[0].next_check_label, "\u0441\u0435\u0433\u043e\u0434\u043d\u044f \u0432 22:00")
 
+    def test_monitor_summaries_distinguish_unsent_stoplist_event_from_notification(self):
+        stoplist_point = "Сухой Лог, Белинского 40 stoplist"
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 137236883).first()
+            config = DataAgentMonitorConfig(
+                user_id=user.id,
+                system_name="italian_pizza",
+                monitor_type="stoplist",
+                point_name=stoplist_point,
+                check_interval_minutes=180,
+                is_active=True,
+                active_from_hour=8,
+                active_to_hour=20,
+                last_status="ok",
+                last_checked_at=datetime(2026, 4, 15, 13, 10, 4),
+                last_result_json={"report_text": "stoplist", "status": "ok"},
+            )
+            session.add(config)
+            session.flush()
+            session.add(
+                DataAgentMonitorEvent(
+                    user_id=user.id,
+                    config_id=config.id,
+                    system_name="italian_pizza",
+                    monitor_type="stoplist",
+                    point_name=stoplist_point,
+                    severity="info",
+                    title="Стоп-лист по расписанию",
+                    body="report",
+                    event_hash="stoplist-1",
+                    sent_to_telegram=False,
+                    created_at=datetime(2026, 4, 14, 8, 2, 32),
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        def _format_moment(value):
+            if value == datetime(2026, 4, 15, 13, 10, 4):
+                return "сегодня в 18:10"
+            if value == datetime(2026, 4, 14, 8, 2, 32):
+                return "14.04 в 13:02"
+            return "пока не было"
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch("data_agent.service.format_monitor_moment", side_effect=_format_moment):
+                with patch("data_agent.service.format_monitor_next_check", return_value="сегодня в 22:00"):
+                    answer = self.service._build_monitors_summary(137236883)
+                    monitors = self.service.list_monitors(137236883)
+
+        stoplist_monitor = next(item for item in monitors if item.monitor_type == "stoplist")
+        self.assertIn("Последнее событие: 14.04 в 13:02, отчёт сформирован", answer)
+        self.assertEqual(stoplist_monitor.last_event_title, "Последнее событие")
+        self.assertEqual(stoplist_monitor.last_event_label, "14.04 в 13:02, отчёт сформирован")
+
     async def test_chat_short_circuits_monitor_list_without_running_scenario_engine(self):
         decision = AgentDecision(
             scenario="monitor_management",
