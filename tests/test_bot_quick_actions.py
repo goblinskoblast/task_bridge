@@ -42,6 +42,15 @@ class BotQuickActionsTest(unittest.TestCase):
         self.assertNotIn("Текущий профиль", AGENT_WELCOME)
         self.assertNotIn("статистика", AGENT_WELCOME.lower())
 
+    def test_agent_welcome_prefers_free_text_instead_of_buttons(self):
+        self.assertIn("просто пишете запрос", AGENT_WELCOME)
+        self.assertNotIn("кнопкой", AGENT_WELCOME)
+
+    def test_empty_points_summary_no_longer_pushes_button_only_flow(self):
+        summary = _build_points_summary_text([])
+        self.assertIn("обычным сообщением", summary)
+        self.assertNotIn("в кнопках", summary)
+
 
 if __name__ == "__main__":
     unittest.main()

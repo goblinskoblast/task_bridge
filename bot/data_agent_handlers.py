@@ -43,7 +43,6 @@ QUICK_REPORT_CALLBACK_PREFIX = "agent_quick:"
 POINT_CALLBACK_PREFIX = "agent_point:"
 POINT_REPORT_CALLBACK_PREFIX = "agent_point_report:"
 POINT_DELIVERY_CALLBACK_PREFIX = "agent_point_delivery:"
-REPORTS_MENU_BUTTON_TEXT = "📊 Отчёты"
 SETTINGS_BUTTON_TEXT = "⚙️ Настройки"
 REPORT_CHATS_BUTTON_TEXT = "💬 Чаты отчётов"
 CONNECT_SYSTEM_BUTTON_TEXT = "➕ Подключить систему"
@@ -54,15 +53,8 @@ AGENT_WELCOME = (
     "Путь здесь короткий:\n"
     "• сначала подключаете систему\n"
     "• потом добавляете точки\n"
-    "• дальше выбираете нужный отчёт кнопкой\n\n"
-    "Если удобнее, можно просто написать запрос обычным сообщением."
-)
-AGENT_ENTRY_KEYBOARD = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text=REPORTS_MENU_BUTTON_TEXT, callback_data="agent_menu_reports")],
-        [InlineKeyboardButton(text=POINTS_BUTTON_TEXT, callback_data="agent_show_points")],
-        [InlineKeyboardButton(text=SYSTEMS_BUTTON_TEXT, callback_data="agent_show_systems")],
-    ]
+    "• дальше просто пишете запрос обычным сообщением\n\n"
+    "Например: пришли стоп-лист по Сухой Лог, Белинского 40."
 )
 
 AGENT_HOME_KEYBOARD = InlineKeyboardMarkup(
@@ -73,11 +65,8 @@ AGENT_HOME_KEYBOARD = InlineKeyboardMarkup(
 
 AGENT_REPORTS_MENU_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
-        [InlineKeyboardButton(text="🚫 Стоп-лист", callback_data="agent_quick_stoplist")],
-        [InlineKeyboardButton(text="🧾 Бланки сейчас", callback_data="agent_quick_blanks_current")],
-        [InlineKeyboardButton(text="🕒 Бланки 12 часов", callback_data="agent_quick_blanks_12h")],
-        [InlineKeyboardButton(text="⭐ Отзывы за сутки", callback_data="agent_quick_reviews_day")],
-        [InlineKeyboardButton(text="📈 Отзывы за неделю", callback_data="agent_quick_reviews_week")],
+        [InlineKeyboardButton(text=POINTS_BUTTON_TEXT, callback_data="agent_show_points")],
+        [InlineKeyboardButton(text=MONITORS_MENU_BUTTON_TEXT, callback_data="agent_show_monitors")],
     ]
 )
 
@@ -243,8 +232,8 @@ def _build_agent_entry_keyboard(*, has_system: bool, has_points: bool) -> Inline
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=REPORTS_MENU_BUTTON_TEXT, callback_data="agent_menu_reports")],
             [InlineKeyboardButton(text=POINTS_BUTTON_TEXT, callback_data="agent_show_points")],
+            [InlineKeyboardButton(text=MONITORS_MENU_BUTTON_TEXT, callback_data="agent_show_monitors")],
             [InlineKeyboardButton(text=SETTINGS_BUTTON_TEXT, callback_data="agent_menu_settings")],
         ]
     )
@@ -725,10 +714,6 @@ def _build_point_actions_keyboard(point: SavedPoint) -> InlineKeyboardMarkup:
     delivery_label = "📨 В чат: вкл" if point.report_delivery_enabled else "🔕 В чат: выкл"
     return _with_agent_home(InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚫 Стоп-лист", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}{point_id}:stoplist")],
-            [InlineKeyboardButton(text="🧾 Бланки сейчас", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}{point_id}:blanks_current")],
-            [InlineKeyboardButton(text="🕒 Бланки 12 часов", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}{point_id}:blanks_12h")],
-            [InlineKeyboardButton(text="⭐ Отзывы", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}{point_id}:reviews_day")],
             [
                 InlineKeyboardButton(text=delivery_label, callback_data=f"{POINT_DELIVERY_CALLBACK_PREFIX}{point_id}"),
                 InlineKeyboardButton(text="🗑 Удалить", callback_data=f"{POINT_CALLBACK_PREFIX}delete:{point_id}"),
@@ -741,10 +726,7 @@ def _build_point_actions_keyboard(point: SavedPoint) -> InlineKeyboardMarkup:
 def _build_all_points_actions_keyboard() -> InlineKeyboardMarkup:
     return _with_agent_home(InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚫 Стоп-лист", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}all:stoplist")],
-            [InlineKeyboardButton(text="🧾 Бланки сейчас", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}all:blanks_current")],
-            [InlineKeyboardButton(text="🕒 Бланки 12 часов", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}all:blanks_12h")],
-            [InlineKeyboardButton(text="⭐ Отзывы", callback_data=f"{POINT_REPORT_CALLBACK_PREFIX}all:reviews_day")],
+            [InlineKeyboardButton(text="➕ Добавить точку", callback_data="agent_point_add")],
             [InlineKeyboardButton(text="↩️ К списку точек", callback_data="agent_show_points")],
         ]
     ))
@@ -754,15 +736,19 @@ def _build_points_summary_text(points: list[SavedPoint]) -> str:
     if not points:
         return (
             "📍 <b>Сохранённых точек пока нет</b>\n\n"
-            "Добавьте первую точку, и дальше бот будет предлагать её в кнопках вместо ручного ввода адреса."
+            "Добавьте первую точку, и дальше сможете писать запросы обычным сообщением без ручного ввода адреса каждый раз."
         )
 
     lines = ["📍 <b>Ваши точки</b>", ""]
     for index, point in enumerate(points, start=1):
         delivery_mark = " • в чат" if point.report_delivery_enabled else ""
         lines.append(f"• <b>{index}.</b> {point.display_name}{delivery_mark}")
-    if len(points) > 1:
-        lines.extend(["", "Можно выбрать одну точку или сразу «Все точки»."])
+    lines.extend(
+        [
+            "",
+            "Можно открыть одну точку или сразу «Все точки». Для отчётов и мониторинга быстрее всего писать обычным сообщением.",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -1055,7 +1041,7 @@ async def _send_points_summary(message: Message, *, telegram_user_id: int | None
         if not points:
             await message.answer(
                 "📍 <b>Точки пока не добавлены</b>\n\n"
-                "Система уже подключена. Теперь добавьте первую точку, и дальше будете выбирать её кнопками.",
+                "Система уже подключена. Теперь добавьте первую точку, и дальше можно будет запрашивать стоп-лист, бланки и мониторинги обычным сообщением.",
                 reply_markup=_build_points_overview_keyboard(points),
                 parse_mode="HTML",
             )
@@ -1071,8 +1057,13 @@ async def _send_points_summary(message: Message, *, telegram_user_id: int | None
 
 async def _send_agent_reports_menu(message: Message) -> None:
     await message.answer(
-        "📊 <b>Отчёты</b>\n\n"
-        "Выберите отчёт, потом точку. Если точки уже сохранены, агент сразу покажет их списком.",
+        "💬 <b>Запросы текстом</b>\n\n"
+        "Сейчас удобнее всего просто писать запрос обычным сообщением.\n\n"
+        "Например:\n"
+        "• пришли стоп-лист по Сухой Лог, Белинского 40\n"
+        "• покажи бланки по всем добавленным точкам\n"
+        "• собери отзывы по Верхнему Уфалею за неделю\n"
+        "• покажи мониторинги",
         reply_markup=_build_agent_reports_menu_keyboard(),
         parse_mode="HTML",
     )
@@ -1093,7 +1084,8 @@ async def _send_point_details(message: Message, telegram_user_id: int, point_id:
             "📍 <b>Точка</b>\n\n"
             f"<b>{point.display_name}</b>\n"
             f"Поставщик: {point.provider}\n"
-            f"Отправка отчётов в чат: {'включена' if point.report_delivery_enabled else 'выключена'}",
+            f"Отправка отчётов в чат: {'включена' if point.report_delivery_enabled else 'выключена'}\n\n"
+            f"Эту точку можно использовать в обычном сообщении, например: <code>пришли стоп-лист по {point.display_name}</code>",
             reply_markup=_build_point_actions_keyboard(point),
             parse_mode="HTML",
         )
@@ -1634,8 +1626,8 @@ async def callback_agent_hint_reviews(callback: CallbackQuery) -> None:
     if callback.message:
         await callback.message.answer(
             "Для отчёта по отзывам можно написать, например:\n"
-            "/reviews за неделю\n"
-            "/reviews Екатеринбург, Малышева 5 за сутки"
+            "собери отзывы по Сухой Лог, Белинского 40 за неделю\n"
+            "покажи отзывы по Верхнему Уфалею за сутки"
         )
 
 
@@ -1645,8 +1637,8 @@ async def callback_agent_hint_stoplist(callback: CallbackQuery) -> None:
     if callback.message:
         await callback.message.answer(
             "Для стоп-листа напишите, например:\n"
-            "/stoplist Екатеринбург, Малышева 5\n"
-            "или обычным текстом: пришли стоп-лист по точке Екатеринбург, Малышева 5"
+            "пришли стоп-лист по Сухой Лог, Белинского 40\n"
+            "покажи стоп-лист по Верхнему Уфалею"
         )
 
 
@@ -1656,8 +1648,8 @@ async def callback_agent_hint_blanks(callback: CallbackQuery) -> None:
     if callback.message:
         await callback.message.answer(
             "Для бланков напишите, например:\n"
-            "/blanks Екатеринбург, Малышева 5 текущий бланк\n"
-            "/blanks Екатеринбург, Малышева 5 за 12 часов"
+            "покажи бланки по Сухой Лог, Белинского 40\n"
+            "покажи бланки по всем добавленным точкам за 3 часа"
         )
 
 
@@ -1670,12 +1662,7 @@ async def callback_agent_hint_monitors(callback: CallbackQuery) -> None:
             "присылай бланки по Сухой Лог, Белинского 40 каждые 3 часа\n"
             "присылай бланки по Сухой Лог, Белинского 40 каждые 2 часа с 11 до 21\n"
             "не присылай бланки по Сухой Лог, Белинского 40\n"
-            "покажи мониторинги\n\n"
-            "/monitorblanks Екатеринбург, Малышева 5 каждый час\n"
-            "/monitorstoplist Екатеринбург, Малышева 5 каждые 3 часа\n\n"
-            "/monitorreviews каждый час\n"
-            "Посмотреть активные мониторинги: /monitors\n"
-            "Команда по ID тоже работает: /unmonitor 12"
+            "покажи мониторинги"
         )
 
 
@@ -1722,7 +1709,7 @@ async def handle_new_saved_point(message: Message, state: FSMContext) -> None:
     await message.answer(
         "✅ <b>Точка сохранена</b>\n\n"
         f"{point.display_name}\n"
-        "Теперь её можно выбирать в кнопках отчётов и отдельно настроить отправку отчётов в чат.",
+        "Теперь можно запрашивать по ней стоп-лист, бланки и мониторинг обычным сообщением. Отправку отчётов в чат при необходимости можно включить отдельно.",
         parse_mode="HTML",
     )
     await _send_points_summary(message)
