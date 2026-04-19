@@ -6,7 +6,7 @@ os.environ.setdefault("BOT_TOKEN", "test-bot-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 
-from bot.data_agent_client import DataAgentClient, DataAgentResponseError
+from bot.data_agent_client import DataAgentClient, DataAgentResponseError, GENERIC_AGENT_RETRY_MESSAGE
 
 
 class DataAgentClientTest(unittest.IsolatedAsyncioTestCase):
@@ -35,9 +35,10 @@ class DataAgentClientTest(unittest.IsolatedAsyncioTestCase):
             DataAgentClient._decode_payload("<html>bad gateway</html>", 502, "https://example.com/chat")
 
         self.assertEqual(ctx.exception.status_code, 502)
-        self.assertIn("некорректный ответ", ctx.exception.user_message.lower())
+        self.assertEqual(ctx.exception.user_message, GENERIC_AGENT_RETRY_MESSAGE)
+        self.assertNotIn("некорректный", ctx.exception.user_message.lower())
 
-    def test_build_http_error_maps_503_to_transient_message(self):
+    def test_build_http_error_hides_internal_status_details(self):
         error = DataAgentClient._build_http_error(
             503,
             {"detail": "Service unavailable"},
@@ -46,7 +47,21 @@ class DataAgentClientTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(error.status_code, 503)
-        self.assertIn("временно недоступен", error.user_message.lower())
+        self.assertEqual(error.user_message, GENERIC_AGENT_RETRY_MESSAGE)
+        self.assertNotIn("сервис", error.user_message.lower())
+
+    def test_build_http_error_hides_internal_auth_failure(self):
+        error = DataAgentClient._build_http_error(
+            403,
+            {"detail": "forbidden"},
+            '{"detail":"forbidden"}',
+            "https://example.com/chat",
+        )
+
+        self.assertEqual(error.status_code, 403)
+        self.assertEqual(error.user_message, GENERIC_AGENT_RETRY_MESSAGE)
+        self.assertNotIn("внутрен", error.user_message.lower())
+        self.assertNotIn("railway", error.user_message.lower())
 
 
 if __name__ == "__main__":

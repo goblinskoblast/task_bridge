@@ -12,6 +12,9 @@ from config import DATA_AGENT_CHAT_TIMEOUT, DATA_AGENT_TIMEOUT, DATA_AGENT_URL, 
 logger = logging.getLogger(__name__)
 
 
+GENERIC_AGENT_RETRY_MESSAGE = "Сейчас не удалось обработать запрос. Попробуйте ещё раз чуть позже."
+
+
 class DataAgentClientError(RuntimeError):
     def __init__(self, message: str, *, user_message: str, status_code: int | None = None) -> None:
         super().__init__(message)
@@ -153,12 +156,12 @@ class DataAgentClient:
                     continue
                 raise DataAgentTransportError(
                     f"DataAgent transport error for {url}: {exc}",
-                    user_message="Не удалось связаться с сервисом агента. Попробуйте ещё раз через минуту.",
+                    user_message=GENERIC_AGENT_RETRY_MESSAGE,
                 ) from exc
 
         raise DataAgentTransportError(
             f"DataAgent request retries exhausted for {url}",
-            user_message="Не удалось связаться с сервисом агента. Попробуйте ещё раз через минуту.",
+            user_message=GENERIC_AGENT_RETRY_MESSAGE,
         )
 
     @staticmethod
@@ -172,7 +175,7 @@ class DataAgentClient:
         except json.JSONDecodeError as exc:
             raise DataAgentResponseError(
                 f"DataAgent returned non-JSON response status={status_code} url={url} body={DataAgentClient._summarize_body(normalized)}",
-                user_message="Сервис агента вернул некорректный ответ. Попробуйте ещё раз через минуту.",
+                user_message=GENERIC_AGENT_RETRY_MESSAGE,
                 status_code=status_code,
             ) from exc
 
@@ -182,12 +185,7 @@ class DataAgentClient:
 
     @staticmethod
     def _build_http_error(status_code: int, data: Dict[str, Any], raw_text: str, url: str) -> DataAgentResponseError:
-        if status_code == 403:
-            user_message = "Внутренний доступ к агенту не прошёл. Проверьте связку сервисов на Railway."
-        elif status_code in {502, 503, 504}:
-            user_message = "Сервис агента временно недоступен. Попробуйте ещё раз через минуту."
-        else:
-            user_message = "Агент ответил ошибкой. Попробуйте повторить запрос чуть позже."
+        user_message = GENERIC_AGENT_RETRY_MESSAGE
 
         detail = ""
         if isinstance(data, dict):

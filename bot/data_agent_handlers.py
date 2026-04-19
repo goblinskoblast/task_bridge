@@ -2089,14 +2089,15 @@ async def connect_waiting_for_password(message: Message, state: FSMContext) -> N
                 parse_mode="HTML",
             )
         else:
-            await waiting.edit_text(
-                f"Не удалось подключить систему: {result.get('error', 'неизвестная ошибка')}"
+            logger.warning(
+                "Agent connect rejected user_id=%s error=%s",
+                message.from_user.id,
+                result.get("error"),
             )
+            await waiting.edit_text("Не удалось подключить систему. Проверьте адрес и логин/пароль, затем попробуйте ещё раз.")
     except Exception as exc:
         logger.error("Agent connect error: %s", exc, exc_info=True)
-        await waiting.edit_text(
-            "Не удалось подключиться к сервису агента. Проверьте DATA_AGENT_URL и INTERNAL_API_URL."
-        )
+        await waiting.edit_text("Не удалось проверить подключение. Попробуйте ещё раз чуть позже.")
 
 
 @router.message(
