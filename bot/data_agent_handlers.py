@@ -918,7 +918,7 @@ async def _prompt_quick_report_action(
         lines = [
             f"⚡ <b>{QUICK_REPORT_ACTIONS[action_key]['title']}</b>",
             "",
-            "Выберите сохранённую точку кнопкой ниже.",
+            "Откройте нужную точку ниже. Если удобнее, можно сразу написать запрос обычным сообщением.",
         ]
         if len(saved_points) > 1:
             lines.append("Можно выбрать и «Все точки».")
@@ -1384,7 +1384,7 @@ async def callback_agent_menu_settings(callback: CallbackQuery, state: FSMContex
     await state.clear()
     if callback.message:
         await callback.message.answer(
-            "⚙️ <b>Настройки агента</b>\n\nВыберите, что хотите настроить.",
+            "⚙️ <b>Настройки агента</b>\n\nОткройте нужный раздел.",
             reply_markup=_build_agent_settings_menu_keyboard(),
             parse_mode="HTML",
         )
@@ -1657,10 +1657,12 @@ async def callback_agent_hint_monitors(callback: CallbackQuery) -> None:
     if callback.message:
         await callback.message.answer(
             "Для мониторинга можно написать, например:\n"
+            "присылай стоп-лист по Сухой Лог, Белинского 40\n"
             "присылай бланки по Сухой Лог, Белинского 40 каждые 3 часа\n"
             "присылай бланки по Сухой Лог, Белинского 40 каждые 2 часа с 11 до 21\n"
             "не присылай бланки по Сухой Лог, Белинского 40\n"
-            "покажи мониторинги"
+            "покажи мониторинги\n\n"
+            "Если время не указать, возьму окно 10:00–22:00 по Екатеринбургу."
         )
 
 

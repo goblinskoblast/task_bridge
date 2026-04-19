@@ -132,15 +132,17 @@ class AgentNavigationTest(unittest.TestCase):
 
         self.assertIn("пришли стоп-лист", text)
         self.assertIn("покажи мониторинги", text)
+        self.assertIn("добавить точку там", text)
         self.assertNotIn("/reviews", text)
         self.assertNotIn("/stoplist", text)
         self.assertNotIn("/blanks", text)
         self.assertNotIn("/monitors", text)
+        self.assertNotIn("/addpoint", text)
 
     def test_main_welcome_message_mentions_free_text_point_flow(self):
         text = _build_welcome_message(is_first_auth=False, pending_count=0)
 
-        self.assertIn("/addpoint", text)
+        self.assertIn("открыть агента, сохранить точку", text)
         self.assertIn("обычным сообщением", text)
         self.assertNotIn("быстрых отчётов", text)
 
