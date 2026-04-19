@@ -385,6 +385,37 @@ class BlanksAdapterAsyncHelpersTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.adapter = ItalianPizzaPortalAdapter()
 
+    async def test_trigger_login_submit_uses_enter_after_retry_click(self):
+        button = SimpleNamespace(
+            is_visible=AsyncMock(return_value=True),
+            click=AsyncMock(),
+        )
+        password = SimpleNamespace(
+            is_visible=AsyncMock(return_value=True),
+            press=AsyncMock(),
+        )
+
+        class Locator:
+            def __init__(self, item=None):
+                self.first = item
+
+            async def count(self):
+                return 1 if self.first is not None else 0
+
+        class Page:
+            def locator(self, selector):
+                if selector == "button[type='submit']":
+                    return Locator(button)
+                if selector == "input[type='password']":
+                    return Locator(password)
+                return Locator()
+
+        result = await self.adapter._trigger_login_submit(Page(), use_force=True, use_enter=True)
+
+        self.assertTrue(result)
+        button.click.assert_awaited_once_with(timeout=3500, force=True)
+        password.press.assert_awaited_once_with("Enter")
+
     async def test_submit_login_and_wait_retries_after_staying_on_login_page(self):
         page = object()
         with patch.object(self.adapter, "_trigger_login_submit", AsyncMock(return_value=True)) as mocked_submit:
@@ -491,6 +522,24 @@ class BlanksAdapterAsyncHelpersTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result)
         self.assertEqual(mocked_click.await_count, 2)
         page.wait_for_timeout.assert_awaited_once()
+
+    async def test_wait_for_blank_hour_applied_accepts_matching_slot_without_active_button(self):
+        page = SimpleNamespace(wait_for_timeout=AsyncMock())
+        with patch.object(self.adapter, "_active_blank_hour_value", AsyncMock(return_value=None)):
+            with patch.object(self.adapter, "_first_blank_slot", AsyncMock(return_value="2026-04-19T03:00")):
+                result = await self.adapter._wait_for_blank_hour_applied(page, "3")
+
+        self.assertTrue(result)
+        page.wait_for_timeout.assert_not_awaited()
+
+    async def test_wait_for_blank_hour_applied_accepts_zero_padded_active_hour(self):
+        page = SimpleNamespace(wait_for_timeout=AsyncMock())
+        with patch.object(self.adapter, "_active_blank_hour_value", AsyncMock(return_value="03")):
+            with patch.object(self.adapter, "_first_blank_slot", AsyncMock(return_value=None)):
+                result = await self.adapter._wait_for_blank_hour_applied(page, "3")
+
+        self.assertTrue(result)
+        page.wait_for_timeout.assert_not_awaited()
 
 
 if __name__ == "__main__":

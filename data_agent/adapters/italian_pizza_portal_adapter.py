@@ -941,6 +941,7 @@ class ItalianPizzaPortalAdapter:
         return "login_page", last_text
 
     async def _trigger_login_submit(self, page, *, use_force: bool = False, use_enter: bool = False) -> bool:
+        clicked = False
         for selector in ["button[type='submit']", "button:has-text('Войти')", "button:has-text('Login')"]:
             locator = page.locator(selector)
             if await locator.count() <= 0:
@@ -950,12 +951,15 @@ class ItalianPizzaPortalAdapter:
                 if not await button.is_visible():
                     continue
                 await button.click(timeout=3500, force=use_force)
-                return True
+                clicked = True
+                if not use_enter:
+                    return True
+                break
             except Exception as exc:
                 logger.info("Blanks login submit click failed selector=%s error=%s", selector, exc)
 
         if not use_enter:
-            return False
+            return clicked
 
         for selector in ["input[type='password']", "input[name='password']"]:
             locator = page.locator(selector)
@@ -969,7 +973,7 @@ class ItalianPizzaPortalAdapter:
                 return True
             except Exception as exc:
                 logger.info("Blanks login submit via Enter failed selector=%s error=%s", selector, exc)
-        return False
+        return clicked
 
     async def _submit_login_and_wait(self, page, attempts: int = 3) -> tuple[str, str]:
         last_state = "login_page"
@@ -1184,13 +1188,23 @@ class ItalianPizzaPortalAdapter:
             return None
         return slot.replace("timesection-", "").strip() or None
 
+    def _blank_hour_values_match(self, actual: str | None, expected: str) -> bool:
+        if actual is None:
+            return False
+        try:
+            return int(str(actual).strip()) == int(str(expected).strip())
+        except (TypeError, ValueError):
+            return str(actual).strip() == str(expected).strip()
+
     async def _wait_for_blank_hour_applied(self, page, hour_value: str, timeout_ms: int = 7000) -> bool:
         target_prefix = f"T{int(hour_value):02d}:00"
         deadline = datetime.now().timestamp() + (timeout_ms / 1000)
         while datetime.now().timestamp() < deadline:
             active_value = await self._active_blank_hour_value(page)
             first_slot = await self._first_blank_slot(page)
-            if active_value == hour_value and (not first_slot or target_prefix in first_slot):
+            slot_matches = bool(first_slot and target_prefix in first_slot)
+            active_matches = self._blank_hour_values_match(active_value, hour_value)
+            if slot_matches or (active_matches and not first_slot):
                 return True
             await page.wait_for_timeout(350)
         return False

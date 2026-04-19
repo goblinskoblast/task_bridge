@@ -1751,7 +1751,12 @@ async def cmd_addpoint(message: Message, state: FSMContext) -> None:
 async def cmd_delpoint(message: Message) -> None:
     point_id_raw = _get_command_args(message.text)
     if not point_id_raw.isdigit():
-        await message.answer("Укажите ID точки, например: <code>/delpoint 3</code>", parse_mode="HTML")
+        await message.answer(
+            "Точки теперь удобнее отключать из меню агента.\n"
+            "Откройте <b>Агент → Точки</b>, выберите нужную точку и нажмите «Удалить».",
+            reply_markup=AGENT_HOME_KEYBOARD,
+            parse_mode="HTML",
+        )
         return
     db = get_db_session()
     try:

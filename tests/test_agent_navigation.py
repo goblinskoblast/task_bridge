@@ -16,6 +16,7 @@ from bot.data_agent_handlers import (
     _build_point_actions_keyboard,
     _build_report_chat_keyboard,
     _build_slim_main_reply_keyboard,
+    cmd_delpoint,
     cmd_unmonitor,
 )
 from bot.handlers import _build_help_message, _build_main_reply_keyboard, _build_welcome_message
@@ -177,6 +178,16 @@ class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("обычным текстом", message.answers[0])
         self.assertIn("не присылай бланки", message.answers[0])
         self.assertNotIn("/unmonitor 12", message.answers[0])
+
+    async def test_delpoint_without_id_points_to_point_menu(self):
+        message = self.DummyMessage("/delpoint")
+
+        await cmd_delpoint(message)
+
+        self.assertEqual(len(message.answers), 1)
+        self.assertIn("Агент → Точки", message.answers[0])
+        self.assertIn("Удалить", message.answers[0])
+        self.assertNotIn("/delpoint 3", message.answers[0])
 
     async def test_unmonitor_failure_hides_internal_reason(self):
         message = self.DummyMessage("/unmonitor 12")
