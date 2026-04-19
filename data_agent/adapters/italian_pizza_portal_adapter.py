@@ -1026,11 +1026,47 @@ class ItalianPizzaPortalAdapter:
                 return {**context, "status": "issue", "issue": issue}
             if self._looks_like_login_page(body):
                 return {**context, "status": "login_page"}
-            if self._contains_report_context(body) or (context.get("visible_period_controls") or []):
+            if self._report_context_ready(context):
                 return {**context, "status": "ok"}
             if attempt < total_attempts - 1:
                 await page.wait_for_timeout(delay_ms)
         return {**last_context, "status": "missing_context"}
+
+    def _report_context_ready(self, context: dict) -> bool:
+        body = context.get("body") or ""
+        return self._contains_report_context(body) or bool(context.get("visible_period_controls") or [])
+
+    async def _capture_report_context_snapshot(self, page, *, route_label: str | None = None) -> dict:
+        body = (await page.locator("body").inner_text())[:8000]
+        return {
+            "body": body,
+            "visible_period_controls": await self._visible_period_controls(page),
+            "visible_report_controls": await self._visible_report_controls(page),
+            "route_label": route_label,
+        }
+
+    async def _wait_for_report_context_snapshot(
+        self,
+        page,
+        *,
+        route_label: str | None,
+        attempts: int = 4,
+        delay_ms: int = 500,
+    ) -> dict:
+        last_context = {
+            "body": "",
+            "visible_period_controls": [],
+            "visible_report_controls": [],
+            "route_label": route_label,
+        }
+        total_attempts = max(1, attempts)
+        for attempt in range(total_attempts):
+            last_context = await self._capture_report_context_snapshot(page, route_label=route_label)
+            if self._report_context_ready(last_context):
+                return last_context
+            if attempt < total_attempts - 1:
+                await page.wait_for_timeout(delay_ms)
+        return last_context
 
     def _contains_report_context(self, text: str) -> bool:
         lowered = self._normalize_text(text)
@@ -1787,16 +1823,9 @@ class ItalianPizzaPortalAdapter:
         return [item["text"] for item in controls if item.get("text")]
 
     async def _open_report_context_if_needed(self, page, point_name: str) -> dict:
-        body = (await page.locator("body").inner_text())[:8000]
-        visible_period_controls = await self._visible_period_controls(page)
-        visible_report_controls = await self._visible_report_controls(page)
-        if self._contains_report_context(body) or visible_period_controls:
-            return {
-                "body": body,
-                "visible_period_controls": visible_period_controls,
-                "visible_report_controls": visible_report_controls,
-                "route_label": None,
-            }
+        context = await self._capture_report_context_snapshot(page)
+        if self._report_context_ready(context):
+            return context
 
         route_labels = [
             "Бланк загрузки",
@@ -1814,33 +1843,26 @@ class ItalianPizzaPortalAdapter:
             clicked_text = await self._click_visible_text_candidate(page, [label])
             if not clicked_text:
                 continue
-            await page.wait_for_timeout(1000)
+            await page.wait_for_timeout(700)
             await self._ensure_point_menu_collapsed(page, point_name)
-            body = (await page.locator("body").inner_text())[:8000]
-            visible_period_controls = await self._visible_period_controls(page)
-            visible_report_controls = await self._visible_report_controls(page)
+            context = await self._wait_for_report_context_snapshot(
+                page,
+                route_label=label,
+                attempts=5,
+                delay_ms=450,
+            )
             logger.info(
                 "Blanks report route probe label=%s clicked=%s periods=%s controls=%s excerpt=%s",
                 label,
                 clicked_text,
-                visible_period_controls[:8],
-                visible_report_controls[:8],
-                self._normalize_text(body)[:180],
+                (context.get("visible_period_controls") or [])[:8],
+                (context.get("visible_report_controls") or [])[:8],
+                self._normalize_text(context.get("body") or "")[:180],
             )
-            if self._contains_report_context(body) or visible_period_controls:
-                return {
-                    "body": body,
-                    "visible_period_controls": visible_period_controls,
-                    "visible_report_controls": visible_report_controls,
-                    "route_label": label,
-                }
+            if self._report_context_ready(context):
+                return context
 
-        return {
-            "body": body,
-            "visible_period_controls": visible_period_controls,
-            "visible_report_controls": visible_report_controls,
-            "route_label": None,
-        }
+        return context
 
     async def _click_best_period_candidate(self, page, candidates: list[str]) -> bool:
         wanted = [candidate.lower() for candidate in candidates if candidate]

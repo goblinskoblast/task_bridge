@@ -432,6 +432,53 @@ class BlanksAdapterAsyncHelpersTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mocked_context.await_count, 2)
         page.wait_for_timeout.assert_awaited_once()
 
+    async def test_open_report_context_waits_for_same_route_to_render(self):
+        page = SimpleNamespace(wait_for_timeout=AsyncMock())
+        with patch.object(
+            self.adapter,
+            "_capture_report_context_snapshot",
+            AsyncMock(
+                side_effect=[
+                    {
+                        "body": "Главная\nПрофиль",
+                        "visible_period_controls": [],
+                        "visible_report_controls": [],
+                        "route_label": None,
+                    },
+                    {
+                        "body": "Главная\nЗагрузка...",
+                        "visible_period_controls": [],
+                        "visible_report_controls": ["Бланк загрузки"],
+                        "route_label": "Бланк загрузки",
+                    },
+                    {
+                        "body": "Бланк загрузки\nОтчет по перегрузкам",
+                        "visible_period_controls": ["3", "6"],
+                        "visible_report_controls": ["Бланк загрузки"],
+                        "route_label": "Бланк загрузки",
+                    },
+                ]
+            ),
+        ) as mocked_snapshot:
+            with patch.object(
+                self.adapter,
+                "_click_visible_text_candidate",
+                AsyncMock(return_value="Бланк загрузки"),
+            ) as mocked_click:
+                with patch.object(
+                    self.adapter,
+                    "_ensure_point_menu_collapsed",
+                    AsyncMock(return_value=(True, [])),
+                ) as mocked_collapse:
+                    result = await self.adapter._open_report_context_if_needed(page, "Сухой Лог, Белинского 40")
+
+        self.assertEqual(result["route_label"], "Бланк загрузки")
+        self.assertEqual(result["visible_period_controls"], ["3", "6"])
+        self.assertEqual(mocked_snapshot.await_count, 3)
+        mocked_click.assert_awaited_once()
+        mocked_collapse.assert_awaited_once()
+        self.assertGreaterEqual(page.wait_for_timeout.await_count, 2)
+
     async def test_click_blank_hour_chip_retries_after_transient_failure(self):
         page = SimpleNamespace(wait_for_timeout=AsyncMock())
         with patch.object(
