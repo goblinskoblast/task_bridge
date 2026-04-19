@@ -331,7 +331,7 @@ def _build_main_reply_keyboard(webapp_url: str) -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
         persistent=True,
-        input_field_placeholder="Напишите задачу или выберите действие ниже",
+        input_field_placeholder="Напишите задачу или запрос агенту",
     )
 
 

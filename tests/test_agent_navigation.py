@@ -1,12 +1,14 @@
 import os
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("BOT_TOKEN", "test-bot-token")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 
 from bot.data_agent_handlers import (
+    QUICK_REPORT_PROMPT_KEYBOARD,
     _build_agent_entry_keyboard,
     _build_agent_entry_text,
     _build_agent_reports_menu_keyboard,
@@ -14,6 +16,7 @@ from bot.data_agent_handlers import (
     _build_point_actions_keyboard,
     _build_report_chat_keyboard,
     _build_slim_main_reply_keyboard,
+    cmd_unmonitor,
 )
 from bot.handlers import _build_help_message, _build_main_reply_keyboard, _build_welcome_message
 
@@ -43,6 +46,7 @@ class AgentNavigationTest(unittest.TestCase):
         self.assertIn("🤖 Агент", texts)
         self.assertNotIn("⚡ Быстрые отчёты", texts)
         self.assertNotIn("📡 Мониторы", texts)
+        self.assertEqual(keyboard.input_field_placeholder, "Напишите задачу или запрос агенту")
 
     def test_agent_root_keyboard_for_ready_user_has_only_main_sections(self):
         texts = _flatten_inline_texts(_build_agent_entry_keyboard(has_system=True, has_points=True))
@@ -126,6 +130,13 @@ class AgentNavigationTest(unittest.TestCase):
         self.assertIn("❓ Помощь", texts)
         self.assertNotIn("⚡ Быстрые отчёты", texts)
         self.assertNotIn("📡 Мониторы", texts)
+        self.assertEqual(keyboard.input_field_placeholder, "Напишите задачу или запрос агенту")
+
+    def test_quick_report_prompt_has_single_home_action(self):
+        texts = _flatten_inline_texts(QUICK_REPORT_PROMPT_KEYBOARD)
+
+        self.assertEqual(texts, ["↩️ В меню агента"])
+        self.assertNotIn("❌ Отмена", texts)
 
     def test_help_message_prefers_free_text_over_legacy_report_commands(self):
         text = _build_help_message()
@@ -145,6 +156,39 @@ class AgentNavigationTest(unittest.TestCase):
         self.assertIn("открыть агента, сохранить точку", text)
         self.assertIn("обычным сообщением", text)
         self.assertNotIn("быстрых отчётов", text)
+
+
+class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
+    class DummyMessage:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            self.from_user = SimpleNamespace(id=17)
+            self.answers: list[str] = []
+
+        async def answer(self, text: str, **_: object) -> None:
+            self.answers.append(text)
+
+    async def test_unmonitor_without_id_points_to_free_text_disable(self):
+        message = self.DummyMessage("/unmonitor")
+
+        await cmd_unmonitor(message)
+
+        self.assertEqual(len(message.answers), 1)
+        self.assertIn("обычным текстом", message.answers[0])
+        self.assertIn("не присылай бланки", message.answers[0])
+        self.assertNotIn("/unmonitor 12", message.answers[0])
+
+    async def test_unmonitor_failure_hides_internal_reason(self):
+        message = self.DummyMessage("/unmonitor 12")
+
+        with patch(
+            "bot.data_agent_handlers.data_agent_client.delete_monitor",
+            AsyncMock(return_value={"success": False, "error": "Page.evaluate failed"}),
+        ):
+            await cmd_unmonitor(message)
+
+        self.assertEqual(message.answers, ["Не удалось отключить мониторинг. Попробуйте отключить его обычным текстом."])
+        self.assertNotIn("Page.evaluate", message.answers[0])
 
 
 if __name__ == "__main__":

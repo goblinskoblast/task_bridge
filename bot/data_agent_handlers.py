@@ -111,8 +111,7 @@ QUICK_REPORT_ACTIONS = {
 
 QUICK_REPORT_PROMPT_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
-        [InlineKeyboardButton(text="↩️ Вернуться в меню", callback_data="agent_quick_cancel")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="agent_quick_cancel")],
+        [InlineKeyboardButton(text="↩️ В меню агента", callback_data="agent_quick_cancel")],
     ]
 )
 
@@ -258,7 +257,7 @@ def _build_slim_main_reply_keyboard(webapp_url: str) -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
         persistent=True,
-        input_field_placeholder="Напишите задачу или выберите действие ниже",
+        input_field_placeholder="Напишите задачу или запрос агенту",
     )
 
 
@@ -1086,7 +1085,6 @@ async def _send_point_details(message: Message, telegram_user_id: int, point_id:
         await message.answer(
             "📍 <b>Точка</b>\n\n"
             f"<b>{point.display_name}</b>\n"
-            f"Поставщик: {point.provider}\n"
             f"Отправка отчётов в чат: {'включена' if point.report_delivery_enabled else 'выключена'}\n\n"
             f"Эту точку можно использовать в обычном сообщении, например: <code>пришли стоп-лист по {point.display_name}</code>",
             reply_markup=_build_point_actions_keyboard(point),
@@ -1242,7 +1240,7 @@ async def _send_agent_request(message: Message, text: str, *, send_progress: boo
             exc_info=True,
         )
         await message.answer(
-            "Агент сейчас недоступен. Проверьте отдельный сервис и попробуйте ещё раз.",
+            "Сейчас не удалось обработать запрос. Попробуйте ещё раз чуть позже.",
             reply_markup=AGENT_HOME_KEYBOARD,
         )
         return
@@ -1805,7 +1803,11 @@ async def cmd_monitors(message: Message) -> None:
 async def cmd_unmonitor(message: Message) -> None:
     monitor_id_raw = _get_command_args(message.text)
     if not monitor_id_raw.isdigit():
-        await message.answer("Укажите ID мониторинга, например: <code>/unmonitor 12</code>", parse_mode="HTML")
+        await message.answer(
+            "Мониторинг теперь удобнее отключать обычным текстом.\n"
+            "Например: <code>не присылай бланки по Сухой Лог, Белинского 40</code>",
+            parse_mode="HTML",
+        )
         return
 
     try:
@@ -1819,8 +1821,7 @@ async def cmd_unmonitor(message: Message) -> None:
         await message.answer(f"✅ Мониторинг <b>#{monitor_id_raw}</b> отключён.", parse_mode="HTML")
     else:
         await message.answer(
-            f"Не удалось отключить мониторинг <b>#{monitor_id_raw}</b>: "
-            f"{result.get('error', 'неизвестная ошибка')}",
+            "Не удалось отключить мониторинг. Попробуйте отключить его обычным текстом.",
             parse_mode="HTML",
         )
 
