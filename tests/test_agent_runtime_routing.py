@@ -274,6 +274,20 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
         self.assertEqual(decision.slots.get("monitor_start_hour"), 11)
         self.assertEqual(decision.slots.get("monitor_end_hour"), 21)
 
+    def test_rule_based_decision_routes_generic_monitor_update_by_point(self):
+        decision = self.runtime._rule_based_decision(
+            "Поменяй время мониторинга по Сухой Лог Белинского 40 с 11 до 21.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "monitor_management")
+        self.assertEqual(decision.slots.get("point_name"), "Сухой Лог, Белинского 40")
+        self.assertEqual(decision.slots.get("monitor_action"), "update")
+        self.assertEqual(decision.slots.get("monitor_start_hour"), 11)
+        self.assertEqual(decision.slots.get("monitor_end_hour"), 21)
+        self.assertEqual(decision.missing_slots, [])
+
     def test_rule_based_decision_recognizes_stoplist_slang_and_noisy_point(self):
         decision = self.runtime._rule_based_decision(
             "Дай мне отчёт по стопам верхнего фолия Ленина 147.",

@@ -91,6 +91,25 @@ class DataAgentService:
             f"Уточни, что отключить: например, «не присылай бланки по {point_name}»."
         )
 
+    def _build_monitor_update_clarification(self, *, point_name: str, monitor_types: list[str]) -> str:
+        labels = [self._plain_monitor_type_label(item) for item in monitor_types]
+        if len(labels) == 2:
+            options = " или ".join(labels)
+        else:
+            options = ", ".join(labels)
+        return (
+            f"По точке {point_name} включено несколько мониторингов: {options}. "
+            f"Уточни, что изменить: например, «измени окно бланков по {point_name} с 10 до 22»."
+        )
+
+    def _scenario_for_monitor_type(self, monitor_type: str | None) -> str:
+        scenarios = {
+            "blanks": "blanks_report",
+            "stoplist": "stoplist_report",
+            "reviews": "reviews_report",
+        }
+        return scenarios.get(str(monitor_type or ""), "monitor_management")
+
     def _disable_monitor(
         self,
         *,
@@ -159,6 +178,70 @@ class DataAgentService:
             return "Не удалось отключить мониторинг. Попробуйте позже."
         finally:
             db.close()
+
+    def _update_monitor_settings(
+        self,
+        *,
+        user_id: int,
+        scenario: str,
+        point_name: str,
+        interval_minutes: int | None,
+        interval_source: str | None = None,
+        start_hour: int | None = None,
+        end_hour: int | None = None,
+    ) -> str:
+        monitor_type = scenario_to_monitor_type(scenario)
+        if monitor_type:
+            note = self._upsert_monitor(
+                user_id=user_id,
+                scenario=scenario,
+                point_name=point_name,
+                interval_minutes=interval_minutes,
+                interval_source=interval_source,
+                start_hour=start_hour,
+                end_hour=end_hour,
+            )
+            return note or "Не удалось обновить мониторинг. Попробуйте указать точку одним сообщением."
+
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return f"Активный мониторинг по точке {point_name} сейчас не найден."
+
+            candidates = (
+                db.query(DataAgentMonitorConfig)
+                .filter(
+                    DataAgentMonitorConfig.user_id == user.id,
+                    DataAgentMonitorConfig.point_name == point_name,
+                    DataAgentMonitorConfig.is_active == True,
+                )
+                .order_by(DataAgentMonitorConfig.monitor_type.asc(), DataAgentMonitorConfig.id.asc())
+                .all()
+            )
+            if not candidates:
+                return f"Активный мониторинг по точке {point_name} сейчас не найден."
+
+            monitor_types = sorted({str(item.monitor_type) for item in candidates})
+            if len(monitor_types) > 1:
+                return self._build_monitor_update_clarification(
+                    point_name=point_name,
+                    monitor_types=monitor_types,
+                )
+            resolved_scenario = self._scenario_for_monitor_type(monitor_types[0])
+        finally:
+            db.close()
+
+        note = self._upsert_monitor(
+            user_id=user_id,
+            scenario=resolved_scenario,
+            point_name=point_name,
+            interval_minutes=interval_minutes,
+            interval_source=interval_source,
+            start_hour=start_hour,
+            end_hour=end_hour,
+        )
+        return note or "Не удалось обновить мониторинг. Попробуйте указать тип отчёта и точку одним сообщением."
 
     def health(self) -> dict:
         return {"status": "ok", "service": "data_agent", "mode": "scenario_engine_v2"}
@@ -886,7 +969,7 @@ class DataAgentService:
                 interval_minutes = decision.slots.get("monitor_interval_minutes")
                 if not isinstance(interval_minutes, int) or interval_minutes <= 0:
                     interval_minutes = None
-                monitor_note = self._upsert_monitor(
+                answer = self._update_monitor_settings(
                     user_id=payload.user_id,
                     scenario=decision.scenario,
                     point_name=point_name,
@@ -895,7 +978,6 @@ class DataAgentService:
                     start_hour=decision.slots.get("monitor_start_hour"),
                     end_hour=decision.slots.get("monitor_end_hour"),
                 )
-                answer = monitor_note or "Не удалось обновить мониторинг. Попробуйте указать тип отчёта и точку одним сообщением."
                 debug_payload, debug_summary = build_debug_artifacts(
                     trace_id=trace_id,
                     scenario=decision.scenario,

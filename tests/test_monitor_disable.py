@@ -222,6 +222,97 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Обновил", response.answer)
         self.assertIn("каждые 2 ч.", response.answer)
 
+    async def test_chat_updates_single_monitor_by_point_without_type(self):
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.point_name == self.point_name).first()
+            config.check_interval_minutes = 120
+            session.commit()
+        finally:
+            session.close()
+
+        decision = AgentDecision(
+            scenario="monitor_management",
+            selected_tools=["orchestrator"],
+            slots={
+                "point_name": self.point_name,
+                "monitor_action": "update",
+                "monitor_start_hour": 11,
+                "monitor_end_hour": 21,
+                "source_message": "поменяй время мониторинга",
+            },
+            missing_slots=[],
+            reasoning="test",
+        )
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch("data_agent.agent_runtime.get_db_session", side_effect=self.SessionLocal):
+                with patch("data_agent.service.agent_runtime.decide", AsyncMock(return_value=decision)):
+                    with patch("data_agent.service.scenario_engine.execute", AsyncMock()) as mocked_execute:
+                        response = await self.service.chat(
+                            DataAgentChatRequest(
+                                user_id=137236883,
+                                message="Поменяй время мониторинга по Сухой Лог Белинского 40 с 11 до 21.",
+                            )
+                        )
+
+        session = self.SessionLocal()
+        try:
+            config = (
+                session.query(DataAgentMonitorConfig)
+                .filter(DataAgentMonitorConfig.point_name == self.point_name)
+                .first()
+            )
+        finally:
+            session.close()
+
+        mocked_execute.assert_not_awaited()
+        self.assertTrue(response.ok)
+        self.assertEqual(response.scenario, "monitor_management")
+        self.assertIsNotNone(config)
+        self.assertEqual(config.monitor_type, "blanks")
+        self.assertEqual(config.check_interval_minutes, 120)
+        self.assertEqual(config.active_from_hour, 9)
+        self.assertEqual(config.active_to_hour, 19)
+        self.assertIn("Обновил", response.answer)
+        self.assertIn("бланков", response.answer)
+
+    def test_update_monitor_by_point_asks_type_when_multiple_monitors_are_active(self):
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 137236883).first()
+            session.add(
+                DataAgentMonitorConfig(
+                    user_id=user.id,
+                    system_name="italian_pizza",
+                    monitor_type="stoplist",
+                    point_name=self.point_name,
+                    check_interval_minutes=180,
+                    is_active=True,
+                    active_from_hour=8,
+                    active_to_hour=20,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            answer = self.service._update_monitor_settings(
+                user_id=137236883,
+                scenario="monitor_management",
+                point_name=self.point_name,
+                interval_minutes=None,
+                start_hour=11,
+                end_hour=21,
+            )
+
+        self.assertIn("включено несколько мониторингов", answer)
+        self.assertIn("бланки", answer)
+        self.assertIn("стоп-лист", answer)
+        self.assertIn("измени окно бланков", answer)
+        self.assertNotIn("ID", answer)
+
     def test_disable_monitor_by_point_asks_type_when_multiple_monitors_are_active(self):
         session = self.SessionLocal()
         try:

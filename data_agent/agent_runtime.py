@@ -248,6 +248,9 @@ class DataAgentRuntime:
         elif any(token in lowered for token in ["отзыв", "отзывы", "рейтинг", "2гис", "2gis", "яндекс карты"]):
             scenario = "reviews_report"
             reasoning = "Определен сценарий отзывов"
+        elif monitor_action == "update" and self._looks_like_generic_monitor_update(lowered, message):
+            scenario = "monitor_management"
+            reasoning = "Запрошено изменение настроек мониторинга без ID"
         elif monitor_action == "disable" and self._looks_like_generic_monitor_disable(lowered, message):
             scenario = "monitor_management"
             reasoning = "Запрошено отключение мониторинга без ID"
@@ -454,6 +457,11 @@ class DataAgentRuntime:
             return True
         return resolve_italian_pizza_point(message) is not None
 
+    def _looks_like_generic_monitor_update(self, lowered: str, message: str) -> bool:
+        if any(marker in lowered for marker in MONITOR_SETTINGS_MARKERS):
+            return True
+        return resolve_italian_pizza_point(message) is not None
+
     def _extract_monitor_action(self, lowered: str) -> Optional[str]:
         if self._has_monitor_list_intent(lowered):
             return "list"
@@ -494,7 +502,7 @@ class DataAgentRuntime:
         return any(marker in lowered for marker in markers)
 
     def _required_slots(self, scenario: str, slots: Dict[str, Any] | None = None) -> List[str]:
-        if scenario == "monitor_management" and slots and slots.get("monitor_action") == "disable":
+        if scenario == "monitor_management" and slots and slots.get("monitor_action") in {"disable", "update"}:
             return ["point_name"]
         if scenario in {"stoplist_report", "blanks_report"}:
             return ["point_name"]
