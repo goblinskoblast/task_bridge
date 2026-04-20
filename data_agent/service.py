@@ -443,6 +443,8 @@ class DataAgentService:
                         last_event_label=description["last_event_label"],
                         delivery_label=description["delivery_label"],
                         behavior_label=description["behavior_label"],
+                        status_icon=description["status_icon"],
+                        status_tone=description["status_tone"],
                         has_active_alert=description["has_active_alert"],
                     )
                 )
@@ -477,21 +479,38 @@ class DataAgentService:
 
             profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user.id).first()
             latest_events = self._load_latest_user_facing_events(db, items)
-            lines = ["Активные мониторинги:"]
+            described_items: list[tuple[DataAgentMonitorConfig, dict[str, object]]] = []
             for item in items:
-                lines.append(
-                    self._format_monitor_summary_item(
+                described_items.append(
+                    (
                         item,
-                        latest_event=latest_events.get(item.id),
-                        delivery_label=self._resolve_monitor_delivery_label(profile, item.monitor_type),
+                        self._describe_monitor_item(
+                            item,
+                            latest_event=latest_events.get(item.id),
+                            delivery_label=self._resolve_monitor_delivery_label(profile, item.monitor_type),
+                        ),
                     )
                 )
+
+            active_alert_count = sum(1 for _, description in described_items if bool(description["has_active_alert"]))
+            retry_count = sum(1 for _, description in described_items if description["status_tone"] == "retry")
+            lines = [f"Активные мониторинги: {len(described_items)}"]
+            if active_alert_count:
+                lines.append(f"🔴 Красная зона сейчас: {active_alert_count}")
+            if retry_count:
+                lines.append(f"🟡 Нужна повторная проверка: {retry_count}")
+            lines.append("")
+
+            for index, (item, description) in enumerate(described_items):
+                lines.append(self._format_monitor_summary_item(item, description=description))
+                if index < len(described_items) - 1:
+                    lines.append("")
 
             lines.extend(
                 [
                     "",
-                    "Изменить можно обычным текстом: присылай бланки по Сухой Лог Белинского 40 каждые 3 часа с 10 до 22.",
-                    "Отключить можно так: не присылай бланки по Сухой Лог Белинского 40.",
+                    "Изменить: присылай бланки по Сухой Лог Белинского 40 каждые 3 часа с 10 до 22.",
+                    "Отключить: не присылай бланки по Сухой Лог Белинского 40.",
                 ]
             )
             return "\n".join(lines)
@@ -507,23 +526,28 @@ class DataAgentService:
         *,
         latest_event: DataAgentMonitorEvent | None = None,
         delivery_label: str | None = None,
+        description: dict[str, object] | None = None,
     ) -> str:
-        description = self._describe_monitor_item(item, latest_event=latest_event, delivery_label=delivery_label)
+        description = description or self._describe_monitor_item(
+            item,
+            latest_event=latest_event,
+            delivery_label=delivery_label,
+        )
         details = [description["interval_label"]]
         if description["window_label"]:
             details.append(description["window_label"])
         lines = [
-            f"- {description['monitor_label']}: {item.point_name}",
+            f"{description['status_icon']} {description['monitor_label']} — {item.point_name}",
             f"  {'; '.join(details)}",
             f"  Сейчас: {description['status_label']}",
-            f"  Что придёт: {description['behavior_label']}",
-            f"  Последняя проверка: {description['last_checked_label']}",
-            f"  Следующая проверка: {description['next_check_label']}",
+            f"  Проверка: {description['last_checked_label']}; дальше: {description['next_check_label']}",
         ]
+        if description["behavior_label"]:
+            lines.append(f"  Пришлю: {description['behavior_label']}")
         if description["last_event_label"]:
             lines.append(f"  {description['last_event_title']}: {description['last_event_label']}")
         if description["delivery_label"]:
-            lines.append(f"  Отправка: {description['delivery_label']}")
+            lines.append(f"  Куда: {description['delivery_label']}")
         return "\n".join(lines)
 
     def _describe_monitor_item(
@@ -548,7 +572,8 @@ class DataAgentService:
             )
             window_label = format_monitor_window(start_hour, end_hour)
         has_active_alert = self._monitor_has_active_alert(item)
-        status_label = self._format_monitor_status(item, has_active_alert=has_active_alert)
+        status_meta = self._describe_monitor_status(item, has_active_alert=has_active_alert)
+        status_label = status_meta["label"]
         behavior_label = self._format_monitor_behavior(item)
         last_checked_label = format_monitor_moment(item.last_checked_at)
         next_check_label = format_monitor_next_check(
@@ -563,6 +588,8 @@ class DataAgentService:
             "interval_label": interval_label,
             "window_label": window_label,
             "status_label": status_label,
+            "status_icon": self._monitor_status_icon(status_meta["tone"]),
+            "status_tone": status_meta["tone"],
             "behavior_label": behavior_label,
             "last_checked_label": last_checked_label,
             "next_check_label": next_check_label,
@@ -577,26 +604,45 @@ class DataAgentService:
             return False
         return bool(isinstance(item.last_result_json, dict) and item.last_result_json.get("has_red_flags"))
 
-    def _format_monitor_status(self, item: DataAgentMonitorConfig, *, has_active_alert: bool = False) -> str:
+    def _describe_monitor_status(
+        self,
+        item: DataAgentMonitorConfig,
+        *,
+        has_active_alert: bool = False,
+    ) -> dict[str, str]:
         if has_active_alert:
-            return "есть красная зона"
+            return {"label": "есть красная зона", "tone": "alert"}
 
         normalized = (item.last_status or "").strip().lower()
         if not normalized:
-            return "ещё не было"
+            return {"label": "ещё не было", "tone": "pending"}
         if normalized in {"ok", "completed"}:
             if item.monitor_type == "blanks":
-                return "красных зон нет"
+                return {"label": "красных зон нет", "tone": "ok"}
             if item.monitor_type == "stoplist":
-                return "отчёт получен"
+                return {"label": "отчёт получен", "tone": "ok"}
             if item.monitor_type == "reviews":
-                return "отчёт обновлён"
-            return "прошла"
+                return {"label": "отчёт обновлён", "tone": "ok"}
+            return {"label": "прошла", "tone": "ok"}
         if normalized in _MONITOR_RETRY_STATUSES:
-            return "нужна повторная проверка"
+            return {"label": "нужна повторная проверка", "tone": "retry"}
         if normalized in {"alert", "warning", "changed", "red_alert"}:
-            return "есть уведомление"
-        return "обновлён"
+            return {"label": "есть уведомление", "tone": "notice"}
+        return {"label": "обновлён", "tone": "info"}
+
+    def _format_monitor_status(self, item: DataAgentMonitorConfig, *, has_active_alert: bool = False) -> str:
+        return self._describe_monitor_status(item, has_active_alert=has_active_alert)["label"]
+
+    @staticmethod
+    def _monitor_status_icon(tone: str) -> str:
+        return {
+            "alert": "🔴",
+            "retry": "🟡",
+            "pending": "⚪",
+            "ok": "✅",
+            "notice": "🔔",
+            "info": "ℹ️",
+        }.get(tone, "ℹ️")
 
     def _format_monitor_behavior(self, item: DataAgentMonitorConfig) -> str:
         if item.monitor_type == "blanks":

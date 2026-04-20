@@ -1,6 +1,7 @@
 import logging
 
 import asyncio
+import html
 import re
 
 from aiogram import F, Router
@@ -979,18 +980,26 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
         )
         return
 
-    lines = ["\U0001f4e1 <b>\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435 \u043c\u043e\u043d\u0438\u0442\u043e\u0440\u0438\u043d\u0433\u0438</b>", ""]
+    active_alert_count = sum(1 for item in monitors if item.get("status_tone") == "alert" or item.get("has_active_alert"))
+    retry_count = sum(1 for item in monitors if item.get("status_tone") == "retry")
+    lines = [f"📡 <b>Активные мониторинги: {len(monitors)}</b>"]
+    if active_alert_count:
+        lines.append(f"🔴 Красная зона сейчас: {active_alert_count}")
+    if retry_count:
+        lines.append(f"🟡 Нужна повторная проверка: {retry_count}")
+    lines.append("")
     for item in monitors:
         monitor_label = {
-            "blanks": "\u0431\u043b\u0430\u043d\u043a\u0438",
-            "stoplist": "\u0441\u0442\u043e\u043f-\u043b\u0438\u0441\u0442",
-            "reviews": "\u043e\u0442\u0437\u044b\u0432\u044b",
+            "blanks": "Бланки",
+            "stoplist": "Стоп-лист",
+            "reviews": "Отзывы",
         }.get(item.get("monitor_type"), item.get("monitor_type"))
         interval_label = item.get("interval_label") or f"\u043a\u0430\u0436\u0434\u044b\u0435 {item.get('check_interval_minutes')} \u043c\u0438\u043d."
         details = [str(interval_label)]
         if item.get("window_label"):
             details.append(str(item.get("window_label")))
 
+        status_icon = item.get("status_icon") or ("🔴" if item.get("has_active_alert") else "ℹ️")
         status_label = item.get("status_label") or item.get("last_status") or "\u0435\u0449\u0451 \u043d\u0435 \u0431\u044b\u043b\u043e"
         last_checked_label = item.get("last_checked_label") or "\u0435\u0449\u0451 \u043d\u0435 \u0431\u044b\u043b\u043e"
         next_check_label = item.get("next_check_label") or "\u0432 \u0431\u043b\u0438\u0436\u0430\u0439\u0448\u0438\u0439 \u0446\u0438\u043a\u043b"
@@ -998,23 +1007,25 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
         last_event_label = item.get("last_event_label") or "\u043f\u043e\u043a\u0430 \u043d\u0435 \u0431\u044b\u043b\u043e"
         delivery_label = item.get("delivery_label")
         behavior_label = item.get("behavior_label")
+        point_name = html.escape(str(item.get("point_name") or ""))
 
-        lines.append(f"\u2022 <b>{monitor_label.title()}</b> \u2014 {item.get('point_name')}")
-        lines.append(f"  {'; '.join(details)}")
-        lines.append(f"  \u0441\u0435\u0439\u0447\u0430\u0441: {status_label}")
+        lines.append(f"{status_icon} <b>{html.escape(str(monitor_label))}</b> — {point_name}")
+        lines.append(f"  {html.escape('; '.join(details))}")
+        lines.append(f"  сейчас: {html.escape(str(status_label))}")
+        lines.append(
+            f"  проверка: {html.escape(str(last_checked_label))}; дальше: {html.escape(str(next_check_label))}"
+        )
         if behavior_label:
-            lines.append(f"  \u0447\u0442\u043e \u043f\u0440\u0438\u0434\u0451\u0442: {behavior_label}")
-        lines.append(f"  \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u044f\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430: {last_checked_label}")
-        lines.append(f"  \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0430\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430: {next_check_label}")
-        lines.append(f"  {last_event_title.lower()}: {last_event_label}")
+            lines.append(f"  пришлю: {html.escape(str(behavior_label))}")
+        lines.append(f"  {html.escape(str(last_event_title).lower())}: {html.escape(str(last_event_label))}")
         if delivery_label:
-            lines.append(f"  \u043e\u0442\u043f\u0440\u0430\u0432\u043a\u0430: {delivery_label}")
+            lines.append(f"  куда: {html.escape(str(delivery_label))}")
         lines.append("")
 
     lines.extend(
         [
-            "\u0418\u0437\u043c\u0435\u043d\u0438\u0442\u044c \u043c\u043e\u0436\u043d\u043e \u0442\u0435\u043a\u0441\u0442\u043e\u043c: <code>\u043f\u0440\u0438\u0441\u044b\u043b\u0430\u0439 \u0431\u043b\u0430\u043d\u043a\u0438 \u043f\u043e \u0421\u0443\u0445\u043e\u0439 \u041b\u043e\u0433 \u0411\u0435\u043b\u0438\u043d\u0441\u043a\u043e\u0433\u043e 40 \u043a\u0430\u0436\u0434\u044b\u0435 2 \u0447\u0430\u0441\u0430 \u0441 11 \u0434\u043e 21</code>",
-            "\u041e\u0442\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u043c\u043e\u0436\u043d\u043e \u0442\u0435\u043a\u0441\u0442\u043e\u043c: <code>\u043d\u0435 \u043f\u0440\u0438\u0441\u044b\u043b\u0430\u0439 \u0431\u043b\u0430\u043d\u043a\u0438 \u043f\u043e \u0421\u0443\u0445\u043e\u0439 \u041b\u043e\u0433 \u0411\u0435\u043b\u0438\u043d\u0441\u043a\u043e\u0433\u043e 40</code>",
+            "Изменить: <code>присылай бланки по Сухой Лог Белинского 40 каждые 2 часа с 11 до 21</code>",
+            "Отключить: <code>не присылай бланки по Сухой Лог Белинского 40</code>",
         ]
     )
     await message.answer("\n".join(lines), reply_markup=AGENT_HOME_KEYBOARD, parse_mode="HTML")

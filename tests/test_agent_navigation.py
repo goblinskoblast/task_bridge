@@ -158,8 +158,8 @@ class AgentNavigationTest(unittest.TestCase):
         text = _build_help_message()
 
         self.assertIn("пришли стоп-лист", text)
-        self.assertIn("покажи мониторинги", text)
-        self.assertIn("добавить точку там", text)
+        self.assertIn("что у меня включено", text)
+        self.assertIn("кнопки «📱 Панель задач» и «🤖 Агент»", text)
         self.assertNotIn("/reviews", text)
         self.assertNotIn("/stoplist", text)
         self.assertNotIn("/blanks", text)
@@ -169,6 +169,8 @@ class AgentNavigationTest(unittest.TestCase):
     def test_main_welcome_message_mentions_free_text_point_flow(self):
         text = _build_welcome_message(is_first_auth=False, pending_count=0)
 
+        self.assertIn("нажать «📱 Панель задач»", text)
+        self.assertIn("нажать «🤖 Агент»", text)
         self.assertIn("открыть агента, сохранить точку", text)
         self.assertIn("обычным сообщением", text)
         self.assertNotIn("быстрых отчётов", text)
@@ -319,6 +321,8 @@ class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
             "interval_label": "каждые 3 часа",
             "window_label": "с 10:00 до 22:00 по Екатеринбургу",
             "status_label": "красных зон нет",
+            "status_icon": "✅",
+            "status_tone": "ok",
             "last_checked_label": "сегодня в 22:00",
             "next_check_label": "завтра в 10:00",
             "last_event_title": "Последнее уведомление",
@@ -329,8 +333,10 @@ class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
         with patch("bot.data_agent_handlers.data_agent_client.list_monitors", AsyncMock(return_value=[monitor])):
             await _send_monitors_summary(message)
 
-        self.assertIn("Активные мониторинги", message.answers[-1])
+        self.assertIn("Активные мониторинги: 1", message.answers[-1])
         self.assertIn("Сухой Лог, Белинского 40", message.answers[-1])
+        self.assertIn("✅", message.answers[-1])
+        self.assertIn("пришлю:", message.answers[-1].lower())
         self.assertEqual(_flatten_inline_texts(message.reply_markups[-1]), ["↩️ В меню агента"])
         self.assertNotIn("💬 Чаты отчётов", _flatten_inline_texts(message.reply_markups[-1]))
 
