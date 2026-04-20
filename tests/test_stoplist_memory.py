@@ -79,9 +79,9 @@ class StoplistMemoryTest(unittest.TestCase):
             removed_age_days={"Пепперони": 2},
         )
         self.assertIn("🆕 Новые в стопе: 1", text)
-        self.assertIn("1. Четыре сыра — в стопе 1 день", text)
+        self.assertIn("1. 🟡 Четыре сыра — в стопе 1 день", text)
         self.assertIn("🟠 Уже в стопе: 1", text)
-        self.assertIn("1. Маргарита — в стопе 3 дня", text)
+        self.assertIn("1. 🟡 Маргарита — в стопе 3 дня", text)
         self.assertIn("🟢 Ушли из стопа: 1", text)
         self.assertIn("1. Пепперони — была в стопе 2 дня", text)
 
@@ -113,10 +113,16 @@ class StoplistMemoryTest(unittest.TestCase):
             current_age_days={item: 4 for item in current_items[:20]} | {item: 1 for item in current_items[20:]},
             removed_age_days={item: 2 for item in removed_items},
         )
-        self.assertIn("20. Позиция 20 — в стопе 4 дня", text)
-        self.assertIn("7. Позиция 27 — в стопе 1 день", text)
+        self.assertIn("20. 🔴 Позиция 20 — в стопе 4 дня", text)
+        self.assertIn("7. 🟡 Позиция 27 — в стопе 1 день", text)
         self.assertIn("3. Ушла 3 — была в стопе 2 дня", text)
         self.assertNotIn("… и ещё", text)
+
+    def test_stoplist_age_marker_turns_red_after_three_days(self):
+        self.assertEqual(point_statistics_service._stoplist_age_marker(1), "🟡")
+        self.assertEqual(point_statistics_service._stoplist_age_marker(3), "🟡")
+        self.assertEqual(point_statistics_service._stoplist_age_marker(4), "🔴")
+        self.assertEqual(point_statistics_service._stoplist_age_marker(5, removed=True), "")
 
     def test_render_stoplist_report_without_saved_point(self):
         text = point_statistics_service._render_stoplist_report(

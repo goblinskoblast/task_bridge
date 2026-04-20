@@ -469,6 +469,11 @@ class PointStatisticsService:
             suffix = "дней"
         return f"{value} {suffix}"
 
+    def _stoplist_age_marker(self, days: int | None, *, removed: bool = False) -> str:
+        if removed or not days:
+            return ""
+        return "🟡" if days <= 3 else "🔴"
+
     def _render_stoplist_section(
         self,
         title: str,
@@ -480,8 +485,9 @@ class PointStatisticsService:
         lines = [f"{title}: {len(items)}"]
         age_days = age_days or {}
         for index, item in enumerate(items, start=1):
-            line = f"{index}. {item}"
             days = age_days.get(item)
+            marker = self._stoplist_age_marker(days, removed=removed)
+            line = f"{index}. {marker} {item}" if marker else f"{index}. {item}"
             if days:
                 line += f" — {'была в стопе' if removed else 'в стопе'} {self._format_days_label(days)}"
             lines.append(line)
