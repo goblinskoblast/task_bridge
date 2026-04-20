@@ -36,8 +36,6 @@ router = Router()
 
 PANEL_BUTTON_TEXT = "📱 Панель задач"
 AGENT_MAIN_BUTTON_TEXT = "🤖 Агент"
-QUICK_REPORTS_BUTTON_TEXT = "⚡ Быстрые отчёты"
-MONITORS_BUTTON_TEXT = "📡 Мониторы"
 SUPPORT_BUTTON_TEXT = "💬 Поддержка"
 HELP_BUTTON_TEXT = "❓ Помощь"
 

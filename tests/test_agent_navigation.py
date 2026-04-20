@@ -57,7 +57,7 @@ class AgentNavigationTest(unittest.TestCase):
             texts,
             [
                 "📍 Точки",
-                "📡 Мониторинги",
+                "📡 Что включено",
                 "⚙️ Настройки",
             ],
         )
@@ -84,24 +84,29 @@ class AgentNavigationTest(unittest.TestCase):
         text = _build_agent_entry_text(has_system=True, has_points=False)
         self.assertIn("Теперь добавьте первую точку.", text)
 
+    def test_agent_entry_text_promotes_monitor_free_text_summary(self):
+        text = _build_agent_entry_text(has_system=True, has_points=True)
+        self.assertIn("что у меня включено", text)
+        self.assertIn("присылай бланки", text)
+
     def test_reports_submenu_is_now_navigation_only(self):
         keyboard = _build_agent_reports_menu_keyboard()
         texts = _flatten_inline_texts(keyboard)
 
         self.assertIn("📍 Точки", texts)
-        self.assertIn("📡 Мониторинги", texts)
+        self.assertIn("📡 Что включено", texts)
         self.assertIn("↩️ В меню агента", texts)
         self.assertNotIn("🚫 Стоп-лист", texts)
         self.assertNotIn("🧾 Бланки сейчас", texts)
         self.assertNotIn("⭐ Отзывы за сутки", texts)
 
-    def test_settings_submenu_contains_settings_actions_and_home(self):
+    def test_settings_submenu_contains_only_settings_actions_and_home(self):
         keyboard = _build_agent_settings_menu_keyboard()
         texts = _flatten_inline_texts(keyboard)
 
         self.assertIn("➕ Подключить систему", texts)
         self.assertIn("💬 Чаты отчётов", texts)
-        self.assertIn("📡 Мониторинги", texts)
+        self.assertNotIn("📡 Что включено", texts)
         self.assertIn("↩️ В меню агента", texts)
 
     def test_point_actions_keyboard_keeps_only_point_management_actions(self):
@@ -198,11 +203,15 @@ class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
         with patch(
             "bot.data_agent_handlers.data_agent_client.delete_monitor",
             AsyncMock(return_value={"success": False, "error": "Page.evaluate failed"}),
-        ):
+        ) as mocked_delete:
             await cmd_unmonitor(message)
 
-        self.assertEqual(message.answers, ["Не удалось отключить мониторинг. Попробуйте отключить его обычным текстом."])
+        mocked_delete.assert_not_awaited()
+        self.assertEqual(len(message.answers), 1)
+        self.assertIn("обычным текстом", message.answers[0])
+        self.assertIn("не присылай бланки", message.answers[0])
         self.assertNotIn("Page.evaluate", message.answers[0])
+        self.assertNotIn("#12", message.answers[0])
 
     async def test_monitors_summary_has_only_home_action_when_empty(self):
         message = self.DummyMessage("покажи мониторинги")

@@ -35,7 +35,6 @@ _LONG_AGENT_CHAT_TIMEOUT_SECONDS = max(data_agent_client.chat_timeout_seconds, 3
 AGENT_BUTTON_TEXT = "🤖 Агент"
 QUICK_REPORTS_BUTTON_TEXT = "⚡ Быстрые отчёты"
 MONITORS_BUTTON_TEXT = "📡 Мониторы"
-SYSTEMS_BUTTON_TEXT = "🔌 Системы"
 POINTS_BUTTON_TEXT = "📍 Точки"
 HELP_BUTTON_TEXT = "❓ Помощь"
 REPORT_CHAT_CALLBACK_PREFIX = "agent_report_chat_select:"
@@ -47,7 +46,7 @@ POINT_DELIVERY_CALLBACK_PREFIX = "agent_point_delivery:"
 SETTINGS_BUTTON_TEXT = "⚙️ Настройки"
 REPORT_CHATS_BUTTON_TEXT = "💬 Чаты отчётов"
 CONNECT_SYSTEM_BUTTON_TEXT = "➕ Подключить систему"
-MONITORS_MENU_BUTTON_TEXT = "📡 Мониторинги"
+MONITORS_MENU_BUTTON_TEXT = "📡 Что включено"
 
 AGENT_WELCOME = (
     "🤖 <b>Агент TaskBridge</b>\n\n"
@@ -74,10 +73,7 @@ AGENT_REPORTS_MENU_KEYBOARD = InlineKeyboardMarkup(
 AGENT_SETTINGS_MENU_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text=CONNECT_SYSTEM_BUTTON_TEXT, callback_data="agent_connect_system")],
-        [
-            InlineKeyboardButton(text=REPORT_CHATS_BUTTON_TEXT, callback_data="agent_choose_report_chat"),
-            InlineKeyboardButton(text=MONITORS_MENU_BUTTON_TEXT, callback_data="agent_show_monitors"),
-        ],
+        [InlineKeyboardButton(text=REPORT_CHATS_BUTTON_TEXT, callback_data="agent_choose_report_chat")],
     ]
 )
 
@@ -210,6 +206,7 @@ def _build_agent_entry_text(*, has_system: bool, has_points: bool) -> str:
         "Например:\n"
         "• пришли стоп-лист по Сухой Лог, Белинского 40\n"
         "• покажи бланки по всем добавленным точкам\n"
+        "• что у меня включено\n"
         "• присылай бланки по Сухой Лог, Белинского 40 каждые 3 часа"
     )
 
@@ -1806,29 +1803,12 @@ async def cmd_monitors(message: Message) -> None:
 
 @router.message(Command("unmonitor"))
 async def cmd_unmonitor(message: Message) -> None:
-    monitor_id_raw = _get_command_args(message.text)
-    if not monitor_id_raw.isdigit():
-        await message.answer(
-            "Мониторинг теперь удобнее отключать обычным текстом.\n"
-            "Например: <code>не присылай бланки по Сухой Лог, Белинского 40</code>",
-            parse_mode="HTML",
-        )
-        return
-
-    try:
-        result = await data_agent_client.delete_monitor(message.from_user.id, int(monitor_id_raw))
-    except Exception as exc:
-        logger.error("Agent delete monitor error: %s", exc, exc_info=True)
-        await message.answer("Не удалось отключить мониторинг.")
-        return
-
-    if result.get("success"):
-        await message.answer(f"✅ Мониторинг <b>#{monitor_id_raw}</b> отключён.", parse_mode="HTML")
-    else:
-        await message.answer(
-            "Не удалось отключить мониторинг. Попробуйте отключить его обычным текстом.",
-            parse_mode="HTML",
-        )
+    await message.answer(
+        "Мониторинг теперь отключается обычным текстом.\n"
+        "Например: <code>не присылай бланки по Сухой Лог, Белинского 40</code>\n"
+        "Если по точке включено несколько проверок, уточните: бланки или стоп-лист.",
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("agentdebug"))
