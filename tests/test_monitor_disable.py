@@ -166,6 +166,151 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(config)
         self.assertFalse(config.is_active)
 
+    async def test_chat_disables_all_monitor_types_by_point_when_explicit(self):
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 137236883).first()
+            session.add(
+                DataAgentMonitorConfig(
+                    user_id=user.id,
+                    system_name="italian_pizza",
+                    monitor_type="stoplist",
+                    point_name=self.point_name,
+                    check_interval_minutes=180,
+                    is_active=True,
+                    active_from_hour=8,
+                    active_to_hour=20,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        decision = AgentDecision(
+            scenario="monitor_management",
+            selected_tools=["orchestrator"],
+            slots={
+                "point_name": self.point_name,
+                "monitor_action": "disable",
+                "all_monitor_types": True,
+                "source_message": "выключи все мониторинги",
+            },
+            missing_slots=[],
+            reasoning="test",
+        )
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch("data_agent.agent_runtime.get_db_session", side_effect=self.SessionLocal):
+                with patch("data_agent.service.agent_runtime.decide", AsyncMock(return_value=decision)):
+                    with patch("data_agent.service.scenario_engine.execute", AsyncMock()) as mocked_execute:
+                        response = await self.service.chat(
+                            DataAgentChatRequest(
+                                user_id=137236883,
+                                message="Выключи все мониторинги по Сухой Лог Белинского 40.",
+                            )
+                        )
+
+        session = self.SessionLocal()
+        try:
+            active_count = (
+                session.query(DataAgentMonitorConfig)
+                .filter(
+                    DataAgentMonitorConfig.point_name == self.point_name,
+                    DataAgentMonitorConfig.is_active == True,
+                )
+                .count()
+            )
+        finally:
+            session.close()
+
+        mocked_execute.assert_not_awaited()
+        self.assertTrue(response.ok)
+        self.assertEqual(active_count, 0)
+        self.assertEqual(response.answer, f"Отключил все мониторинги по точке {self.point_name}.")
+
+    async def test_chat_disables_all_blanks_without_point_when_type_scope_is_explicit(self):
+        other_point = "Реж, Ленина 17"
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 137236883).first()
+            session.add(
+                DataAgentMonitorConfig(
+                    user_id=user.id,
+                    system_name="italian_pizza",
+                    monitor_type="blanks",
+                    point_name=other_point,
+                    check_interval_minutes=180,
+                    is_active=True,
+                    active_from_hour=8,
+                    active_to_hour=20,
+                )
+            )
+            session.add(
+                DataAgentMonitorConfig(
+                    user_id=user.id,
+                    system_name="italian_pizza",
+                    monitor_type="stoplist",
+                    point_name=self.point_name,
+                    check_interval_minutes=180,
+                    is_active=True,
+                    active_from_hour=8,
+                    active_to_hour=20,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        decision = AgentDecision(
+            scenario="blanks_report",
+            selected_tools=["blanks_tool"],
+            slots={
+                "monitor_action": "disable",
+                "all_points": True,
+                "source_message": "выключи все бланки",
+            },
+            missing_slots=[],
+            reasoning="test",
+        )
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch("data_agent.agent_runtime.get_db_session", side_effect=self.SessionLocal):
+                with patch("data_agent.service.agent_runtime.decide", AsyncMock(return_value=decision)):
+                    with patch("data_agent.service.scenario_engine.execute", AsyncMock()) as mocked_execute:
+                        response = await self.service.chat(
+                            DataAgentChatRequest(
+                                user_id=137236883,
+                                message="Выключи все бланки.",
+                            )
+                        )
+
+        session = self.SessionLocal()
+        try:
+            active_blanks_count = (
+                session.query(DataAgentMonitorConfig)
+                .filter(
+                    DataAgentMonitorConfig.monitor_type == "blanks",
+                    DataAgentMonitorConfig.is_active == True,
+                )
+                .count()
+            )
+            active_stoplist_count = (
+                session.query(DataAgentMonitorConfig)
+                .filter(
+                    DataAgentMonitorConfig.monitor_type == "stoplist",
+                    DataAgentMonitorConfig.is_active == True,
+                )
+                .count()
+            )
+        finally:
+            session.close()
+
+        mocked_execute.assert_not_awaited()
+        self.assertTrue(response.ok)
+        self.assertEqual(active_blanks_count, 0)
+        self.assertEqual(active_stoplist_count, 1)
+        self.assertEqual(response.answer, "Отключил все мониторинги бланков.")
+
     async def test_chat_updates_monitor_window_without_running_report(self):
         session = self.SessionLocal()
         try:

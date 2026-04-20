@@ -80,6 +80,15 @@ class DataAgentService:
         }
         return labels.get(monitor_type, monitor_type)
 
+    @staticmethod
+    def _plain_monitor_type_genitive_label(monitor_type: str) -> str:
+        labels = {
+            "blanks": "бланков",
+            "stoplist": "стоп-листа",
+            "reviews": "отзывов",
+        }
+        return labels.get(monitor_type, monitor_type)
+
     def _build_monitor_disable_clarification(self, *, point_name: str, monitor_types: list[str]) -> str:
         labels = [self._plain_monitor_type_label(item) for item in monitor_types]
         if len(labels) == 2:
@@ -90,6 +99,28 @@ class DataAgentService:
             f"По точке {point_name} включено несколько мониторингов: {options}. "
             f"Уточни, что отключить: например, «не присылай бланки по {point_name}»."
         )
+
+    def _build_monitor_disabled_many_note(
+        self,
+        *,
+        monitor_type: str | None,
+        count: int,
+        point_name: str | None = None,
+    ) -> str:
+        if count <= 0:
+            if monitor_type:
+                return f"Активные мониторинги {self._plain_monitor_type_label(monitor_type)} сейчас не найдены."
+            if point_name:
+                return f"Активный мониторинг по точке {point_name} сейчас не найден."
+            return "Активные мониторинги сейчас не найдены."
+
+        if point_name and monitor_type:
+            return build_monitor_disabled_note(monitor_type=monitor_type, point_name=point_name)
+        if point_name:
+            return f"Отключил все мониторинги по точке {point_name}."
+        if monitor_type:
+            return f"Отключил все мониторинги {self._plain_monitor_type_genitive_label(monitor_type)}."
+        return "Отключил выбранные мониторинги."
 
     def _build_monitor_update_clarification(self, *, point_name: str, monitor_types: list[str]) -> str:
         labels = [self._plain_monitor_type_label(item) for item in monitor_types]
@@ -115,10 +146,12 @@ class DataAgentService:
         *,
         user_id: int,
         scenario: str,
-        point_name: str,
+        point_name: str | None,
+        all_monitor_types: bool = False,
+        all_points: bool = False,
     ) -> str:
         monitor_type = scenario_to_monitor_type(scenario)
-        if not point_name:
+        if not point_name and not (monitor_type and all_points):
             return "Не хватает точки для отключения мониторинга. Пришли город и адрес пиццерии одним сообщением."
 
         db = get_db_session()
@@ -126,8 +159,32 @@ class DataAgentService:
             user = db.query(User).filter(User.telegram_id == user_id).first()
             if not user:
                 if monitor_type:
-                    return build_monitor_not_found_note(monitor_type=monitor_type, point_name=point_name)
+                    if all_points:
+                        return self._build_monitor_disabled_many_note(monitor_type=monitor_type, count=0)
+                    return build_monitor_not_found_note(monitor_type=monitor_type, point_name=point_name or "")
                 return f"Активный мониторинг по точке {point_name} сейчас не найден."
+
+            if monitor_type and all_points:
+                candidates = (
+                    db.query(DataAgentMonitorConfig)
+                    .filter(
+                        DataAgentMonitorConfig.user_id == user.id,
+                        DataAgentMonitorConfig.monitor_type == monitor_type,
+                        DataAgentMonitorConfig.is_active == True,
+                    )
+                    .order_by(DataAgentMonitorConfig.point_name.asc(), DataAgentMonitorConfig.id.asc())
+                    .all()
+                )
+                if not candidates:
+                    return self._build_monitor_disabled_many_note(monitor_type=monitor_type, count=0)
+
+                for item in candidates:
+                    item.is_active = False
+                db.commit()
+                return self._build_monitor_disabled_many_note(
+                    monitor_type=monitor_type,
+                    count=len(candidates),
+                )
 
             if not monitor_type:
                 candidates = (
@@ -144,17 +201,22 @@ class DataAgentService:
                     return f"Активный мониторинг по точке {point_name} сейчас не найден."
 
                 monitor_types = sorted({str(item.monitor_type) for item in candidates})
-                if len(monitor_types) > 1:
+                if len(monitor_types) > 1 and not all_monitor_types:
                     return self._build_monitor_disable_clarification(
-                        point_name=point_name,
+                        point_name=point_name or "",
                         monitor_types=monitor_types,
                     )
 
-                monitor_type = monitor_types[0]
                 for item in candidates:
                     item.is_active = False
                 db.commit()
-                return build_monitor_disabled_note(monitor_type=monitor_type, point_name=point_name)
+                if len(monitor_types) == 1:
+                    return build_monitor_disabled_note(monitor_type=monitor_types[0], point_name=point_name or "")
+                return self._build_monitor_disabled_many_note(
+                    monitor_type=None,
+                    count=len(candidates),
+                    point_name=point_name,
+                )
 
             item = (
                 db.query(DataAgentMonitorConfig)
@@ -167,11 +229,11 @@ class DataAgentService:
                 .first()
             )
             if not item:
-                return build_monitor_not_found_note(monitor_type=monitor_type, point_name=point_name)
+                return build_monitor_not_found_note(monitor_type=monitor_type, point_name=point_name or "")
 
             item.is_active = False
             db.commit()
-            return build_monitor_disabled_note(monitor_type=monitor_type, point_name=point_name)
+            return build_monitor_disabled_note(monitor_type=monitor_type, point_name=point_name or "")
         except Exception:
             db.rollback()
             logger.exception("Failed to disable monitor")
@@ -933,11 +995,13 @@ class DataAgentService:
                     debug_summary=debug_summary,
                 )
 
-            if monitor_action == "disable" and point_name:
+            if monitor_action == "disable" and (point_name or decision.slots.get("all_points")):
                 answer = self._disable_monitor(
                     user_id=payload.user_id,
                     scenario=decision.scenario,
                     point_name=point_name,
+                    all_monitor_types=bool(decision.slots.get("all_monitor_types")),
+                    all_points=bool(decision.slots.get("all_points")),
                 )
                 debug_payload, debug_summary = build_debug_artifacts(
                     trace_id=trace_id,

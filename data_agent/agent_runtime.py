@@ -78,6 +78,16 @@ MONITOR_SETTINGS_MARKERS = (
     "время",
 )
 
+MONITOR_ALL_TYPE_MARKERS = (
+    "все мониторинги",
+    "все рассылки",
+    "все уведомления",
+    "всё по точке",
+    "все по точке",
+    "ничего не присылай",
+    "вообще ничего",
+)
+
 MONITOR_LIST_MARKERS = (
     "какие мониторинги",
     "какие у меня мониторинги",
@@ -216,7 +226,11 @@ class DataAgentRuntime:
         if merged_slots.get("monitor_interval_minutes") and not merged_slots.get("monitor_interval_source") and session.slots.get("monitor_interval_source"):
             merged_slots["monitor_interval_source"] = session.slots.get("monitor_interval_source")
         required = self._required_slots(base.scenario, merged_slots)
-        if merged_slots.get("all_points") and "point_name" in required:
+        if (
+            merged_slots.get("all_points")
+            and "point_name" in required
+            and not (base.scenario == "monitor_management" and merged_slots.get("all_monitor_types"))
+        ):
             required = [slot for slot in required if slot != "point_name"]
         missing = [slot for slot in required if not merged_slots.get(slot)]
         return AgentDecision(
@@ -273,7 +287,11 @@ class DataAgentRuntime:
         if scenario == "blanks_report" and monitor_action != "disable" and not slots.get("period_hint"):
             slots["period_hint"] = "за последние 3 часа"
         required = self._required_slots(scenario, slots)
-        if slots.get("all_points") and "point_name" in required:
+        if (
+            slots.get("all_points")
+            and "point_name" in required
+            and not (scenario == "monitor_management" and slots.get("all_monitor_types"))
+        ):
             required = [slot for slot in required if slot != "point_name"]
         missing = [slot for slot in required if not slots.get(slot)]
         return AgentDecision(
@@ -335,7 +353,11 @@ class DataAgentRuntime:
             slots["period_hint"] = str(result["period_hint"]).strip()
         slots["source_message"] = message
         required = self._required_slots(scenario, slots)
-        if slots.get("all_points") and "point_name" in required:
+        if (
+            slots.get("all_points")
+            and "point_name" in required
+            and not (scenario == "monitor_management" and slots.get("all_monitor_types"))
+        ):
             required = [slot for slot in required if slot != "point_name"]
         missing = [slot for slot in required if not slots.get(slot)]
         return AgentDecision(
@@ -369,6 +391,10 @@ class DataAgentRuntime:
         monitor_action = self._extract_monitor_action(lowered)
         if monitor_action:
             slots["monitor_action"] = monitor_action
+        if monitor_action == "disable" and self._has_all_monitor_types_request(lowered):
+            slots["all_monitor_types"] = True
+        if monitor_action == "disable" and not slots.get("all_points") and self._has_all_points_monitor_type_request(lowered):
+            slots["all_points"] = True
         if any(marker in lowered for marker in FOLLOWUP_MARKERS) and session.slots.get("point_name") and not slots.get("all_points"):
             slots.setdefault("point_name", session.slots.get("point_name"))
         return slots
@@ -461,6 +487,21 @@ class DataAgentRuntime:
         if any(marker in lowered for marker in MONITOR_SETTINGS_MARKERS):
             return True
         return resolve_italian_pizza_point(message) is not None
+
+    def _has_all_monitor_types_request(self, lowered: str) -> bool:
+        if any(marker in lowered for marker in MONITOR_ALL_TYPE_MARKERS):
+            return True
+        return bool(
+            any(marker in lowered for marker in ("все", "всё", "ничего"))
+            and any(marker in lowered for marker in ("мониторинг", "рассыл", "уведомлен", "присыл"))
+        )
+
+    def _has_all_points_monitor_type_request(self, lowered: str) -> bool:
+        if self._is_all_points_request(lowered):
+            return True
+        if not any(marker in lowered for marker in ("все", "всё", "кажд", "по всем")):
+            return False
+        return any(marker in lowered for marker in ("бланк", "стоп", "отзыв", "мониторинг", "рассыл"))
 
     def _extract_monitor_action(self, lowered: str) -> Optional[str]:
         if self._has_monitor_list_intent(lowered):

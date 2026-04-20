@@ -223,6 +223,43 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
         self.assertEqual(decision.slots.get("monitor_action"), "disable")
         self.assertEqual(decision.missing_slots, [])
 
+    def test_rule_based_decision_routes_disable_all_monitor_types_by_point(self):
+        decision = self.runtime._rule_based_decision(
+            "Выключи все мониторинги по Сухой Лог Белинского 40.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "monitor_management")
+        self.assertEqual(decision.slots.get("point_name"), "Сухой Лог, Белинского 40")
+        self.assertEqual(decision.slots.get("monitor_action"), "disable")
+        self.assertTrue(decision.slots.get("all_monitor_types"))
+        self.assertEqual(decision.missing_slots, [])
+
+    def test_rule_based_decision_routes_disable_all_blanks_without_point(self):
+        decision = self.runtime._rule_based_decision(
+            "Выключи все бланки.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "blanks_report")
+        self.assertEqual(decision.slots.get("monitor_action"), "disable")
+        self.assertTrue(decision.slots.get("all_points"))
+        self.assertEqual(decision.missing_slots, [])
+
+    def test_rule_based_decision_does_not_disable_everything_without_scope(self):
+        decision = self.runtime._rule_based_decision(
+            "Выключи все мониторинги.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "monitor_management")
+        self.assertEqual(decision.slots.get("monitor_action"), "disable")
+        self.assertTrue(decision.slots.get("all_monitor_types"))
+        self.assertIn("point_name", decision.missing_slots)
+
     def test_rule_based_decision_asks_point_for_generic_monitor_disable(self):
         decision = self.runtime._rule_based_decision(
             "Останови мониторинг.",
