@@ -55,6 +55,29 @@ MONITOR_DISABLE_MARKERS = (
     "отмени мониторинг",
 )
 
+MONITOR_UPDATE_MARKERS = (
+    "измени",
+    "поменяй",
+    "обнови",
+    "перенастрой",
+    "настрой",
+    "поставь",
+    "сделай",
+)
+
+MONITOR_SETTINGS_MARKERS = (
+    "мониторинг",
+    "рассыл",
+    "уведомлен",
+    "уведомлени",
+    "присылай",
+    "следи",
+    "окно",
+    "интервал",
+    "расписан",
+    "время",
+)
+
 MONITOR_LIST_MARKERS = (
     "какие мониторинги",
     "какие у меня мониторинги",
@@ -436,6 +459,10 @@ class DataAgentRuntime:
             return "list"
         if any(marker in lowered for marker in MONITOR_DISABLE_MARKERS):
             return "disable"
+        if any(marker in lowered for marker in MONITOR_UPDATE_MARKERS) and any(
+            marker in lowered for marker in MONITOR_SETTINGS_MARKERS
+        ):
+            return "update"
         return None
 
     def _extract_monitor_window(self, message: str) -> Optional[tuple[int, int]]:

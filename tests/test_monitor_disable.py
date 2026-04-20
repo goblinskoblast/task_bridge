@@ -166,6 +166,62 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(config)
         self.assertFalse(config.is_active)
 
+    async def test_chat_updates_monitor_window_without_running_report(self):
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.point_name == self.point_name).first()
+            config.check_interval_minutes = 120
+            session.commit()
+        finally:
+            session.close()
+
+        decision = AgentDecision(
+            scenario="blanks_report",
+            selected_tools=["blanks_tool"],
+            slots={
+                "point_name": self.point_name,
+                "monitor_action": "update",
+                "monitor_interval_minutes": 180,
+                "monitor_interval_source": "default_intent",
+                "monitor_start_hour": 11,
+                "monitor_end_hour": 21,
+                "source_message": "измени окно мониторинга",
+            },
+            missing_slots=[],
+            reasoning="test",
+        )
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch("data_agent.agent_runtime.get_db_session", side_effect=self.SessionLocal):
+                with patch("data_agent.service.agent_runtime.decide", AsyncMock(return_value=decision)):
+                    with patch("data_agent.service.scenario_engine.execute", AsyncMock()) as mocked_execute:
+                        response = await self.service.chat(
+                            DataAgentChatRequest(
+                                user_id=137236883,
+                                message="Измени окно мониторинга бланков по Сухой Лог Белинского 40 с 11 до 21.",
+                            )
+                        )
+
+        session = self.SessionLocal()
+        try:
+            config = (
+                session.query(DataAgentMonitorConfig)
+                .filter(DataAgentMonitorConfig.point_name == self.point_name)
+                .first()
+            )
+        finally:
+            session.close()
+
+        mocked_execute.assert_not_awaited()
+        self.assertTrue(response.ok)
+        self.assertEqual(response.status, "completed")
+        self.assertIsNotNone(config)
+        self.assertEqual(config.check_interval_minutes, 120)
+        self.assertEqual(config.active_from_hour, 9)
+        self.assertEqual(config.active_to_hour, 19)
+        self.assertIn("Обновил", response.answer)
+        self.assertIn("каждые 2 ч.", response.answer)
+
     def test_disable_monitor_by_point_asks_type_when_multiple_monitors_are_active(self):
         session = self.SessionLocal()
         try:

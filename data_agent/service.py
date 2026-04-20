@@ -664,7 +664,7 @@ class DataAgentService:
         user_id: int,
         scenario: str,
         point_name: str,
-        interval_minutes: int,
+        interval_minutes: int | None,
         interval_source: str | None = None,
         start_hour: int | None = None,
         end_hour: int | None = None,
@@ -674,7 +674,7 @@ class DataAgentService:
             monitor_type = "reviews"
             point_name = point_name or "все точки"
 
-        if not monitor_type or not point_name or not interval_minutes:
+        if not monitor_type or not point_name:
             return None
 
         db = get_db_session()
@@ -703,8 +703,10 @@ class DataAgentService:
                 )
 
             resolved_interval_minutes = interval_minutes
-            if existing and interval_source == "default_intent":
+            if existing and (interval_minutes is None or interval_source == "default_intent"):
                 resolved_interval_minutes = existing.check_interval_minutes
+            elif resolved_interval_minutes is None:
+                resolved_interval_minutes = 180
 
             if start_hour is not None and end_hour is not None:
                 user_window = (start_hour, end_hour)
@@ -723,14 +725,14 @@ class DataAgentService:
                     system_name="italian_pizza",
                     monitor_type=monitor_type,
                     point_name=point_name,
-                    check_interval_minutes=resolved_interval_minutes,
+                    check_interval_minutes=int(resolved_interval_minutes),
                     is_active=True,
                     active_from_hour=service_start_hour,
                     active_to_hour=service_end_hour,
                 )
                 db.add(existing)
             else:
-                existing.check_interval_minutes = resolved_interval_minutes
+                existing.check_interval_minutes = int(resolved_interval_minutes)
                 existing.is_active = True
                 if start_hour is not None and end_hour is not None:
                     existing.active_from_hour = service_start_hour
@@ -750,7 +752,7 @@ class DataAgentService:
             return build_monitor_saved_note(
                 monitor_type=monitor_type,
                 point_name=point_name,
-                interval_minutes=resolved_interval_minutes,
+                interval_minutes=int(resolved_interval_minutes),
                 chat_title=chat_title,
                 start_hour=user_window[0],
                 end_hour=user_window[1],
@@ -854,6 +856,46 @@ class DataAgentService:
                     scenario=decision.scenario,
                     point_name=point_name,
                 )
+                debug_payload, debug_summary = build_debug_artifacts(
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="completed",
+                    selected_tools=selected_tools,
+                    tool_results={},
+                )
+                agent_runtime.save_session(
+                    payload.user_id,
+                    decision,
+                    user_message=normalized_message,
+                    answer=answer,
+                    status="completed",
+                    trace_id=trace_id,
+                    debug_summary=debug_summary,
+                    debug_payload=debug_payload,
+                )
+                return DataAgentChatResponse(
+                    answer=answer,
+                    selected_tools=selected_tools,
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="completed",
+                    debug_summary=debug_summary,
+                )
+
+            if monitor_action == "update" and point_name:
+                interval_minutes = decision.slots.get("monitor_interval_minutes")
+                if not isinstance(interval_minutes, int) or interval_minutes <= 0:
+                    interval_minutes = None
+                monitor_note = self._upsert_monitor(
+                    user_id=payload.user_id,
+                    scenario=decision.scenario,
+                    point_name=point_name,
+                    interval_minutes=interval_minutes,
+                    interval_source=decision.slots.get("monitor_interval_source"),
+                    start_hour=decision.slots.get("monitor_start_hour"),
+                    end_hour=decision.slots.get("monitor_end_hour"),
+                )
+                answer = monitor_note or "Не удалось обновить мониторинг. Попробуйте указать тип отчёта и точку одним сообщением."
                 debug_payload, debug_summary = build_debug_artifacts(
                     trace_id=trace_id,
                     scenario=decision.scenario,
