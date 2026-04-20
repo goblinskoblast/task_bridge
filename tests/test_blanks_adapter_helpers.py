@@ -416,6 +416,61 @@ class BlanksAdapterAsyncHelpersTest(unittest.IsolatedAsyncioTestCase):
         button.click.assert_awaited_once_with(timeout=3500, force=True)
         password.press.assert_awaited_once_with("Enter")
 
+    async def test_trigger_login_submit_falls_back_to_enter_when_button_missing(self):
+        password = SimpleNamespace(
+            is_visible=AsyncMock(return_value=True),
+            press=AsyncMock(),
+        )
+
+        class Locator:
+            def __init__(self, item=None):
+                self.first = item
+
+            async def count(self):
+                return 1 if self.first is not None else 0
+
+        class Page:
+            def locator(self, selector):
+                if selector == "input[type='password']":
+                    return Locator(password)
+                return Locator()
+
+        result = await self.adapter._trigger_login_submit(Page(), use_force=False, use_enter=False)
+
+        self.assertTrue(result)
+        password.press.assert_awaited_once_with("Enter")
+
+    async def test_trigger_login_submit_falls_back_to_enter_when_click_fails(self):
+        button = SimpleNamespace(
+            is_visible=AsyncMock(return_value=True),
+            click=AsyncMock(side_effect=RuntimeError("disabled")),
+        )
+        password = SimpleNamespace(
+            is_visible=AsyncMock(return_value=True),
+            press=AsyncMock(),
+        )
+
+        class Locator:
+            def __init__(self, item=None):
+                self.first = item
+
+            async def count(self):
+                return 1 if self.first is not None else 0
+
+        class Page:
+            def locator(self, selector):
+                if selector == "button[type='submit']":
+                    return Locator(button)
+                if selector == "input[type='password']":
+                    return Locator(password)
+                return Locator()
+
+        result = await self.adapter._trigger_login_submit(Page(), use_force=False, use_enter=False)
+
+        self.assertTrue(result)
+        button.click.assert_awaited_once_with(timeout=3500, force=False)
+        password.press.assert_awaited_once_with("Enter")
+
     async def test_submit_login_and_wait_retries_after_staying_on_login_page(self):
         page = object()
         with patch.object(self.adapter, "_trigger_login_submit", AsyncMock(return_value=True)) as mocked_submit:

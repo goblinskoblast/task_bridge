@@ -940,6 +940,21 @@ class ItalianPizzaPortalAdapter:
                 return "ok", last_text
         return "login_page", last_text
 
+    async def _press_login_password_enter(self, page) -> bool:
+        for selector in ["input[type='password']", "input[name='password']"]:
+            locator = page.locator(selector)
+            if await locator.count() <= 0:
+                continue
+            field = locator.first
+            try:
+                if not await field.is_visible():
+                    continue
+                await field.press("Enter")
+                return True
+            except Exception as exc:
+                logger.info("Blanks login submit via Enter failed selector=%s error=%s", selector, exc)
+        return False
+
     async def _trigger_login_submit(self, page, *, use_force: bool = False, use_enter: bool = False) -> bool:
         clicked = False
         for selector in ["button[type='submit']", "button:has-text('Войти')", "button:has-text('Login')"]:
@@ -958,21 +973,9 @@ class ItalianPizzaPortalAdapter:
             except Exception as exc:
                 logger.info("Blanks login submit click failed selector=%s error=%s", selector, exc)
 
-        if not use_enter:
-            return clicked
+        if use_enter or not clicked:
+            return (await self._press_login_password_enter(page)) or clicked
 
-        for selector in ["input[type='password']", "input[name='password']"]:
-            locator = page.locator(selector)
-            if await locator.count() <= 0:
-                continue
-            field = locator.first
-            try:
-                if not await field.is_visible():
-                    continue
-                await field.press("Enter")
-                return True
-            except Exception as exc:
-                logger.info("Blanks login submit via Enter failed selector=%s error=%s", selector, exc)
         return clicked
 
     async def _submit_login_and_wait(self, page, attempts: int = 3) -> tuple[str, str]:
