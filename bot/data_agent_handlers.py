@@ -43,7 +43,7 @@ QUICK_REPORT_CALLBACK_PREFIX = "agent_quick:"
 POINT_CALLBACK_PREFIX = "agent_point:"
 POINT_REPORT_CALLBACK_PREFIX = "agent_point_report:"
 POINT_DELIVERY_CALLBACK_PREFIX = "agent_point_delivery:"
-SETTINGS_BUTTON_TEXT = "⚙️ Настройки"
+SETTINGS_BUTTON_TEXT = "🔧 Системы и чаты"
 SYSTEMS_MENU_BUTTON_TEXT = "🔌 Подключённые системы"
 REPORT_CHATS_BUTTON_TEXT = "💬 Чаты отчётов"
 CONNECT_SYSTEM_BUTTON_TEXT = "➕ Подключить систему"
@@ -77,6 +77,11 @@ AGENT_SETTINGS_MENU_KEYBOARD = InlineKeyboardMarkup(
         [InlineKeyboardButton(text=CONNECT_SYSTEM_BUTTON_TEXT, callback_data="agent_connect_system")],
         [InlineKeyboardButton(text=REPORT_CHATS_BUTTON_TEXT, callback_data="agent_choose_report_chat")],
     ]
+)
+
+AGENT_SETTINGS_MENU_TEXT = (
+    "🔧 <b>Системы и чаты</b>\n\n"
+    "Здесь можно проверить подключённые системы и выбрать чаты для отчётов."
 )
 
 QUICK_REPORT_ACTIONS = {
@@ -1061,7 +1066,11 @@ async def _send_agent_reports_menu(message: Message) -> None:
 
 
 async def _send_agent_settings_menu(message: Message) -> None:
-    await _send_systems_summary(message)
+    await message.answer(
+        AGENT_SETTINGS_MENU_TEXT,
+        reply_markup=_build_agent_settings_menu_keyboard(),
+        parse_mode="HTML",
+    )
 
 
 async def _send_point_details(message: Message, telegram_user_id: int, point_id: int) -> None:
@@ -1377,11 +1386,7 @@ async def callback_agent_menu_settings(callback: CallbackQuery, state: FSMContex
     await callback.answer()
     await state.clear()
     if callback.message:
-        await callback.message.answer(
-            "⚙️ <b>Настройки агента</b>\n\nОткройте нужный раздел.",
-            reply_markup=_build_agent_settings_menu_keyboard(),
-            parse_mode="HTML",
-        )
+        await _send_agent_settings_menu(callback.message)
 
 
 @router.callback_query(F.data == "agent_connect_system")

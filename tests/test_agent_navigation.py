@@ -8,6 +8,9 @@ os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 
 from bot.data_agent_handlers import (
+    MONITORS_MENU_BUTTON_TEXT,
+    POINTS_BUTTON_TEXT,
+    SETTINGS_BUTTON_TEXT,
     _build_agent_entry_keyboard,
     _build_agent_entry_text,
     _build_legacy_quick_report_hint,
@@ -16,6 +19,7 @@ from bot.data_agent_handlers import (
     _build_point_actions_keyboard,
     _build_report_chat_keyboard,
     _build_slim_main_reply_keyboard,
+    callback_agent_menu_settings,
     callback_agent_point_report,
     callback_agent_quick_stoplist,
     _send_monitors_summary,
@@ -179,6 +183,29 @@ class AgentNavigationTest(unittest.TestCase):
         self.assertNotIn("быстрых отчётов", text)
 
 
+    def test_agent_root_keyboard_for_ready_user_has_only_main_sections(self):
+        texts = _flatten_inline_texts(_build_agent_entry_keyboard(has_system=True, has_points=True))
+
+        self.assertEqual(
+            texts,
+            [
+                POINTS_BUTTON_TEXT,
+                MONITORS_MENU_BUTTON_TEXT,
+                SETTINGS_BUTTON_TEXT,
+            ],
+        )
+
+    def test_agent_root_keyboard_without_points_leads_to_add_point(self):
+        texts = _flatten_inline_texts(_build_agent_entry_keyboard(has_system=True, has_points=False))
+        self.assertEqual(
+            texts,
+            [
+                "➕ Добавить точку",
+                SETTINGS_BUTTON_TEXT,
+            ],
+        )
+
+
 class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
     class DummyMessage:
         def __init__(self, text: str) -> None:
@@ -262,6 +289,16 @@ class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.clear_count, 1)
         mocked_refresh.assert_awaited_once()
         mocked_monitors.assert_awaited_once_with(message)
+
+    async def test_settings_callback_opens_concrete_systems_and_chats_menu(self):
+        callback = self.DummyCallback()
+        state = self.DummyState()
+
+        with patch("bot.data_agent_handlers._send_agent_settings_menu", AsyncMock()) as mocked_menu:
+            await callback_agent_menu_settings(callback, state)
+
+        self.assertEqual(state.clear_count, 1)
+        mocked_menu.assert_awaited_once_with(callback.message)
 
     async def test_unmonitor_without_id_points_to_free_text_disable(self):
         message = self.DummyMessage("/unmonitor")

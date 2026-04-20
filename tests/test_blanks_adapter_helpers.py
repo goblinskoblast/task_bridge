@@ -489,6 +489,27 @@ class BlanksAdapterAsyncHelpersTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(mocked_submit.await_args_list[1].kwargs["use_force"])
         self.assertTrue(mocked_submit.await_args_list[1].kwargs["use_enter"])
 
+    async def test_submit_login_and_wait_uses_final_grace_window_after_retry_exhausted(self):
+        page = object()
+        with patch.object(self.adapter, "_trigger_login_submit", AsyncMock(return_value=True)) as mocked_submit:
+            with patch.object(
+                self.adapter,
+                "_wait_for_post_login_state",
+                AsyncMock(
+                    side_effect=[
+                        ("login_page", "Логин"),
+                        ("login_page", "Логин"),
+                        ("login_page", "Логин"),
+                        ("ok", "Портал"),
+                    ]
+                ),
+            ) as mocked_wait:
+                state, text = await self.adapter._submit_login_and_wait(page)
+
+        self.assertEqual((state, text), ("ok", "Портал"))
+        self.assertEqual(mocked_submit.await_count, 3)
+        self.assertEqual(mocked_wait.await_count, 4)
+
     async def test_load_report_context_retries_until_period_controls_appear(self):
         page = SimpleNamespace(wait_for_timeout=AsyncMock())
         with patch.object(
@@ -648,6 +669,57 @@ class BlanksAdapterAsyncHelpersTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result)
         mocked_wait.assert_awaited_once()
         button.click.assert_not_awaited()
+
+    async def test_scan_blank_report_reloads_context_after_transient_period_selection_failure(self):
+        page = object()
+        with patch.object(self.adapter, "_blank_hour_scan_values", return_value=["3"]):
+            with patch.object(
+                self.adapter,
+                "_click_blank_hour_chip",
+                AsyncMock(side_effect=[False, True]),
+            ) as mocked_click:
+                with patch.object(
+                    self.adapter,
+                    "_load_report_context",
+                    AsyncMock(
+                        return_value={
+                            "status": "ok",
+                            "visible_period_controls": ["3", "6"],
+                            "visible_report_controls": ["Бланк загрузки"],
+                            "body": "Бланк загрузки",
+                        }
+                    ),
+                ) as mocked_context:
+                    with patch.object(
+                        self.adapter,
+                        "_visible_blank_hour_controls",
+                        AsyncMock(return_value=["3", "6"]),
+                    ):
+                        with patch.object(
+                            self.adapter,
+                            "_read_blank_red_signals",
+                            AsyncMock(
+                                return_value={
+                                    "signals": [],
+                                    "slot_count": 1,
+                                    "table_count": 1,
+                                    "first_slot": "2026-04-19T03:00",
+                                    "styled_cell_samples": [],
+                                    "table_samples": [],
+                                }
+                            ),
+                        ):
+                            result = await self.adapter._scan_blank_report(
+                                page,
+                                "Сухой Лог, Белинского 40",
+                                "последние 3 часа",
+                            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["inspected_hours"], ["3"])
+        self.assertEqual(result["visible_period_controls"], ["3", "6"])
+        self.assertEqual(mocked_click.await_count, 2)
+        mocked_context.assert_awaited_once()
 
     async def test_wait_for_blank_hour_applied_accepts_matching_slot_without_active_button(self):
         page = SimpleNamespace(wait_for_timeout=AsyncMock())

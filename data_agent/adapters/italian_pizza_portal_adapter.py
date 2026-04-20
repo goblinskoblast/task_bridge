@@ -997,6 +997,15 @@ class ItalianPizzaPortalAdapter:
                 return last_state, last_text
             if attempt < total_attempts - 1:
                 logger.info("Blanks login still on auth page, retrying submit attempt=%s", attempt + 2)
+        if last_state == "login_page":
+            logger.info("Blanks login still on auth page after submit retries, waiting extra grace window")
+            grace_state, grace_text = await self._wait_for_post_login_state(
+                page,
+                attempts=4,
+                delay_ms=900,
+            )
+            if grace_state != "login_page":
+                return grace_state, grace_text
         return last_state, last_text
 
     async def _wait_for_portal_ready(self, page, point_name: str, attempts: int = 8, delay_ms: int = 700) -> tuple[list[str], str]:
@@ -1274,6 +1283,24 @@ class ItalianPizzaPortalAdapter:
             if attempt < total_attempts - 1:
                 await page.wait_for_timeout(500 + (attempt * 250))
         return False
+
+    async def _ensure_blank_hour_chip_selected(self, page, *, point_name: str, hour_value: str) -> tuple[bool, list[str]]:
+        if await self._click_blank_hour_chip(page, hour_value):
+            return True, await self._visible_blank_hour_controls(page)
+
+        logger.info(
+            "Blanks blank-hour chip did not apply value=%s, reloading report context for point=%s",
+            hour_value,
+            point_name,
+        )
+        report_context = await self._load_report_context(page, point_name, attempts=2, delay_ms=700)
+        visible_controls = list(report_context.get("visible_period_controls") or [])
+        if report_context.get("status") == "ok" and await self._click_blank_hour_chip(page, hour_value, attempts=2):
+            refreshed_controls = await self._visible_blank_hour_controls(page)
+            return True, refreshed_controls or visible_controls
+        if not visible_controls:
+            visible_controls = await self._visible_blank_hour_controls(page)
+        return False, visible_controls
 
     def _rolling_blank_hours(self, period_hint: str) -> int | None:
         normalized = self._normalize_text(period_hint)
@@ -1746,12 +1773,17 @@ class ItalianPizzaPortalAdapter:
             }
 
         for hour_value in scan_hours:
-            if not await self._click_blank_hour_chip(page, hour_value):
+            selected, visible_controls = await self._ensure_blank_hour_chip_selected(
+                page,
+                point_name=point_name,
+                hour_value=hour_value,
+            )
+            if not selected:
                 return {
                     "status": "needs_period",
-                    "message": self._build_period_help_message(period_hint, await self._visible_blank_hour_controls(page)),
+                    "message": self._build_period_help_message(period_hint, visible_controls),
                     "matched_period": hour_value,
-                    "visible_period_controls": await self._visible_blank_hour_controls(page),
+                    "visible_period_controls": visible_controls,
                     "inspected_hours": inspected_hours,
                     "inspected_slots": inspected_slots,
                 }
