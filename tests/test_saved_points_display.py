@@ -19,7 +19,7 @@ class SavedPointsDisplayTest(unittest.TestCase):
         summary = _build_points_summary_text(points)
 
         self.assertIn("• <b>1.</b> Верхний Уфалей, Ленина 147", summary)
-        self.assertIn("• <b>2.</b> Сухой Лог, Белинского 40 • в чат", summary)
+        self.assertIn("• <b>2.</b> Сухой Лог, Белинского 40 — отчёты в чат", summary)
         self.assertNotIn("#7", summary)
         self.assertNotIn("#42", summary)
 

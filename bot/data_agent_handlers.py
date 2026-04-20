@@ -82,7 +82,7 @@ AGENT_SETTINGS_MENU_KEYBOARD = InlineKeyboardMarkup(
 
 AGENT_SETTINGS_MENU_TEXT = (
     "🔧 <b>Системы и чаты</b>\n\n"
-    "Здесь можно проверить подключённые системы и выбрать чаты для отчётов."
+    "Здесь можно проверить подключённую систему и выбрать, куда будут приходить отчёты."
 )
 
 QUICK_REPORT_ACTIONS = {
@@ -769,7 +769,7 @@ def _build_points_overview_keyboard(points: list[SavedPoint]) -> InlineKeyboardM
 
 def _build_point_actions_keyboard(point: SavedPoint) -> InlineKeyboardMarkup:
     point_id = point.id
-    delivery_label = "📨 В чат: вкл" if point.report_delivery_enabled else "🔕 В чат: выкл"
+    delivery_label = "📨 Отчёты в чат: вкл" if point.report_delivery_enabled else "🔕 Отчёты в чат: выкл"
     return _with_agent_home(InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -794,17 +794,20 @@ def _build_points_summary_text(points: list[SavedPoint]) -> str:
     if not points:
         return (
             "📍 <b>Сохранённых точек пока нет</b>\n\n"
-            "Добавьте первую точку, и дальше сможете писать запросы обычным сообщением без ручного ввода адреса каждый раз."
+            "Добавьте первую точку, и дальше можно будет писать запросы обычным сообщением.\n\n"
+            "Например:\n"
+            "• пришли стоп-лист по Сухой Лог, Белинского 40\n"
+            "• покажи бланки по всем добавленным точкам"
         )
 
     lines = ["📍 <b>Ваши точки</b>", ""]
     for index, point in enumerate(points, start=1):
-        delivery_mark = " • в чат" if point.report_delivery_enabled else ""
+        delivery_mark = " — отчёты в чат" if point.report_delivery_enabled else ""
         lines.append(f"• <b>{index}.</b> {point.display_name}{delivery_mark}")
     lines.extend(
         [
             "",
-            "Можно открыть одну точку или сразу «Все точки». Для отчётов и мониторинга быстрее всего писать обычным сообщением.",
+            "Откройте точку, если хотите включить отчёты в чат или удалить её. Для отчётов и мониторинга быстрее всего писать обычным сообщением.",
         ]
     )
     return "\n".join(lines)
@@ -962,16 +965,21 @@ async def _send_systems_summary(message: Message, *, telegram_user_id: int | Non
     if not systems:
         await message.answer(
             "🔌 <b>Подключённых систем пока нет</b>\n\n"
-            "Сначала подключите систему, потом сможете добавлять точки и настраивать чаты для отчётов.",
+            "Сначала подключите Italian Pizza. Потом можно будет добавить точку и писать запросы обычным сообщением.",
             reply_markup=_build_agent_systems_keyboard(),
             parse_mode="HTML",
         )
         return
 
-    lines = ["🔌 <b>Подключённые системы</b>", ""]
+    lines = [f"🔌 <b>Подключённые системы: {len(systems)}</b>", ""]
     for item in systems:
         lines.append(f"• <b>{item.get('system_name', 'web-system')}</b> — {item.get('url')}")
-    lines.extend(["", "Здесь же можно подключить новую систему или выбрать чат для отчётов."])
+    lines.extend(
+        [
+            "",
+            "Если нужная система уже подключена, следующий шаг — добавить точку и дальше писать запросы обычным сообщением.",
+        ]
+    )
     await message.answer("\n".join(lines), reply_markup=_build_agent_systems_keyboard(), parse_mode="HTML")
 
 
@@ -1107,8 +1115,11 @@ async def _send_point_details(message: Message, telegram_user_id: int, point_id:
         await message.answer(
             "📍 <b>Точка</b>\n\n"
             f"<b>{point.display_name}</b>\n"
-            f"Отправка отчётов в чат: {'включена' if point.report_delivery_enabled else 'выключена'}\n\n"
-            f"Эту точку можно использовать в обычном сообщении, например: <code>пришли стоп-лист по {point.display_name}</code>",
+            f"Отчёты в чат: {'включены' if point.report_delivery_enabled else 'выключены'}\n\n"
+            "Можно написать, например:\n"
+            f"• <code>пришли стоп-лист по {point.display_name}</code>\n"
+            f"• <code>покажи бланки по {point.display_name}</code>\n"
+            f"• <code>присылай бланки по {point.display_name} каждые 3 часа</code>",
             reply_markup=_build_point_actions_keyboard(point),
             parse_mode="HTML",
         )
@@ -1608,54 +1619,6 @@ async def callback_agent_quick_blanks_12h(callback: CallbackQuery, state: FSMCon
         await callback.message.answer(_build_legacy_quick_report_hint("blanks_12h"), reply_markup=AGENT_HOME_KEYBOARD)
 
 
-@router.callback_query(F.data == "agent_hint_reviews")
-async def callback_agent_hint_reviews(callback: CallbackQuery) -> None:
-    await callback.answer()
-    if callback.message:
-        await callback.message.answer(
-            "Для отчёта по отзывам можно написать, например:\n"
-            "собери отзывы по Сухой Лог, Белинского 40 за неделю\n"
-            "покажи отзывы по Верхнему Уфалею за сутки"
-        )
-
-
-@router.callback_query(F.data == "agent_hint_stoplist")
-async def callback_agent_hint_stoplist(callback: CallbackQuery) -> None:
-    await callback.answer()
-    if callback.message:
-        await callback.message.answer(
-            "Для стоп-листа напишите, например:\n"
-            "пришли стоп-лист по Сухой Лог, Белинского 40\n"
-            "покажи стоп-лист по Верхнему Уфалею"
-        )
-
-
-@router.callback_query(F.data == "agent_hint_blanks")
-async def callback_agent_hint_blanks(callback: CallbackQuery) -> None:
-    await callback.answer()
-    if callback.message:
-        await callback.message.answer(
-            "Для бланков напишите, например:\n"
-            "покажи бланки по Сухой Лог, Белинского 40\n"
-            "покажи бланки по всем добавленным точкам за 3 часа"
-        )
-
-
-@router.callback_query(F.data == "agent_hint_monitors")
-async def callback_agent_hint_monitors(callback: CallbackQuery) -> None:
-    await callback.answer()
-    if callback.message:
-        await callback.message.answer(
-            "Для мониторинга можно написать, например:\n"
-            "присылай стоп-лист по Сухой Лог, Белинского 40\n"
-            "присылай бланки по Сухой Лог, Белинского 40 каждые 3 часа\n"
-            "присылай бланки по Сухой Лог, Белинского 40 каждые 2 часа с 11 до 21\n"
-            "не присылай бланки по Сухой Лог, Белинского 40\n"
-            "покажи мониторинги\n\n"
-            "Если время не указать, возьму окно 10:00–22:00 по Екатеринбургу."
-        )
-
-
 @router.callback_query(F.data == "agent_show_debug")
 async def callback_agent_show_debug(callback: CallbackQuery) -> None:
     if not _is_developer_telegram_id(callback.from_user.id):
@@ -1681,7 +1644,7 @@ async def handle_new_saved_point(message: Message, state: FSMContext) -> None:
     await message.answer(
         "✅ <b>Точка сохранена</b>\n\n"
         f"{point.display_name}\n"
-        "Теперь можно запрашивать по ней стоп-лист, бланки и мониторинг обычным сообщением. Отправку отчётов в чат при необходимости можно включить отдельно.",
+        "Теперь можно сразу писать по ней обычным сообщением: стоп-лист, бланки или мониторинг. Если нужно, потом можно отдельно включить отчёты в чат.",
         parse_mode="HTML",
     )
     await _send_points_summary(message)

@@ -36,7 +36,7 @@ class BotQuickActionsTest(unittest.TestCase):
         point = SimpleNamespace(id=3, display_name="Сухой Лог, Белинского 40", report_delivery_enabled=True)
         summary = _build_points_summary_text([point])
         self.assertIn("Сухой Лог, Белинского 40", summary)
-        self.assertIn("• в чат", summary)
+        self.assertIn("— отчёты в чат", summary)
 
     def test_agent_welcome_no_longer_mentions_stats_or_profile(self):
         self.assertNotIn("Текущий профиль", AGENT_WELCOME)
@@ -49,6 +49,7 @@ class BotQuickActionsTest(unittest.TestCase):
     def test_empty_points_summary_no_longer_pushes_button_only_flow(self):
         summary = _build_points_summary_text([])
         self.assertIn("обычным сообщением", summary)
+        self.assertIn("пришли стоп-лист", summary)
         self.assertNotIn("в кнопках", summary)
 
 
