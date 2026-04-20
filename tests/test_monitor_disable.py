@@ -422,6 +422,59 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Обновил", response.answer)
         self.assertIn("бланков", response.answer)
 
+    async def test_chat_short_circuits_monitor_enable_without_running_report(self):
+        point_name = "Верхний Уфалей, Ленина 147"
+        decision = AgentDecision(
+            scenario="blanks_report",
+            selected_tools=["blanks_tool"],
+            slots={
+                "point_name": point_name,
+                "monitor_action": "enable",
+                "monitor_interval_minutes": 120,
+                "monitor_interval_source": "explicit",
+                "monitor_start_hour": 10,
+                "monitor_end_hour": 22,
+                "source_message": "присылай бланки",
+            },
+            missing_slots=[],
+            reasoning="test",
+        )
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch("data_agent.agent_runtime.get_db_session", side_effect=self.SessionLocal):
+                with patch("data_agent.service.agent_runtime.decide", AsyncMock(return_value=decision)):
+                    with patch("data_agent.service.scenario_engine.execute", AsyncMock()) as mocked_execute:
+                        response = await self.service.chat(
+                            DataAgentChatRequest(
+                                user_id=137236883,
+                                message="Присылай бланки по Верхнему Уфалею каждые 2 часа.",
+                            )
+                        )
+
+        session = self.SessionLocal()
+        try:
+            config = (
+                session.query(DataAgentMonitorConfig)
+                .filter(
+                    DataAgentMonitorConfig.point_name == point_name,
+                    DataAgentMonitorConfig.monitor_type == "blanks",
+                )
+                .first()
+            )
+        finally:
+            session.close()
+
+        mocked_execute.assert_not_awaited()
+        self.assertTrue(response.ok)
+        self.assertEqual(response.status, "completed")
+        self.assertEqual(response.scenario, "blanks_report")
+        self.assertIn("Включил мониторинг бланков", response.answer)
+        self.assertIn("каждые 2 ч.", response.answer)
+        self.assertNotIn("Текущий срез", response.answer)
+        self.assertIsNotNone(config)
+        self.assertTrue(config.is_active)
+        self.assertEqual(config.check_interval_minutes, 120)
+
     def test_update_monitor_by_point_asks_type_when_multiple_monitors_are_active(self):
         session = self.SessionLocal()
         try:

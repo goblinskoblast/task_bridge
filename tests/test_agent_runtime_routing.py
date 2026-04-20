@@ -85,9 +85,34 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
 
         self.assertEqual(decision.scenario, "blanks_report")
         self.assertEqual(decision.slots.get("point_name"), "Сухой Лог, Белинского 40")
+        self.assertEqual(decision.slots.get("monitor_action"), "enable")
         self.assertEqual(decision.slots.get("monitor_interval_minutes"), 180)
         self.assertEqual(decision.slots.get("period_hint"), "за последние 3 часа")
         self.assertEqual(decision.missing_slots, [])
+
+    def test_rule_based_decision_extracts_natural_two_hour_monitor_interval(self):
+        decision = self.runtime._rule_based_decision(
+            "Присылай бланки по Сухой Лог Белинского 40 раз в два часа.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "blanks_report")
+        self.assertEqual(decision.slots.get("monitor_action"), "enable")
+        self.assertEqual(decision.slots.get("monitor_interval_minutes"), 120)
+        self.assertEqual(decision.slots.get("monitor_interval_source"), "explicit")
+
+    def test_rule_based_decision_extracts_minute_monitor_interval(self):
+        decision = self.runtime._rule_based_decision(
+            "Мониторь бланки по Сухой Лог Белинского 40 каждые 90 минут.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "blanks_report")
+        self.assertEqual(decision.slots.get("monitor_action"), "enable")
+        self.assertEqual(decision.slots.get("monitor_interval_minutes"), 90)
+        self.assertEqual(decision.slots.get("monitor_interval_source"), "explicit")
 
     def test_rule_based_decision_defaults_monitor_interval_for_blanks_monitor_intent(self):
         expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
@@ -100,6 +125,7 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
 
         self.assertEqual(decision.scenario, "blanks_report")
         self.assertEqual(decision.slots.get("point_name"), expected_point_name)
+        self.assertEqual(decision.slots.get("monitor_action"), "enable")
         self.assertEqual(decision.slots.get("monitor_interval_minutes"), 180)
         self.assertEqual(decision.slots.get("monitor_interval_source"), "default_intent")
         self.assertEqual(decision.slots.get("period_hint"), expected_period)
@@ -114,6 +140,7 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
 
         self.assertEqual(decision.scenario, "stoplist_report")
         self.assertEqual(decision.slots.get("point_name"), expected_point_name)
+        self.assertEqual(decision.slots.get("monitor_action"), "enable")
         self.assertEqual(decision.slots.get("monitor_interval_minutes"), 180)
 
     def test_rule_based_decision_extracts_daily_monitor_interval(self):

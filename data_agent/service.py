@@ -1068,6 +1068,47 @@ class DataAgentService:
                     debug_summary=debug_summary,
                 )
 
+            if monitor_action == "enable" and point_name:
+                interval_minutes = decision.slots.get("monitor_interval_minutes")
+                if not isinstance(interval_minutes, int) or interval_minutes <= 0:
+                    interval_minutes = None
+                answer = self._upsert_monitor(
+                    user_id=payload.user_id,
+                    scenario=decision.scenario,
+                    point_name=point_name,
+                    interval_minutes=interval_minutes,
+                    interval_source=decision.slots.get("monitor_interval_source"),
+                    start_hour=decision.slots.get("monitor_start_hour"),
+                    end_hour=decision.slots.get("monitor_end_hour"),
+                )
+                if not answer:
+                    answer = "Не удалось настроить мониторинг. Попробуйте указать тип отчёта и точку одним сообщением."
+                debug_payload, debug_summary = build_debug_artifacts(
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="completed",
+                    selected_tools=selected_tools,
+                    tool_results={},
+                )
+                agent_runtime.save_session(
+                    payload.user_id,
+                    decision,
+                    user_message=normalized_message,
+                    answer=answer,
+                    status="completed",
+                    trace_id=trace_id,
+                    debug_summary=debug_summary,
+                    debug_payload=debug_payload,
+                )
+                return DataAgentChatResponse(
+                    answer=answer,
+                    selected_tools=selected_tools,
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="completed",
+                    debug_summary=debug_summary,
+                )
+
             execution_started = time.perf_counter()
             execution = await scenario_engine.execute(
                 scenario=decision.scenario,

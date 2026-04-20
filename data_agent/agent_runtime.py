@@ -110,6 +110,23 @@ MONITOR_LIST_MARKERS = (
     "активные уведомления",
 )
 
+MONITOR_INTERVAL_NUMBER_WORDS = {
+    "один": 1,
+    "одну": 1,
+    "два": 2,
+    "две": 2,
+    "три": 3,
+    "четыре": 4,
+    "пять": 5,
+    "шесть": 6,
+    "семь": 7,
+    "восемь": 8,
+    "девять": 9,
+    "десять": 10,
+    "одиннадцать": 11,
+    "двенадцать": 12,
+}
+
 
 @dataclass
 class AgentSessionSnapshot:
@@ -280,6 +297,9 @@ class DataAgentRuntime:
         slots = self._extract_slots(message, session)
         slots["source_message"] = message
         monitor_action = slots.get("monitor_action")
+        if scenario in {"blanks_report", "stoplist_report", "reviews_report"} and monitor_action not in {"disable", "update"}:
+            if self._has_monitor_intent(lowered):
+                slots["monitor_action"] = "enable"
         if scenario in {"blanks_report", "stoplist_report"} and monitor_action != "disable" and not slots.get("monitor_interval_minutes"):
             if self._has_monitor_intent(lowered):
                 slots["monitor_interval_minutes"] = 180
@@ -441,15 +461,26 @@ class DataAgentRuntime:
 
     def _extract_monitor_interval(self, message: str) -> Optional[int]:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
-        if "раз в час" in lowered or "каждый час" in lowered:
+        if any(marker in lowered for marker in ("раз в полчаса", "каждые полчаса", "каждые пол часа")):
+            return 30
+        if any(marker in lowered for marker in ("раз в час", "каждый час", "каждые час", "ежечасно")):
             return 60
-        if "раз в три часа" in lowered or "каждые три часа" in lowered:
-            return 180
         if any(marker in lowered for marker in ["каждый день", "ежедневно", "раз в день", "раз в сутки", "каждые сутки"]):
             return 1440
-        match = re.search(r"каждые\s+(\d+)\s+час", lowered)
-        if match:
-            return int(match.group(1)) * 60
+
+        minute_match = re.search(r"(?:каждые|раз в)\s+(\d+)\s*(?:мин\.?|минут(?:у|ы)?)", lowered)
+        if minute_match:
+            return int(minute_match.group(1))
+
+        hour_match = re.search(r"(?:каждые|раз в)\s+(\d+)\s*(?:ч\.?|час(?:а|ов)?)", lowered)
+        if hour_match:
+            return int(hour_match.group(1)) * 60
+
+        word_hour_match = re.search(r"(?:каждые|раз в)\s+([а-яё]+)\s*(?:ч\.?|час(?:а|ов)?)", lowered)
+        if word_hour_match:
+            hours = MONITOR_INTERVAL_NUMBER_WORDS.get(word_hour_match.group(1))
+            if hours:
+                return hours * 60
         return None
 
     def _has_monitor_intent(self, lowered: str) -> bool:
