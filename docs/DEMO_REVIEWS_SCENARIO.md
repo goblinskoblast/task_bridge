@@ -9,7 +9,7 @@ Build a reviews report from a configured Google Sheets or CSV source and deliver
 ## Current flow
 
 1. Configure `REVIEWS_SHEET_URL` with a Google Sheets link or direct CSV export URL.
-2. User sends `/reviews` or `/reviews month` in Telegram.
+2. User sends a plain-text request in Telegram, for example `собери отзывы по Верхнему Уфалею за неделю`.
 3. TaskBridge forwards the request to `data_agent`.
 4. `data_agent` selects `review_tool`.
 5. `review_tool`:
@@ -38,5 +38,5 @@ The parser is flexible, but best results come when the source contains these col
 
 - add branch-level drill-down
 - add export to mini app
-- add scheduled reviews digest
-- add Pinpong/browser source as a second reviews provider
+- continue improving scheduled reviews digest
+- add Pinpong/browser source as another reviews provider

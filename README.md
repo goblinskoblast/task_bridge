@@ -7,8 +7,8 @@ TaskBridge is a Telegram-first task management service with:
 - Telegram Mini App for task management
 - OpenClaw-based AI routing
 - calendar sync for tasks with due dates
-- phase 4 Browser Agent MVP for `data_agent`
-- first restaurant demo scenario for reviews analytics via `review_tool`
+- DataAgent for restaurant reports, saved points, and monitoring
+- restaurant scenarios for stop-list, blanks, and reviews analytics
 
 ## Current modules
 
@@ -19,16 +19,19 @@ TaskBridge is a Telegram-first task management service with:
 - `data_agent/` - separate DataAgent service node with Browser Agent MVP and modular tools
 - `docs/` - deployment, SDD, and integration documentation
 
-## Main bot commands
+## Telegram UX
 
-- `/start` - start and quick access
-- `/panel` - open the task panel
-- `/help` - usage help
-- `/support` - support chat
-- `/agent` - main entrypoint for the orchestrator
-- `/dataagent` and `/bigbrother` - hidden compatibility aliases
-- `/connect` - connect an external system for DataAgent
-- `/systems` - list connected DataAgent systems
+The primary user path is intentionally simple:
+
+- `/start` opens the main reply buttons: task panel, agent, support, and help.
+- The agent menu is the main place to connect systems, add points, and inspect active monitoring.
+- Reports and monitor settings should be requested in plain text, for example:
+  - `пришли стоп-лист по Сухой Лог, Белинского 40`
+  - `покажи бланки по всем добавленным точкам`
+  - `присылай бланки по Сухой Лог, Белинского 40 каждые 3 часа`
+  - `покажи мониторинги`
+
+Legacy slash commands are kept only for compatibility and are not shown in the Telegram command menu.
 
 ## Local run
 
@@ -68,20 +71,21 @@ Important groups:
 Current status:
 
 - separate FastAPI node
-- `/health`, `/chat`, `/systems/connect`, `/systems/{user_id}`
-- Telegram integration via `/agent`, `/connect`, `/systems`
+- `/health`, `/chat`, `/systems/connect`, `/systems/{user_id}`, `/monitors/{user_id}`
+- Telegram integration through the agent menu and plain-text requests
 - persistent storage for connected systems
 - internal email/calendar tools
 - AI orchestrator for tool planning and final answer synthesis
-- Browser Agent MVP via Playwright for connected systems
-- `review_tool` for restaurant review reports from Google Sheets CSV
+- Playwright adapter for Italian Pizza blanks
+- public Italian Pizza stop-list adapter
+- reviews reports from configured review sources
+- scheduled monitoring for stop-list, blanks, and reviews
 
 Not implemented yet:
 
 - secure vault-level credentials storage
-- production-grade browser orchestration and Telegram progress streaming
-- stoplist and blanks monitoring tools
-- scheduler and memory layer for the Big Brother orchestrator
+- broader production-grade browser orchestration beyond current restaurant flows
+- richer operator dashboards and adoption metrics
 
 ## Notes
 
