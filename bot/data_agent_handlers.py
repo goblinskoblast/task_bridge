@@ -105,12 +105,6 @@ QUICK_REPORT_ACTIONS = {
     },
 }
 
-QUICK_REPORT_PROMPT_KEYBOARD = InlineKeyboardMarkup(
-    inline_keyboard=[
-        [InlineKeyboardButton(text="↩️ В меню агента", callback_data="agent_quick_cancel")],
-    ]
-)
-
 _REPORT_FAILURE_MESSAGES = {
     "stoplist_report": "Не удалось получить отчет по стоп-листу. Попробуйте позже.",
     "blanks_report": "Не удалось получить отчет по бланкам. Попробуйте позже.",
@@ -321,10 +315,6 @@ class ConnectSystemState(StatesGroup):
     waiting_for_url = State()
     waiting_for_login = State()
     waiting_for_password = State()
-
-
-class QuickReportState(StatesGroup):
-    waiting_for_point = State()
 
 
 class PointManagementState(StatesGroup):
@@ -668,18 +658,44 @@ def _get_command_args(raw_text: str | None) -> str:
     return parts[1].strip()
 
 
-def _build_quick_report_prompt(action_key: str) -> str:
-    action = QUICK_REPORT_ACTIONS[action_key]
-    return (
-        f"⚡ <b>{action['title']}</b>\n\n"
-        "Пришлите только точку одним сообщением.\n"
-        f"Например: <code>{action['example']}</code>"
-    )
-
-
 def _build_quick_report_request(action_key: str, point: str) -> str:
     action = QUICK_REPORT_ACTIONS[action_key]
     return action["request_builder"](point.strip())
+
+
+def _build_legacy_quick_report_hint(action_key: str) -> str:
+    examples = {
+        "reviews_day": (
+            "собери отзывы по Сухой Лог, Белинского 40 за сутки",
+            "собери отзывы по Верхнему Уфалею за сутки",
+        ),
+        "reviews_week": (
+            "собери отзывы по Сухой Лог, Белинского 40 за неделю",
+            "собери отзывы по Верхнему Уфалею за неделю",
+        ),
+        "stoplist": (
+            "пришли стоп-лист по Сухой Лог, Белинского 40",
+            "покажи стоп-лист по Верхнему Уфалею",
+        ),
+        "blanks_current": (
+            "покажи бланки по Сухой Лог, Белинского 40",
+            "покажи бланки по всем добавленным точкам",
+        ),
+        "blanks_12h": (
+            "покажи бланки по Сухой Лог, Белинского 40 за 12 часов",
+            "покажи бланки по всем добавленным точкам за 12 часов",
+        ),
+    }
+    selected = examples.get(action_key) or (
+        "пришли стоп-лист по Сухой Лог, Белинского 40",
+        "покажи бланки по всем добавленным точкам",
+    )
+    return (
+        "Эти быстрые кнопки больше не нужны: теперь проще написать запрос обычным сообщением.\n\n"
+        "Например:\n"
+        f"• {selected[0]}\n"
+        f"• {selected[1]}"
+    )
 
 
 def _build_voice_request_preview(text: str) -> str:
@@ -888,55 +904,6 @@ async def _send_quick_report_request(message: Message, command_text: str | None,
     args = _get_command_args(command_text)
     payload = f"{prefix}. {args}".strip() if args else prefix
     await _dispatch_agent_request(message, payload)
-
-
-async def _prompt_quick_report_action(
-    message: Message,
-    state: FSMContext,
-    action_key: str,
-    *,
-    telegram_user_id: int | None = None,
-) -> None:
-    effective_user_id = telegram_user_id or message.from_user.id
-    has_system = await _user_has_connected_italian_pizza_system(effective_user_id)
-    db = get_db_session()
-    try:
-        saved_points = saved_point_service.list_points(db, effective_user_id)
-    finally:
-        db.close()
-
-    if action_key in {"blanks_current", "blanks_12h"} and not has_system:
-        await state.clear()
-        await message.answer(
-            "Для бланков сначала нужно подключить систему Italian Pizza.\n\n"
-            "Откройте «🔌 Системы» или нажмите «➕ Подключить систему»."
-        )
-        return
-
-    if saved_points:
-        await state.clear()
-        lines = [
-            f"⚡ <b>{QUICK_REPORT_ACTIONS[action_key]['title']}</b>",
-            "",
-            "Откройте нужную точку ниже. Если удобнее, можно сразу написать запрос обычным сообщением.",
-        ]
-        if len(saved_points) > 1:
-            lines.append("Можно выбрать и «Все точки».")
-        await message.answer(
-            "\n".join(lines),
-            reply_markup=_build_points_overview_keyboard(saved_points),
-            parse_mode="HTML",
-        )
-        await state.update_data(quick_report_action=action_key)
-        return
-
-    await state.set_state(QuickReportState.waiting_for_point)
-    await state.update_data(quick_report_action=action_key)
-    await message.answer(
-        _build_quick_report_prompt(action_key),
-        reply_markup=_with_agent_home(QUICK_REPORT_PROMPT_KEYBOARD),
-        parse_mode="HTML",
-    )
 
 
 async def _send_systems_summary(message: Message, *, telegram_user_id: int | None = None) -> None:
@@ -1349,13 +1316,15 @@ async def open_agent_from_button(message: Message, state: FSMContext) -> None:
 @router.message(F.chat.type == "private", F.text == QUICK_REPORTS_BUTTON_TEXT)
 async def open_quick_reports_from_button(message: Message, state: FSMContext) -> None:
     await _refresh_private_main_menu(message)
-    await _open_agent_entry(message, state)
+    await state.clear()
+    await _send_agent_reports_menu(message)
 
 
 @router.message(F.chat.type == "private", F.text == MONITORS_BUTTON_TEXT)
 async def open_monitors_from_button(message: Message, state: FSMContext) -> None:
     await _refresh_private_main_menu(message)
-    await _open_agent_entry(message, state)
+    await state.clear()
+    await _send_monitors_summary(message)
 
 
 @router.message(F.chat.type == "private", F.text == POINTS_BUTTON_TEXT)
@@ -1457,21 +1426,6 @@ async def callback_agent_point(callback: CallbackQuery, state: FSMContext) -> No
 
     payload = callback.data[len(POINT_CALLBACK_PREFIX):]
     if payload == "all":
-        data = await state.get_data()
-        action_key = data.get("quick_report_action")
-        if action_key in QUICK_REPORT_ACTIONS:
-            db = get_db_session()
-            try:
-                points = saved_point_service.list_points(db, callback.from_user.id)
-            finally:
-                db.close()
-            await state.clear()
-            if not points:
-                await callback.message.answer("Сначала добавьте хотя бы одну точку.", reply_markup=AGENT_HOME_KEYBOARD)
-                return
-            await _send_saved_points_report(callback.message, action_key, points, actor_user=callback.from_user)
-            return
-
         await _send_all_points_details(callback.message, callback.from_user.id)
         return
 
@@ -1494,21 +1448,6 @@ async def callback_agent_point(callback: CallbackQuery, state: FSMContext) -> No
         return
 
     point_id = int(payload)
-    data = await state.get_data()
-    action_key = data.get("quick_report_action")
-    if action_key in QUICK_REPORT_ACTIONS:
-        db = get_db_session()
-        try:
-            point = saved_point_service.get_point(db, callback.from_user.id, point_id)
-        finally:
-            db.close()
-        await state.clear()
-        if not point or not point.is_active:
-            await callback.message.answer("Точка не найдена.")
-            return
-        await _send_saved_points_report(callback.message, action_key, [point], actor_user=callback.from_user)
-        return
-
     await _send_point_details(callback.message, callback.from_user.id, point_id)
 
 
@@ -1586,36 +1525,41 @@ async def callback_agent_quick_cancel(callback: CallbackQuery, state: FSMContext
 @router.callback_query(F.data == "agent_quick_reviews_day")
 async def callback_agent_quick_reviews_day(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
+    await state.clear()
     if callback.message:
-        await _prompt_quick_report_action(callback.message, state, "reviews_day", telegram_user_id=callback.from_user.id)
+        await callback.message.answer(_build_legacy_quick_report_hint("reviews_day"), reply_markup=AGENT_HOME_KEYBOARD)
 
 
 @router.callback_query(F.data == "agent_quick_reviews_week")
 async def callback_agent_quick_reviews_week(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
+    await state.clear()
     if callback.message:
-        await _prompt_quick_report_action(callback.message, state, "reviews_week", telegram_user_id=callback.from_user.id)
+        await callback.message.answer(_build_legacy_quick_report_hint("reviews_week"), reply_markup=AGENT_HOME_KEYBOARD)
 
 
 @router.callback_query(F.data == "agent_quick_stoplist")
 async def callback_agent_quick_stoplist(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
+    await state.clear()
     if callback.message:
-        await _prompt_quick_report_action(callback.message, state, "stoplist", telegram_user_id=callback.from_user.id)
+        await callback.message.answer(_build_legacy_quick_report_hint("stoplist"), reply_markup=AGENT_HOME_KEYBOARD)
 
 
 @router.callback_query(F.data == "agent_quick_blanks_current")
 async def callback_agent_quick_blanks_current(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
+    await state.clear()
     if callback.message:
-        await _prompt_quick_report_action(callback.message, state, "blanks_current", telegram_user_id=callback.from_user.id)
+        await callback.message.answer(_build_legacy_quick_report_hint("blanks_current"), reply_markup=AGENT_HOME_KEYBOARD)
 
 
 @router.callback_query(F.data == "agent_quick_blanks_12h")
 async def callback_agent_quick_blanks_12h(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
+    await state.clear()
     if callback.message:
-        await _prompt_quick_report_action(callback.message, state, "blanks_12h", telegram_user_id=callback.from_user.id)
+        await callback.message.answer(_build_legacy_quick_report_hint("blanks_12h"), reply_markup=AGENT_HOME_KEYBOARD)
 
 
 @router.callback_query(F.data == "agent_hint_reviews")
@@ -1674,24 +1618,6 @@ async def callback_agent_show_debug(callback: CallbackQuery) -> None:
     await callback.answer()
     if callback.message:
         await _send_agent_debug_message(callback.message, callback.from_user.id)
-
-
-@router.message(StateFilter(QuickReportState.waiting_for_point), F.text)
-async def handle_quick_report_point(message: Message, state: FSMContext) -> None:
-    point = (message.text or "").strip()
-    if not point:
-        await message.answer("Пришлите точку одним сообщением.")
-        return
-
-    data = await state.get_data()
-    action_key = data.get("quick_report_action")
-    if action_key not in QUICK_REPORT_ACTIONS:
-        await state.clear()
-        await _open_agent_entry(message, state)
-        return
-
-    await state.clear()
-    await _dispatch_agent_request(message, _build_quick_report_request(action_key, point))
 
 
 @router.message(StateFilter(PointManagementState.waiting_for_new_point), F.text)

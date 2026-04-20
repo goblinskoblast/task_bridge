@@ -8,17 +8,20 @@ os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 
 from bot.data_agent_handlers import (
-    QUICK_REPORT_PROMPT_KEYBOARD,
     _build_agent_entry_keyboard,
     _build_agent_entry_text,
+    _build_legacy_quick_report_hint,
     _build_agent_reports_menu_keyboard,
     _build_agent_settings_menu_keyboard,
     _build_point_actions_keyboard,
     _build_report_chat_keyboard,
     _build_slim_main_reply_keyboard,
+    callback_agent_quick_stoplist,
     _send_monitors_summary,
     cmd_delpoint,
     cmd_unmonitor,
+    open_monitors_from_button,
+    open_quick_reports_from_button,
 )
 from bot.handlers import _build_help_message, _build_main_reply_keyboard, _build_welcome_message
 
@@ -139,12 +142,6 @@ class AgentNavigationTest(unittest.TestCase):
         self.assertNotIn("📡 Мониторы", texts)
         self.assertEqual(keyboard.input_field_placeholder, "Напишите задачу или запрос агенту")
 
-    def test_quick_report_prompt_has_single_home_action(self):
-        texts = _flatten_inline_texts(QUICK_REPORT_PROMPT_KEYBOARD)
-
-        self.assertEqual(texts, ["↩️ В меню агента"])
-        self.assertNotIn("❌ Отмена", texts)
-
     def test_help_message_prefers_free_text_over_legacy_report_commands(self):
         text = _build_help_message()
 
@@ -176,6 +173,65 @@ class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
         async def answer(self, text: str, **kwargs: object) -> None:
             self.answers.append(text)
             self.reply_markups.append(kwargs.get("reply_markup"))
+
+    class DummyCallback:
+        def __init__(self) -> None:
+            self.message = LegacyCommandUxTest.DummyMessage("")
+            self.from_user = SimpleNamespace(id=17)
+            self.answers: list[str | None] = []
+
+        async def answer(self, text: str | None = None, **kwargs: object) -> None:
+            self.answers.append(text)
+
+    class DummyState:
+        def __init__(self) -> None:
+            self.clear_count = 0
+
+        async def clear(self) -> None:
+            self.clear_count += 1
+
+    def test_legacy_quick_report_hint_points_to_free_text(self):
+        text = _build_legacy_quick_report_hint("stoplist")
+
+        self.assertIn("обычным сообщением", text)
+        self.assertIn("пришли стоп-лист", text)
+        self.assertNotIn("Пришлите только точку", text)
+
+    async def test_legacy_quick_report_callback_no_longer_prompts_point_keyboard(self):
+        callback = self.DummyCallback()
+        state = self.DummyState()
+
+        await callback_agent_quick_stoplist(callback, state)
+
+        self.assertEqual(state.clear_count, 1)
+        self.assertEqual(len(callback.message.answers), 1)
+        self.assertIn("обычным сообщением", callback.message.answers[0])
+        self.assertIn("пришли стоп-лист", callback.message.answers[0])
+        self.assertEqual(_flatten_inline_texts(callback.message.reply_markups[-1]), ["↩️ В меню агента"])
+
+    async def test_legacy_quick_reports_reply_button_opens_text_examples(self):
+        message = self.DummyMessage("⚡ Быстрые отчёты")
+        state = self.DummyState()
+
+        with patch("bot.data_agent_handlers._refresh_private_main_menu", AsyncMock()) as mocked_refresh:
+            with patch("bot.data_agent_handlers._send_agent_reports_menu", AsyncMock()) as mocked_reports:
+                await open_quick_reports_from_button(message, state)
+
+        self.assertEqual(state.clear_count, 1)
+        mocked_refresh.assert_awaited_once()
+        mocked_reports.assert_awaited_once_with(message)
+
+    async def test_legacy_monitors_reply_button_opens_active_summary(self):
+        message = self.DummyMessage("📡 Мониторы")
+        state = self.DummyState()
+
+        with patch("bot.data_agent_handlers._refresh_private_main_menu", AsyncMock()) as mocked_refresh:
+            with patch("bot.data_agent_handlers._send_monitors_summary", AsyncMock()) as mocked_monitors:
+                await open_monitors_from_button(message, state)
+
+        self.assertEqual(state.clear_count, 1)
+        mocked_refresh.assert_awaited_once()
+        mocked_monitors.assert_awaited_once_with(message)
 
     async def test_unmonitor_without_id_points_to_free_text_disable(self):
         message = self.DummyMessage("/unmonitor")
