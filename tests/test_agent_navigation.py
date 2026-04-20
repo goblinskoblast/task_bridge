@@ -33,7 +33,6 @@ from bot.handlers import (
     PANEL_BUTTON_TEXT,
     _build_help_message,
     _build_main_reply_keyboard,
-    _build_start_shortcuts_keyboard,
     _build_welcome_message,
 )
 
@@ -65,23 +64,15 @@ class AgentNavigationTest(unittest.TestCase):
         self.assertNotIn("📡 Мониторы", texts)
         self.assertEqual(keyboard.input_field_placeholder, "Напишите задачу или запрос агенту")
 
-    def test_start_shortcuts_keyboard_has_panel_and_agent_buttons(self):
-        keyboard = _build_start_shortcuts_keyboard("https://example.com/webapp")
-        texts = _flatten_inline_texts(keyboard)
-
-        self.assertEqual(texts, [PANEL_BUTTON_TEXT, AGENT_MAIN_BUTTON_TEXT])
-        self.assertEqual(keyboard.inline_keyboard[0][0].web_app.url, "https://example.com/webapp")
-        self.assertEqual(keyboard.inline_keyboard[1][0].callback_data, "agent_open")
-
     def test_agent_root_keyboard_for_ready_user_has_only_main_sections(self):
         texts = _flatten_inline_texts(_build_agent_entry_keyboard(has_system=True, has_points=True))
 
         self.assertEqual(
             texts,
             [
-                "📍 Точки",
-                "📡 Что включено",
-                "⚙️ Настройки",
+                POINTS_BUTTON_TEXT,
+                MONITORS_MENU_BUTTON_TEXT,
+                SETTINGS_BUTTON_TEXT,
             ],
         )
 
@@ -95,7 +86,7 @@ class AgentNavigationTest(unittest.TestCase):
             texts,
             [
                 "➕ Добавить точку",
-                "⚙️ Настройки",
+                SETTINGS_BUTTON_TEXT,
             ],
         )
 
@@ -181,31 +172,6 @@ class AgentNavigationTest(unittest.TestCase):
         self.assertIn("открыть агента, сохранить точку", text)
         self.assertIn("обычным сообщением", text)
         self.assertNotIn("быстрых отчётов", text)
-
-
-    def test_agent_root_keyboard_for_ready_user_has_only_main_sections(self):
-        texts = _flatten_inline_texts(_build_agent_entry_keyboard(has_system=True, has_points=True))
-
-        self.assertEqual(
-            texts,
-            [
-                POINTS_BUTTON_TEXT,
-                MONITORS_MENU_BUTTON_TEXT,
-                SETTINGS_BUTTON_TEXT,
-            ],
-        )
-
-    def test_agent_root_keyboard_without_points_leads_to_add_point(self):
-        texts = _flatten_inline_texts(_build_agent_entry_keyboard(has_system=True, has_points=False))
-        self.assertEqual(
-            texts,
-            [
-                "➕ Добавить точку",
-                SETTINGS_BUTTON_TEXT,
-            ],
-        )
-
-
 class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
     class DummyMessage:
         def __init__(self, text: str) -> None:

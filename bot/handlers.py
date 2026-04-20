@@ -333,15 +333,6 @@ def _build_main_reply_keyboard(webapp_url: str) -> ReplyKeyboardMarkup:
     )
 
 
-def _build_start_shortcuts_keyboard(webapp_url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=PANEL_BUTTON_TEXT, web_app=WebAppInfo(url=webapp_url))],
-            [InlineKeyboardButton(text=AGENT_MAIN_BUTTON_TEXT, callback_data="agent_open")],
-        ]
-    )
-
-
 def _build_welcome_message(is_first_auth: bool, pending_count: int) -> str:
     if pending_count:
         intro = (
