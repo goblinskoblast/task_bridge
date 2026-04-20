@@ -1219,8 +1219,11 @@ class ItalianPizzaPortalAdapter:
                 else:
                     class_name = (await button.get_attribute("class") or "").lower()
                     if "disabled" in class_name or await button.is_disabled():
-                        logger.info("Blanks blank-hour chip already active value=%s selector=data-cy", hour_value)
-                        return True
+                        if await self._wait_for_blank_hour_applied(page, hour_value, timeout_ms=3500):
+                            logger.info("Blanks blank-hour chip already active value=%s selector=data-cy", hour_value)
+                            return True
+                        logger.info("Blanks blank-hour chip active state did not match table value=%s selector=data-cy", hour_value)
+                        return False
                     await button.click(timeout=3500, force=True)
                     if await self._wait_for_blank_hour_applied(page, hour_value):
                         await page.wait_for_timeout(500)
@@ -1244,8 +1247,11 @@ class ItalianPizzaPortalAdapter:
 
             class_name = (await item.get_attribute("class") or "").lower()
             if "disabled" in class_name:
-                logger.info("Blanks blank-hour chip already active value=%s idx=%s", hour_value, idx)
-                return True
+                if await self._wait_for_blank_hour_applied(page, hour_value, timeout_ms=3500):
+                    logger.info("Blanks blank-hour chip already active value=%s idx=%s", hour_value, idx)
+                    return True
+                logger.info("Blanks blank-hour chip active state did not match table value=%s idx=%s", hour_value, idx)
+                return False
 
             try:
                 await item.click(timeout=2500, force=True)

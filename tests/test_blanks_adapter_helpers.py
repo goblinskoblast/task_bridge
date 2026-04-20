@@ -523,6 +523,77 @@ class BlanksAdapterAsyncHelpersTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mocked_click.await_count, 2)
         page.wait_for_timeout.assert_awaited_once()
 
+    async def test_click_blank_hour_chip_confirms_disabled_chip_applied_to_table(self):
+        button = SimpleNamespace(
+            is_visible=AsyncMock(return_value=True),
+            get_attribute=AsyncMock(return_value="Mui-disabled"),
+            is_disabled=AsyncMock(return_value=True),
+            click=AsyncMock(),
+        )
+
+        class Locator:
+            def __init__(self, item=None):
+                self.first = item
+
+            async def count(self):
+                return 1 if self.first is not None else 0
+
+            def nth(self, index):
+                return self.first
+
+        class Page:
+            def locator(self, selector):
+                if selector == "button[data-cy='hour-3']":
+                    return Locator(button)
+                return Locator()
+
+        page = Page()
+        with patch.object(
+            self.adapter,
+            "_wait_for_blank_hour_applied",
+            AsyncMock(return_value=True),
+        ) as mocked_wait:
+            result = await self.adapter._click_blank_hour_chip_once(page, "3")
+
+        self.assertTrue(result)
+        mocked_wait.assert_awaited_once()
+        self.assertIs(mocked_wait.await_args.args[0], page)
+        self.assertEqual(mocked_wait.await_args.args[1], "3")
+        self.assertEqual(mocked_wait.await_args.kwargs["timeout_ms"], 3500)
+        button.click.assert_not_awaited()
+
+    async def test_click_blank_hour_chip_rejects_disabled_chip_when_table_is_stale(self):
+        button = SimpleNamespace(
+            is_visible=AsyncMock(return_value=True),
+            get_attribute=AsyncMock(return_value="Mui-disabled"),
+            is_disabled=AsyncMock(return_value=True),
+            click=AsyncMock(),
+        )
+
+        class Locator:
+            def __init__(self, item=None):
+                self.first = item
+
+            async def count(self):
+                return 1 if self.first is not None else 0
+
+        class Page:
+            def locator(self, selector):
+                if selector == "button[data-cy='hour-3']":
+                    return Locator(button)
+                return Locator()
+
+        with patch.object(
+            self.adapter,
+            "_wait_for_blank_hour_applied",
+            AsyncMock(return_value=False),
+        ) as mocked_wait:
+            result = await self.adapter._click_blank_hour_chip_once(Page(), "3")
+
+        self.assertFalse(result)
+        mocked_wait.assert_awaited_once()
+        button.click.assert_not_awaited()
+
     async def test_wait_for_blank_hour_applied_accepts_matching_slot_without_active_button(self):
         page = SimpleNamespace(wait_for_timeout=AsyncMock())
         with patch.object(self.adapter, "_active_blank_hour_value", AsyncMock(return_value=None)):
