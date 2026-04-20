@@ -660,6 +660,29 @@ def _get_command_args(raw_text: str | None) -> str:
     return parts[1].strip()
 
 
+def _looks_like_systems_summary_request(text: str) -> bool:
+    lowered = re.sub(r"\s+", " ", (text or "").lower()).strip()
+    if not lowered or "систем" not in lowered:
+        return False
+    if any(marker in lowered for marker in ("подключи", "подключить", "добавь", "добавить")):
+        return False
+    if lowered.startswith(("подключенные системы", "подключённые системы")):
+        return True
+    return any(
+        marker in lowered
+        for marker in (
+            "какие",
+            "какая",
+            "покажи",
+            "показать",
+            "список",
+            "что у меня",
+            "есть ли",
+            "активные",
+        )
+    )
+
+
 def _build_quick_report_request(action_key: str, point: str) -> str:
     action = QUICK_REPORT_ACTIONS[action_key]
     return action["request_builder"](point.strip())
@@ -2003,7 +2026,11 @@ async def connect_waiting_for_password(message: Message, state: FSMContext) -> N
     F.text != HELP_BUTTON_TEXT,
 )
 async def handle_private_agent_message(message: Message, state: FSMContext) -> None:
-    await _dispatch_agent_request(message, (message.text or "").strip())
+    text = (message.text or "").strip()
+    if _looks_like_systems_summary_request(text):
+        await _send_systems_summary(message)
+        return
+    await _dispatch_agent_request(message, text)
 
 
 @router.message(
