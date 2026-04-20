@@ -1459,27 +1459,13 @@ async def callback_agent_point_report(callback: CallbackQuery) -> None:
     if not callback.message:
         return
     payload = callback.data[len(POINT_REPORT_CALLBACK_PREFIX):]
-    point_ref, action_key = payload.split(":", 1)
+    payload_parts = payload.split(":", 1)
+    action_key = payload_parts[1] if len(payload_parts) == 2 else ""
     if action_key not in QUICK_REPORT_ACTIONS:
-        await callback.message.answer("Не удалось определить тип отчёта.")
+        await callback.message.answer("Не удалось определить тип отчёта.", reply_markup=AGENT_HOME_KEYBOARD)
         return
 
-    db = get_db_session()
-    try:
-        points = (
-            saved_point_service.list_points(db, callback.from_user.id)
-            if point_ref == "all"
-            else [saved_point_service.get_point(db, callback.from_user.id, int(point_ref))]
-        )
-        points = [item for item in points if item and item.is_active]
-    finally:
-        db.close()
-
-    if not points:
-        await callback.message.answer("Точки не найдены.")
-        return
-
-    await _send_saved_points_report(callback.message, action_key, points, actor_user=callback.from_user)
+    await callback.message.answer(_build_legacy_quick_report_hint(action_key), reply_markup=AGENT_HOME_KEYBOARD)
 
 
 @router.callback_query(F.data.startswith(POINT_DELIVERY_CALLBACK_PREFIX))

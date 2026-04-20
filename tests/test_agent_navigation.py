@@ -16,6 +16,7 @@ from bot.data_agent_handlers import (
     _build_point_actions_keyboard,
     _build_report_chat_keyboard,
     _build_slim_main_reply_keyboard,
+    callback_agent_point_report,
     callback_agent_quick_stoplist,
     _send_monitors_summary,
     cmd_delpoint,
@@ -176,7 +177,8 @@ class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
             self.reply_markups.append(kwargs.get("reply_markup"))
 
     class DummyCallback:
-        def __init__(self) -> None:
+        def __init__(self, data: str = "") -> None:
+            self.data = data
             self.message = LegacyCommandUxTest.DummyMessage("")
             self.from_user = SimpleNamespace(id=17)
             self.answers: list[str | None] = []
@@ -205,6 +207,18 @@ class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
         await callback_agent_quick_stoplist(callback, state)
 
         self.assertEqual(state.clear_count, 1)
+        self.assertEqual(len(callback.message.answers), 1)
+        self.assertIn("обычным сообщением", callback.message.answers[0])
+        self.assertIn("пришли стоп-лист", callback.message.answers[0])
+        self.assertEqual(_flatten_inline_texts(callback.message.reply_markups[-1]), ["↩️ В меню агента"])
+
+    async def test_legacy_point_report_callback_no_longer_runs_report(self):
+        callback = self.DummyCallback("agent_point_report:7:stoplist")
+
+        with patch("bot.data_agent_handlers._send_saved_points_report", AsyncMock()) as mocked_report:
+            await callback_agent_point_report(callback)
+
+        mocked_report.assert_not_awaited()
         self.assertEqual(len(callback.message.answers), 1)
         self.assertIn("обычным сообщением", callback.message.answers[0])
         self.assertIn("пришли стоп-лист", callback.message.answers[0])
