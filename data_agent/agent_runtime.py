@@ -57,12 +57,24 @@ MONITOR_DISABLE_MARKERS = (
 
 MONITOR_LIST_MARKERS = (
     "какие мониторинги",
+    "какие у меня мониторинги",
     "покажи мониторинги",
+    "покажи мои мониторинги",
+    "покажи активные мониторинги",
     "список мониторингов",
     "активные мониторинги",
     "мои мониторинги",
     "что у меня включено",
+    "что сейчас включено",
+    "что включено",
     "что включено по мониторингам",
+    "что присылается",
+    "что ты присылаешь",
+    "какие отчеты присылаются",
+    "какие отчёты присылаются",
+    "какие рассылки",
+    "активные рассылки",
+    "активные уведомления",
 )
 
 
@@ -180,7 +192,7 @@ class DataAgentRuntime:
             merged_slots["monitor_interval_minutes"] = session.slots.get("monitor_interval_minutes")
         if merged_slots.get("monitor_interval_minutes") and not merged_slots.get("monitor_interval_source") and session.slots.get("monitor_interval_source"):
             merged_slots["monitor_interval_source"] = session.slots.get("monitor_interval_source")
-        required = self._required_slots(base.scenario)
+        required = self._required_slots(base.scenario, merged_slots)
         if merged_slots.get("all_points") and "point_name" in required:
             required = [slot for slot in required if slot != "point_name"]
         missing = [slot for slot in required if not merged_slots.get(slot)]
@@ -200,6 +212,7 @@ class DataAgentRuntime:
         lowered = re.sub(r"\s+", " ", (message or "").lower()).strip()
         scenario = "general"
         reasoning = "Rule-based routing"
+        monitor_action = self._extract_monitor_action(lowered)
         if self._has_monitor_list_intent(lowered):
             scenario = "monitor_management"
             reasoning = "Запрошен список мониторингов"
@@ -212,6 +225,9 @@ class DataAgentRuntime:
         elif any(token in lowered for token in ["отзыв", "отзывы", "рейтинг", "2гис", "2gis", "яндекс карты"]):
             scenario = "reviews_report"
             reasoning = "Определен сценарий отзывов"
+        elif monitor_action == "disable" and self._looks_like_generic_monitor_disable(lowered, message):
+            scenario = "monitor_management"
+            reasoning = "Запрошено отключение мониторинга без ID"
         elif self._is_point_only_followup(message, session):
             scenario = session.scenario or "general"
             reasoning = f"Точка обновляет текущий сценарий {scenario}"
@@ -230,7 +246,7 @@ class DataAgentRuntime:
                 slots["monitor_interval_source"] = "default_intent"
         if scenario == "blanks_report" and monitor_action != "disable" and not slots.get("period_hint"):
             slots["period_hint"] = "за последние 3 часа"
-        required = self._required_slots(scenario)
+        required = self._required_slots(scenario, slots)
         if slots.get("all_points") and "point_name" in required:
             required = [slot for slot in required if slot != "point_name"]
         missing = [slot for slot in required if not slots.get(slot)]
@@ -292,7 +308,7 @@ class DataAgentRuntime:
         if result.get("period_hint"):
             slots["period_hint"] = str(result["period_hint"]).strip()
         slots["source_message"] = message
-        required = self._required_slots(scenario)
+        required = self._required_slots(scenario, slots)
         if slots.get("all_points") and "point_name" in required:
             required = [slot for slot in required if slot != "point_name"]
         missing = [slot for slot in required if not slots.get(slot)]
@@ -388,7 +404,32 @@ class DataAgentRuntime:
         return any(marker in lowered for marker in MONITOR_INTENT_MARKERS)
 
     def _has_monitor_list_intent(self, lowered: str) -> bool:
-        return any(marker in lowered for marker in MONITOR_LIST_MARKERS)
+        if any(marker in lowered for marker in MONITOR_LIST_MARKERS):
+            return True
+        if "мониторинг" in lowered and any(
+            marker in lowered
+            for marker in (
+                "какие",
+                "покажи",
+                "список",
+                "активные",
+                "включено",
+                "включены",
+                "включённые",
+                "включенные",
+            )
+        ):
+            return True
+        if any(marker in lowered for marker in ("какие", "что", "покажи")) and any(
+            marker in lowered for marker in ("присыла", "рассыл", "уведомлен")
+        ):
+            return True
+        return False
+
+    def _looks_like_generic_monitor_disable(self, lowered: str, message: str) -> bool:
+        if any(marker in lowered for marker in ("мониторинг", "рассыл", "уведомлен", "уведомлени", "уведомления")):
+            return True
+        return resolve_italian_pizza_point(message) is not None
 
     def _extract_monitor_action(self, lowered: str) -> Optional[str]:
         if self._has_monitor_list_intent(lowered):
@@ -425,7 +466,9 @@ class DataAgentRuntime:
         )
         return any(marker in lowered for marker in markers)
 
-    def _required_slots(self, scenario: str) -> List[str]:
+    def _required_slots(self, scenario: str, slots: Dict[str, Any] | None = None) -> List[str]:
+        if scenario == "monitor_management" and slots and slots.get("monitor_action") == "disable":
+            return ["point_name"]
         if scenario in {"stoplist_report", "blanks_report"}:
             return ["point_name"]
         return []
@@ -451,6 +494,8 @@ class DataAgentRuntime:
 
     def build_missing_slots_answer(self, decision: AgentDecision) -> str:
         if "point_name" in decision.missing_slots:
+            if decision.scenario == "monitor_management":
+                return "Не хватает точки для отключения мониторинга. Пришли город и адрес пиццерии одним сообщением."
             if decision.scenario == "stoplist_report":
                 return "Не хватает точки для стоп-листа. Пришли город и адрес пиццерии одним сообщением."
             if decision.scenario == "blanks_report":

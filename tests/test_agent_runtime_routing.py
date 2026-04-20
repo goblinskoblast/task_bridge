@@ -191,6 +191,49 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
         self.assertEqual(decision.slots.get("monitor_action"), "list")
         self.assertEqual(decision.missing_slots, [])
 
+    def test_rule_based_decision_understands_flexible_monitor_list_phrases(self):
+        phrases = [
+            "Какие у меня мониторинги включены?",
+            "Какие отчёты сейчас присылаются?",
+            "Что сейчас включено по рассылкам?",
+        ]
+
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                decision = self.runtime._rule_based_decision(
+                    phrase,
+                    AgentSessionSnapshot(user_id=1),
+                    1,
+                )
+
+                self.assertEqual(decision.scenario, "monitor_management")
+                self.assertEqual(decision.slots.get("monitor_action"), "list")
+                self.assertEqual(decision.missing_slots, [])
+
+    def test_rule_based_decision_routes_generic_monitor_disable_by_point(self):
+        expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
+        decision = self.runtime._rule_based_decision(
+            "Останови мониторинг по Сухой Лог Белинского 40.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "monitor_management")
+        self.assertEqual(decision.slots.get("point_name"), expected_point_name)
+        self.assertEqual(decision.slots.get("monitor_action"), "disable")
+        self.assertEqual(decision.missing_slots, [])
+
+    def test_rule_based_decision_asks_point_for_generic_monitor_disable(self):
+        decision = self.runtime._rule_based_decision(
+            "Останови мониторинг.",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "monitor_management")
+        self.assertEqual(decision.slots.get("monitor_action"), "disable")
+        self.assertEqual(decision.missing_slots, ["point_name"])
+
     def test_rule_based_decision_keeps_one_off_blanks_request_without_monitor_interval(self):
         expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
         decision = self.runtime._rule_based_decision(

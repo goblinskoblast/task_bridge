@@ -124,6 +124,95 @@ class MonitorDisableTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(config)
         self.assertFalse(config.is_active)
 
+    async def test_chat_disables_single_monitor_by_point_without_monitor_id(self):
+        decision = AgentDecision(
+            scenario="monitor_management",
+            selected_tools=["orchestrator"],
+            slots={
+                "point_name": self.point_name,
+                "monitor_action": "disable",
+                "source_message": "останови мониторинг",
+            },
+            missing_slots=[],
+            reasoning="test",
+        )
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch("data_agent.agent_runtime.get_db_session", side_effect=self.SessionLocal):
+                with patch("data_agent.service.agent_runtime.decide", AsyncMock(return_value=decision)):
+                    with patch("data_agent.service.scenario_engine.execute", AsyncMock()) as mocked_execute:
+                        response = await self.service.chat(
+                            DataAgentChatRequest(
+                                user_id=137236883,
+                                message="Останови мониторинг по Сухой Лог Белинского 40.",
+                            )
+                        )
+
+        session = self.SessionLocal()
+        try:
+            config = (
+                session.query(DataAgentMonitorConfig)
+                .filter(DataAgentMonitorConfig.point_name == self.point_name)
+                .first()
+            )
+        finally:
+            session.close()
+
+        mocked_execute.assert_not_awaited()
+        self.assertTrue(response.ok)
+        self.assertEqual(response.scenario, "monitor_management")
+        self.assertEqual(response.status, "completed")
+        self.assertEqual(response.answer, f"Отключил мониторинг бланков по точке {self.point_name}.")
+        self.assertIsNotNone(config)
+        self.assertFalse(config.is_active)
+
+    def test_disable_monitor_by_point_asks_type_when_multiple_monitors_are_active(self):
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 137236883).first()
+            session.add(
+                DataAgentMonitorConfig(
+                    user_id=user.id,
+                    system_name="italian_pizza",
+                    monitor_type="stoplist",
+                    point_name=self.point_name,
+                    check_interval_minutes=180,
+                    is_active=True,
+                    active_from_hour=8,
+                    active_to_hour=20,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            answer = self.service._disable_monitor(
+                user_id=137236883,
+                scenario="monitor_management",
+                point_name=self.point_name,
+            )
+
+        session = self.SessionLocal()
+        try:
+            active_count = (
+                session.query(DataAgentMonitorConfig)
+                .filter(
+                    DataAgentMonitorConfig.point_name == self.point_name,
+                    DataAgentMonitorConfig.is_active == True,
+                )
+                .count()
+            )
+        finally:
+            session.close()
+
+        self.assertEqual(active_count, 2)
+        self.assertIn("включено несколько мониторингов", answer)
+        self.assertIn("бланки", answer)
+        self.assertIn("стоп-лист", answer)
+        self.assertIn("не присылай бланки", answer)
+        self.assertNotIn("ID", answer)
+
     def test_build_monitors_summary_uses_user_timezone_and_plain_text(self):
         with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
             answer = self.service._build_monitors_summary(137236883)
