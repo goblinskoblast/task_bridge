@@ -208,7 +208,15 @@ class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("обычным сообщением", text)
         self.assertIn("пришли стоп-лист", text)
+        self.assertNotIn("быстрые кнопки больше не нужны", text)
         self.assertNotIn("Пришлите только точку", text)
+
+    def test_legacy_quick_report_hint_can_use_specific_point(self):
+        text = _build_legacy_quick_report_hint("stoplist", point_name="Сухой Лог, Белинского 40")
+
+        self.assertIn("пришли стоп-лист по Сухой Лог, Белинского 40", text)
+        self.assertIn("присылай стоп-лист по Сухой Лог, Белинского 40 каждые 3 часа", text)
+        self.assertNotIn("Верхний Уфалей", text)
 
     async def test_legacy_quick_report_callback_no_longer_prompts_point_keyboard(self):
         callback = self.DummyCallback()
@@ -226,12 +234,18 @@ class LegacyCommandUxTest(unittest.IsolatedAsyncioTestCase):
         callback = self.DummyCallback("agent_point_report:7:stoplist")
 
         with patch("bot.data_agent_handlers._send_saved_points_report", AsyncMock()) as mocked_report:
-            await callback_agent_point_report(callback)
+            with patch(
+                "bot.data_agent_handlers._resolve_saved_point_name",
+                return_value="Сухой Лог, Белинского 40",
+            ) as mocked_point_name:
+                await callback_agent_point_report(callback)
 
         mocked_report.assert_not_awaited()
+        mocked_point_name.assert_called_once_with(17, 7)
         self.assertEqual(len(callback.message.answers), 1)
         self.assertIn("обычным сообщением", callback.message.answers[0])
-        self.assertIn("пришли стоп-лист", callback.message.answers[0])
+        self.assertIn("пришли стоп-лист по Сухой Лог, Белинского 40", callback.message.answers[0])
+        self.assertIn("присылай стоп-лист по Сухой Лог, Белинского 40 каждые 3 часа", callback.message.answers[0])
         self.assertEqual(_flatten_inline_texts(callback.message.reply_markups[-1]), ["↩️ В меню агента"])
 
     async def test_legacy_quick_reports_reply_button_opens_text_examples(self):

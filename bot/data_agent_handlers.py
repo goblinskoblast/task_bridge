@@ -694,39 +694,52 @@ def _build_quick_report_request(action_key: str, point: str) -> str:
     return action["request_builder"](point.strip())
 
 
-def _build_legacy_quick_report_hint(action_key: str) -> str:
+def _build_legacy_quick_report_hint(action_key: str, *, point_name: str | None = None) -> str:
+    primary_point = point_name or "Сухой Лог, Белинского 40"
+    secondary_point = point_name or "Верхний Уфалей"
     examples = {
         "reviews_day": (
-            "собери отзывы по Сухой Лог, Белинского 40 за сутки",
-            "собери отзывы по Верхнему Уфалею за сутки",
+            f"собери отзывы по {primary_point} за сутки",
+            f"собери отзывы по {primary_point} за неделю" if point_name else f"собери отзывы по {secondary_point} за сутки",
         ),
         "reviews_week": (
-            "собери отзывы по Сухой Лог, Белинского 40 за неделю",
-            "собери отзывы по Верхнему Уфалею за неделю",
+            f"собери отзывы по {primary_point} за неделю",
+            f"собери отзывы по {primary_point} за сутки" if point_name else f"собери отзывы по {secondary_point} за неделю",
         ),
         "stoplist": (
-            "пришли стоп-лист по Сухой Лог, Белинского 40",
-            "покажи стоп-лист по Верхнему Уфалею",
+            f"пришли стоп-лист по {primary_point}",
+            f"присылай стоп-лист по {primary_point} каждые 3 часа" if point_name else f"покажи стоп-лист по {secondary_point}",
         ),
         "blanks_current": (
-            "покажи бланки по Сухой Лог, Белинского 40",
-            "покажи бланки по всем добавленным точкам",
+            f"покажи бланки по {primary_point}",
+            f"присылай бланки по {primary_point} каждые 3 часа" if point_name else "покажи бланки по всем добавленным точкам",
         ),
         "blanks_12h": (
-            "покажи бланки по Сухой Лог, Белинского 40 за 12 часов",
-            "покажи бланки по всем добавленным точкам за 12 часов",
+            f"покажи бланки по {primary_point} за 12 часов",
+            f"присылай бланки по {primary_point} каждые 3 часа" if point_name else "покажи бланки по всем добавленным точкам за 12 часов",
         ),
     }
     selected = examples.get(action_key) or (
-        "пришли стоп-лист по Сухой Лог, Белинского 40",
+        f"пришли стоп-лист по {primary_point}",
         "покажи бланки по всем добавленным точкам",
     )
     return (
-        "Эти быстрые кнопки больше не нужны: теперь проще написать запрос обычным сообщением.\n\n"
+        "Сейчас проще написать запрос обычным сообщением.\n\n"
         "Например:\n"
         f"• {selected[0]}\n"
         f"• {selected[1]}"
     )
+
+
+def _resolve_saved_point_name(telegram_user_id: int, point_id: int) -> str | None:
+    db = get_db_session()
+    try:
+        point = saved_point_service.get_point(db, telegram_user_id, point_id)
+        if not point or not point.is_active:
+            return None
+        return point.display_name
+    finally:
+        db.close()
 
 
 def _build_voice_request_preview(text: str) -> str:
@@ -1064,13 +1077,13 @@ async def _send_points_summary(message: Message, *, telegram_user_id: int | None
 
 async def _send_agent_reports_menu(message: Message) -> None:
     await message.answer(
-        "💬 <b>Запросы текстом</b>\n\n"
-        "Сейчас удобнее всего просто писать запрос обычным сообщением.\n\n"
+        "💬 <b>Сейчас быстрее так</b>\n\n"
+        "Если система и точки уже добавлены, просто напишите запрос обычным сообщением.\n\n"
         "Например:\n"
         "• пришли стоп-лист по Сухой Лог, Белинского 40\n"
         "• покажи бланки по всем добавленным точкам\n"
         "• собери отзывы по Верхнему Уфалею за неделю\n"
-        "• покажи мониторинги",
+        "• что у меня включено",
         reply_markup=_build_agent_reports_menu_keyboard(),
         parse_mode="HTML",
     )
@@ -1499,12 +1512,18 @@ async def callback_agent_point_report(callback: CallbackQuery) -> None:
         return
     payload = callback.data[len(POINT_REPORT_CALLBACK_PREFIX):]
     payload_parts = payload.split(":", 1)
+    point_name: str | None = None
+    if len(payload_parts) == 2 and payload_parts[0].isdigit():
+        point_name = _resolve_saved_point_name(callback.from_user.id, int(payload_parts[0]))
     action_key = payload_parts[1] if len(payload_parts) == 2 else ""
     if action_key not in QUICK_REPORT_ACTIONS:
         await callback.message.answer("Не удалось определить тип отчёта.", reply_markup=AGENT_HOME_KEYBOARD)
         return
 
-    await callback.message.answer(_build_legacy_quick_report_hint(action_key), reply_markup=AGENT_HOME_KEYBOARD)
+    await callback.message.answer(
+        _build_legacy_quick_report_hint(action_key, point_name=point_name),
+        reply_markup=AGENT_HOME_KEYBOARD,
+    )
 
 
 @router.callback_query(F.data.startswith(POINT_DELIVERY_CALLBACK_PREFIX))
