@@ -7,7 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, BotCommandScopeDefault
+from aiogram.types import BotCommandScopeDefault
 from fastapi import HTTPException, Request
 import uvicorn
 
@@ -33,15 +33,9 @@ def get_webhook_target() -> str:
 
 
 async def set_bot_commands(bot: Bot) -> None:
-    """Install the default bot commands menu."""
-    commands = [
-        BotCommand(command="start", description="Начать работу с ботом"),
-        BotCommand(command="panel", description="Открыть панель задач"),
-        BotCommand(command="support", description="Чат поддержки"),
-        BotCommand(command="help", description="Справка и инструкции"),
-    ]
-    await bot.set_my_commands(commands, BotCommandScopeDefault())
-    logger.info("Bot commands menu set successfully")
+    """Keep Telegram's slash-command menu hidden; /start reply buttons are the primary path."""
+    await bot.delete_my_commands(scope=BotCommandScopeDefault())
+    logger.info("Bot commands menu cleared")
 
 
 def build_dispatcher() -> Dispatcher:

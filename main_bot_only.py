@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, BotCommandScopeDefault
+from aiogram.types import BotCommandScopeDefault
 
 from config import BOT_TOKEN
 from bot.handlers import router, init_default_categories
@@ -26,15 +26,9 @@ logger = logging.getLogger(__name__)
 
 
 async def set_bot_commands(bot: Bot):
-    """Устанавливает меню команд бота"""
-    commands = [
-        BotCommand(command="start", description="🚀 Начать работу с ботом"),
-        BotCommand(command="panel", description="📱 Открыть панель задач"),
-        BotCommand(command="support", description="💬 Чат поддержки"),
-        BotCommand(command="help", description="❓ Справка и инструкции")
-    ]
-    await bot.set_my_commands(commands, BotCommandScopeDefault())
-    logger.info("Bot commands menu set successfully")
+    """Убирает нижнее меню команд: основной путь теперь кнопки после /start."""
+    await bot.delete_my_commands(scope=BotCommandScopeDefault())
+    logger.info("Bot commands menu cleared")
 
 
 async def start_bot_polling():
@@ -59,7 +53,7 @@ async def start_bot_polling():
     dp.include_router(data_agent_router)
     dp.include_router(router)
 
-    # Устанавливаем меню команд
+    # Убираем меню команд: навигация идёт через /start и обычный текст.
     await set_bot_commands(bot)
 
     logger.info("Bot started in polling mode (BOT ONLY - no webapp)")
