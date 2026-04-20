@@ -4,6 +4,7 @@ import logging
 import re
 from collections import defaultdict
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -12,9 +13,11 @@ from db.models import DataAgentSystem, PointStatRun, PointStatSnapshot, SavedPoi
 
 from .blanks_tool import blanks_tool
 from .italian_pizza import resolve_italian_pizza_point
+from .monitoring import MONITOR_USER_TIMEZONE
 from .stoplist_tool import stoplist_tool
 
 logger = logging.getLogger(__name__)
+USER_TIMEZONE = ZoneInfo(MONITOR_USER_TIMEZONE)
 
 
 class PointStatisticsService:
@@ -175,17 +178,23 @@ class PointStatisticsService:
                 )
                 return enriched
 
-            previous_snapshot = self._get_latest_snapshot(db, point.id)
+            snapshots = self._list_snapshots(db, point.id)
+            previous_snapshot = snapshots[-1] if snapshots else None
             previous_items = self._normalize_items(previous_snapshot.stoplist_items_json if previous_snapshot else [])
             delta = self._compute_stoplist_delta(previous_items, current_items)
+            history_days = self._build_stoplist_item_history_days(snapshots, current_items)
 
             enriched["delta"] = delta
+            enriched["stoplist_age_days"] = history_days["current"]
+            enriched["removed_stoplist_age_days"] = history_days["removed"]
             enriched["report_text"] = self._render_stoplist_report(
                 point_name=point.display_name,
                 current_items=current_items,
                 delta=delta,
                 has_history=previous_snapshot is not None,
                 is_saved_point=True,
+                current_age_days=history_days["current"],
+                removed_age_days=history_days["removed"],
             )
 
             self._store_stoplist_snapshot(db, point, current_items)
@@ -307,6 +316,64 @@ class PointStatisticsService:
             .first()
         )
 
+    def _list_snapshots(self, db: Session, saved_point_id: int) -> list[PointStatSnapshot]:
+        return (
+            db.query(PointStatSnapshot)
+            .filter(PointStatSnapshot.saved_point_id == saved_point_id)
+            .order_by(PointStatSnapshot.snapshot_at.asc(), PointStatSnapshot.id.asc())
+            .all()
+        )
+
+    def _build_stoplist_item_history_days(
+        self,
+        snapshots: list[PointStatSnapshot],
+        current_items: list[str],
+        *,
+        as_of: datetime | None = None,
+    ) -> dict[str, dict[str, int]]:
+        if not snapshots:
+            return {
+                "current": {item: 1 for item in current_items},
+                "removed": {},
+            }
+
+        ongoing_start_by_item: dict[str, datetime] = {}
+        previous_items: set[str] = set()
+        previous_snapshot_at: datetime | None = None
+
+        for snapshot in snapshots:
+            snapshot_at = snapshot.snapshot_at
+            snapshot_items = set(self._normalize_items(snapshot.stoplist_items_json))
+            ended_items = previous_items - snapshot_items
+            for item in ended_items:
+                ongoing_start_by_item.pop(item, None)
+            for item in snapshot_items:
+                ongoing_start_by_item.setdefault(item, snapshot_at)
+            previous_items = snapshot_items
+            previous_snapshot_at = snapshot_at
+
+        current_set = set(current_items)
+        current_days: dict[str, int] = {}
+        current_reference = as_of or datetime.utcnow()
+        last_snapshot_at = previous_snapshot_at or current_reference
+
+        for item in current_items:
+            if item in previous_items:
+                start_at = ongoing_start_by_item.get(item, last_snapshot_at)
+                current_days[item] = self._count_user_facing_days(start_at, current_reference)
+            else:
+                current_days[item] = 1
+
+        removed_days: dict[str, int] = {}
+        for item in previous_items - current_set:
+            start_at = ongoing_start_by_item.get(item, last_snapshot_at)
+            removed_days[item] = self._count_user_facing_days(start_at, last_snapshot_at)
+
+        return {
+            "current": current_days,
+            "removed": removed_days,
+        }
+
     def _store_stoplist_snapshot(self, db: Session, point: SavedPoint, current_items: list[str]) -> None:
         now = datetime.utcnow()
         run = PointStatRun(
@@ -379,6 +446,47 @@ class PointStatisticsService:
             "stayed": [item for item in current_items if item in previous_set],
         }
 
+    def _count_user_facing_days(self, started_at: datetime, finished_at: datetime) -> int:
+        if started_at.tzinfo is None:
+            started_local = started_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(USER_TIMEZONE)
+        else:
+            started_local = started_at.astimezone(USER_TIMEZONE)
+        if finished_at.tzinfo is None:
+            finished_local = finished_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(USER_TIMEZONE)
+        else:
+            finished_local = finished_at.astimezone(USER_TIMEZONE)
+        return max((finished_local.date() - started_local.date()).days + 1, 1)
+
+    def _format_days_label(self, days: int) -> str:
+        value = max(int(days or 1), 1)
+        remainder_10 = value % 10
+        remainder_100 = value % 100
+        if remainder_10 == 1 and remainder_100 != 11:
+            suffix = "день"
+        elif remainder_10 in {2, 3, 4} and remainder_100 not in {12, 13, 14}:
+            suffix = "дня"
+        else:
+            suffix = "дней"
+        return f"{value} {suffix}"
+
+    def _render_stoplist_section(
+        self,
+        title: str,
+        items: list[str],
+        *,
+        age_days: dict[str, int] | None = None,
+        removed: bool = False,
+    ) -> list[str]:
+        lines = [f"{title}: {len(items)}"]
+        age_days = age_days or {}
+        for index, item in enumerate(items, start=1):
+            line = f"{index}. {item}"
+            days = age_days.get(item)
+            if days:
+                line += f" — {'была в стопе' if removed else 'в стопе'} {self._format_days_label(days)}"
+            lines.append(line)
+        return lines
+
     def _render_stoplist_report(
         self,
         point_name: str,
@@ -387,42 +495,64 @@ class PointStatisticsService:
         *,
         has_history: bool,
         is_saved_point: bool,
+        current_age_days: dict[str, int] | None = None,
+        removed_age_days: dict[str, int] | None = None,
     ) -> str:
         lines = [f"📍 Точка: {point_name}"]
+        current_age_days = current_age_days or {}
+        removed_age_days = removed_age_days or {}
 
         if current_items:
             lines.append(f"🚫 Сейчас в стоп-листе: {len(current_items)}")
-            if has_history and is_saved_point:
-                added_set = set(delta["added"])
-                stayed_set = set(delta["stayed"])
-                for item in current_items:
-                    if item in added_set:
-                        lines.append(f"🆕 {item}")
-                    elif item in stayed_set:
-                        lines.append(f"🔁 {item}")
-                    else:
-                        lines.append(f"• {item}")
-            else:
-                lines.extend(f"• {item}" for item in current_items)
         else:
             lines.append("✅ Сейчас в стоп-листе недоступных позиций нет.")
 
         lines.append("")
+        if current_items:
+            if has_history and is_saved_point:
+                if delta["added"]:
+                    lines.extend(
+                        self._render_stoplist_section(
+                            "🆕 Новые в стопе",
+                            delta["added"],
+                            age_days=current_age_days,
+                        )
+                    )
+                    lines.append("")
+                if delta["stayed"]:
+                    lines.extend(
+                        self._render_stoplist_section(
+                            "🟠 Уже в стопе",
+                            delta["stayed"],
+                            age_days=current_age_days,
+                        )
+                    )
+                    lines.append("")
+            else:
+                lines.extend(self._render_stoplist_section("🟠 Сейчас в стопе", current_items))
+                lines.append("")
+
         if not is_saved_point:
-            lines.append("ℹ️ Чтобы видеть динамику изменений, сохраните эту точку в боте.")
+            lines.append("ℹ️ Чтобы видеть новые позиции, ушедшие позиции и дни в стопе, сохраните эту точку в боте.")
             return "\n".join(lines)
 
         if not has_history:
-            lines.append("🕓 Динамика появится после следующей проверки этой точки.")
+            lines.append("🕓 Разделю позиции на новые и ушедшие и покажу дни в стопе после следующей проверки этой точки.")
             return "\n".join(lines)
 
         if delta["removed"]:
-            lines.append(f"✅ Ушли из стоп-листа: {len(delta['removed'])}")
-            lines.extend(f"• {item}" for item in delta["removed"])
+            lines.extend(
+                self._render_stoplist_section(
+                    "🟢 Ушли из стопа",
+                    delta["removed"],
+                    age_days=removed_age_days,
+                    removed=True,
+                )
+            )
             lines.append("")
 
-        if not delta["added"] and not delta["removed"]:
-            lines.append("🟰 По сравнению с прошлой проверкой изменений нет.")
+        if not current_items and not delta["removed"]:
+            lines.append("🟢 По сравнению с прошлой проверкой новых изменений нет.")
 
         while lines and lines[-1] == "":
             lines.pop()

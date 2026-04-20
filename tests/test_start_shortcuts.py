@@ -10,10 +10,6 @@ os.environ.setdefault("AI_PROVIDER", "openai")
 from bot.handlers import AGENT_MAIN_BUTTON_TEXT, PANEL_BUTTON_TEXT, cmd_start
 
 
-def _flatten_inline_texts(keyboard) -> list[str]:
-    return [button.text for row in keyboard.inline_keyboard for button in row]
-
-
 def _flatten_reply_texts(keyboard) -> list[str]:
     return [button.text for row in keyboard.keyboard for button in row]
 
@@ -61,7 +57,7 @@ class _DummyMessage:
 
 
 class StartShortcutsFlowTest(unittest.IsolatedAsyncioTestCase):
-    async def test_cmd_start_sends_shortcuts_then_reply_menu(self):
+    async def test_cmd_start_sends_single_welcome_with_reply_menu(self):
         message = _DummyMessage()
         db = _DummyDbSession()
         user = SimpleNamespace(id=42, telegram_id=17, username="tester")
@@ -73,18 +69,13 @@ class StartShortcutsFlowTest(unittest.IsolatedAsyncioTestCase):
                         await cmd_start(message)
 
         self.assertTrue(db.closed)
-        self.assertEqual(len(message.answers), 2)
+        self.assertEqual(len(message.answers), 1)
 
         welcome = message.answers[0]
-        self.assertEqual(_flatten_inline_texts(welcome["reply_markup"]), [PANEL_BUTTON_TEXT, AGENT_MAIN_BUTTON_TEXT])
-        self.assertEqual(welcome["reply_markup"].inline_keyboard[0][0].web_app.url, "https://example.com/webapp")
-        self.assertEqual(welcome["reply_markup"].inline_keyboard[1][0].callback_data, "agent_open")
         self.assertEqual(welcome["parse_mode"], "HTML")
-
-        menu_notice = message.answers[1]
-        self.assertEqual(menu_notice["text"], "Меню внизу.")
-        self.assertIn(PANEL_BUTTON_TEXT, _flatten_reply_texts(menu_notice["reply_markup"]))
-        self.assertIn(AGENT_MAIN_BUTTON_TEXT, _flatten_reply_texts(menu_notice["reply_markup"]))
+        self.assertEqual(welcome["reply_markup"].keyboard[0][0].web_app.url, "https://example.com/webapp")
+        self.assertIn(PANEL_BUTTON_TEXT, _flatten_reply_texts(welcome["reply_markup"]))
+        self.assertIn(AGENT_MAIN_BUTTON_TEXT, _flatten_reply_texts(welcome["reply_markup"]))
 
 
 if __name__ == "__main__":
