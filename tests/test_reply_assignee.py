@@ -11,6 +11,7 @@ os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 
 from bot.handlers import (
+    _extract_observed_message_metadata,
     _extract_reply_assignee_hint,
     _resolve_assignee_usernames,
     get_or_create_user_by_username,
@@ -115,6 +116,48 @@ class ReplyAssigneeTest(unittest.TestCase):
             _resolve_assignee_usernames({"assignee_usernames": ["analyst"]}, reply_assignee_hint=reply_hint),
             ["analyst"],
         )
+
+    def test_observed_message_metadata_tracks_reply_to_bot(self):
+        message = SimpleNamespace(
+            reply_to_message=SimpleNamespace(
+                message_id=9001,
+                from_user=SimpleNamespace(is_bot=True),
+            ),
+            forward_origin=None,
+            forward_from=None,
+            forward_from_chat=None,
+            forward_date=None,
+        )
+
+        metadata = _extract_observed_message_metadata(message)
+
+        self.assertEqual(metadata["reply_to_message_id"], 9001)
+        self.assertTrue(metadata["reply_to_from_bot"])
+        self.assertFalse(metadata["is_forwarded"])
+
+    def test_observed_message_metadata_tracks_forward_origin(self):
+        message = SimpleNamespace(
+            reply_to_message=None,
+            forward_origin=SimpleNamespace(
+                type="user",
+                sender_user=SimpleNamespace(
+                    username="taskbridge_bot",
+                    first_name="TaskBridge",
+                    last_name=None,
+                    is_bot=True,
+                ),
+            ),
+            forward_from=None,
+            forward_from_chat=None,
+            forward_date=None,
+        )
+
+        metadata = _extract_observed_message_metadata(message)
+
+        self.assertTrue(metadata["is_forwarded"])
+        self.assertEqual(metadata["forward_origin_type"], "user")
+        self.assertEqual(metadata["forward_origin_title"], "@taskbridge_bot")
+        self.assertTrue(metadata["forward_from_bot"])
 
 
 if __name__ == "__main__":

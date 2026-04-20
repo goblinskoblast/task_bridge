@@ -3,6 +3,7 @@
 import logging
 import json
 import hashlib
+from dataclasses import dataclass
 from datetime import datetime
 
 import pytz
@@ -33,6 +34,37 @@ _MONITOR_FAILURE_STATUSES = {
     "awaiting_user_input",
     "not_configured",
 }
+
+
+@dataclass(frozen=True)
+class _MonitorDelivery:
+    chat_id: int
+    telegram_message_id: int | None = None
+    sent_at: datetime | None = None
+
+
+def _telegram_message_sent_at(sent_message) -> datetime | None:
+    value = getattr(sent_message, "date", None)
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(pytz.UTC).replace(tzinfo=None)
+
+
+def _delivery_from_sent_message(sent_message, *, chat_id: int) -> _MonitorDelivery:
+    return _MonitorDelivery(
+        chat_id=chat_id,
+        telegram_message_id=getattr(sent_message, "message_id", None),
+        sent_at=_telegram_message_sent_at(sent_message) or datetime.utcnow(),
+    )
+
+
+def _mark_event_delivered(event: DataAgentMonitorEvent, delivery: _MonitorDelivery) -> None:
+    event.sent_to_telegram = True
+    event.telegram_chat_id = delivery.chat_id
+    event.telegram_message_id = delivery.telegram_message_id
+    event.telegram_sent_at = delivery.sent_at or datetime.utcnow()
 
 
 def _result_alert_hash(result: dict | None, *, config: DataAgentMonitorConfig | None = None) -> str | None:
@@ -142,10 +174,10 @@ async def _send_with_direct_fallback(
     fallback_chat_id: int | None,
     text: str,
     parse_mode: str | None = None,
-) -> int:
+) -> _MonitorDelivery:
     try:
-        await bot.send_message(chat_id=primary_chat_id, text=text, parse_mode=parse_mode)
-        return primary_chat_id
+        sent_message = await bot.send_message(chat_id=primary_chat_id, text=text, parse_mode=parse_mode)
+        return _delivery_from_sent_message(sent_message, chat_id=primary_chat_id)
     except Exception as exc:
         if not fallback_chat_id or fallback_chat_id == primary_chat_id:
             raise
@@ -155,8 +187,8 @@ async def _send_with_direct_fallback(
             fallback_chat_id,
             exc,
         )
-        await bot.send_message(chat_id=fallback_chat_id, text=text, parse_mode=parse_mode)
-        return fallback_chat_id
+        sent_message = await bot.send_message(chat_id=fallback_chat_id, text=text, parse_mode=parse_mode)
+        return _delivery_from_sent_message(sent_message, chat_id=fallback_chat_id)
 
 
 def _build_monitor_failure_hash(config: DataAgentMonitorConfig, result: dict) -> str:
@@ -406,7 +438,7 @@ async def _run_blanks_monitor(
             user = db.query(User).filter(User.id == config.user_id).first()
             delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "blanks")
             if notify_user and delivery_chat_id:
-                delivered_chat_id = await _send_with_direct_fallback(
+                delivery = await _send_with_direct_fallback(
                     bot,
                     primary_chat_id=delivery_chat_id,
                     fallback_chat_id=_resolve_direct_user_chat_id(user),
@@ -422,10 +454,10 @@ async def _run_blanks_monitor(
                     "Blanks monitor alert sent user_id=%s point=%s chat_id=%s alert_hash=%s",
                     config.user_id,
                     config.point_name,
-                    delivered_chat_id,
+                    delivery.chat_id,
                     alert_hash,
                 )
-                event.sent_to_telegram = True
+                _mark_event_delivered(event, delivery)
             config.last_alert_hash = alert_hash
             db.commit()
         elif not has_red_flags and (not previous_had_red_flags or has_scan_evidence):
@@ -512,7 +544,7 @@ async def _run_stoplist_monitor(
 
             delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "stoplist")
             if notify_user and delivery_chat_id:
-                await bot.send_message(
+                sent_message = await bot.send_message(
                     chat_id=delivery_chat_id,
                     text=(
                         f"{'Стоп-лист изменился' if changed else 'Стоп-лист по расписанию'}\n\n"
@@ -521,7 +553,10 @@ async def _run_stoplist_monitor(
                     ),
                     parse_mode="HTML",
                 )
-                event.sent_to_telegram = True
+                _mark_event_delivered(
+                    event,
+                    _delivery_from_sent_message(sent_message, chat_id=delivery_chat_id),
+                )
             config.last_alert_hash = report_hash
             db.commit()
         else:
@@ -602,7 +637,7 @@ async def _run_reviews_monitor(
             user = db.query(User).filter(User.id == config.user_id).first()
             delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "reviews")
             if notify_user and delivery_chat_id:
-                await bot.send_message(
+                sent_message = await bot.send_message(
                     chat_id=delivery_chat_id,
                     text=(
                         "Обновился отчёт по отзывам\n\n"
@@ -610,7 +645,10 @@ async def _run_reviews_monitor(
                     ),
                     parse_mode="HTML",
                 )
-                event.sent_to_telegram = True
+                _mark_event_delivered(
+                    event,
+                    _delivery_from_sent_message(sent_message, chat_id=delivery_chat_id),
+                )
             config.last_alert_hash = report_hash
             db.commit()
         else:

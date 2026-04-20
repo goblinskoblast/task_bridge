@@ -63,11 +63,56 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
 
 def init_db():
     Base.metadata.create_all(bind=sync_engine)
+    _ensure_message_columns()
     _ensure_task_columns()
     _ensure_data_agent_profile_columns()
     _ensure_data_agent_monitor_columns()
     _ensure_data_agent_session_columns()
     _ensure_saved_point_columns()
+
+
+def _ensure_message_columns():
+    inspector = inspect(sync_engine)
+    if "messages" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("messages")}
+    bigint_type = "BIGINT" if sync_engine.dialect.name == "postgresql" else "INTEGER"
+    boolean_type = "BOOLEAN" if sync_engine.dialect.name == "postgresql" else "INTEGER"
+    default_false = "FALSE" if sync_engine.dialect.name == "postgresql" else "0"
+    alter_statements = []
+
+    if "reply_to_message_id" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE messages ADD COLUMN reply_to_message_id {bigint_type}"
+        )
+    if "reply_to_from_bot" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE messages ADD COLUMN reply_to_from_bot {boolean_type}"
+        )
+    if "is_forwarded" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE messages ADD COLUMN is_forwarded {boolean_type} DEFAULT {default_false}"
+        )
+    if "forward_origin_type" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE messages ADD COLUMN forward_origin_type VARCHAR(50)"
+        )
+    if "forward_origin_title" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE messages ADD COLUMN forward_origin_title VARCHAR(500)"
+        )
+    if "forward_from_bot" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE messages ADD COLUMN forward_from_bot {boolean_type}"
+        )
+
+    if not alter_statements:
+        return
+
+    with sync_engine.begin() as connection:
+        for statement in alter_statements:
+            connection.execute(text(statement))
 
 
 def _ensure_task_columns():
@@ -206,11 +251,38 @@ def _ensure_data_agent_monitor_columns():
             f"ALTER TABLE data_agent_monitor_configs ADD COLUMN active_to_hour {integer_type}"
         )
 
-    if not alter_statements:
+    if alter_statements:
+        with sync_engine.begin() as connection:
+            for statement in alter_statements:
+                connection.execute(text(statement))
+
+    if "data_agent_monitor_events" not in inspector.get_table_names():
+        return
+
+    inspector = inspect(sync_engine)
+    event_column_names = {column["name"] for column in inspector.get_columns("data_agent_monitor_events")}
+    bigint_type = "BIGINT" if sync_engine.dialect.name == "postgresql" else "INTEGER"
+    datetime_type = "TIMESTAMP" if sync_engine.dialect.name == "postgresql" else "DATETIME"
+    event_alter_statements = []
+
+    if "telegram_chat_id" not in event_column_names:
+        event_alter_statements.append(
+            f"ALTER TABLE data_agent_monitor_events ADD COLUMN telegram_chat_id {bigint_type}"
+        )
+    if "telegram_message_id" not in event_column_names:
+        event_alter_statements.append(
+            f"ALTER TABLE data_agent_monitor_events ADD COLUMN telegram_message_id {bigint_type}"
+        )
+    if "telegram_sent_at" not in event_column_names:
+        event_alter_statements.append(
+            f"ALTER TABLE data_agent_monitor_events ADD COLUMN telegram_sent_at {datetime_type}"
+        )
+
+    if not event_alter_statements:
         return
 
     with sync_engine.begin() as connection:
-        for statement in alter_statements:
+        for statement in event_alter_statements:
             connection.execute(text(statement))
 
 

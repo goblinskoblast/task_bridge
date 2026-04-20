@@ -273,6 +273,80 @@ def _extract_reply_assignee_hint(message: Message) -> Optional[Dict[str, Any]]:
     }
 
 
+def _compact_name(user: Any) -> str | None:
+    if not user:
+        return None
+    username = getattr(user, "username", None)
+    if username:
+        return f"@{username}"
+    parts = [
+        getattr(user, "first_name", None),
+        getattr(user, "last_name", None),
+    ]
+    normalized = " ".join(part for part in parts if part).strip()
+    return normalized or None
+
+
+def _extract_forward_metadata(message: Message) -> Dict[str, Any]:
+    origin = getattr(message, "forward_origin", None)
+    legacy_user = getattr(message, "forward_from", None)
+    legacy_chat = getattr(message, "forward_from_chat", None)
+    is_forwarded = bool(origin or legacy_user or legacy_chat or getattr(message, "forward_date", None))
+    if not is_forwarded:
+        return {
+            "is_forwarded": False,
+            "forward_origin_type": None,
+            "forward_origin_title": None,
+            "forward_from_bot": None,
+        }
+
+    origin_type = getattr(origin, "type", None) if origin else None
+    origin_title = None
+    from_bot = None
+
+    sender_user = getattr(origin, "sender_user", None) if origin else None
+    sender_chat = None
+    if origin:
+        sender_chat = getattr(origin, "sender_chat", None) or getattr(origin, "chat", None)
+
+    if sender_user:
+        origin_title = _compact_name(sender_user)
+        from_bot = getattr(sender_user, "is_bot", None)
+    elif sender_chat:
+        origin_title = getattr(sender_chat, "title", None) or getattr(sender_chat, "username", None)
+    elif origin and getattr(origin, "sender_user_name", None):
+        origin_title = getattr(origin, "sender_user_name", None)
+    elif origin and getattr(origin, "author_signature", None):
+        origin_title = getattr(origin, "author_signature", None)
+    elif legacy_user:
+        origin_type = "user"
+        origin_title = _compact_name(legacy_user)
+        from_bot = getattr(legacy_user, "is_bot", None)
+    elif legacy_chat:
+        origin_type = "chat"
+        origin_title = getattr(legacy_chat, "title", None) or getattr(legacy_chat, "username", None)
+
+    if not origin_type and origin:
+        origin_type = type(origin).__name__.replace("MessageOrigin", "").lower() or "unknown"
+
+    return {
+        "is_forwarded": True,
+        "forward_origin_type": origin_type or "unknown",
+        "forward_origin_title": origin_title,
+        "forward_from_bot": from_bot,
+    }
+
+
+def _extract_observed_message_metadata(message: Message) -> Dict[str, Any]:
+    reply_message = getattr(message, "reply_to_message", None)
+    reply_user = getattr(reply_message, "from_user", None)
+    return {
+        "reply_to_message_id": getattr(reply_message, "message_id", None),
+        "reply_to_from_bot": getattr(reply_user, "is_bot", None) if reply_user else None,
+        **_extract_forward_metadata(message),
+    }
+
+
 def _resolve_assignee_usernames(
     task_data: Optional[Dict[str, Any]],
     reply_assignee_hint: Optional[Dict[str, Any]] = None,
@@ -842,6 +916,7 @@ async def handle_group_message(message: Message):
             user_id=user.id,
             text=message.text,
             date=message.date,
+            **_extract_observed_message_metadata(message),
             has_task=False,
         )
         db.add(message_obj)

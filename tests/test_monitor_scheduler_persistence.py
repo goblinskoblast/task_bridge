@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import create_engine
@@ -21,9 +22,12 @@ from data_agent import monitor_scheduler
 class _DummyBot:
     def __init__(self) -> None:
         self.messages: list[dict] = []
+        self._next_message_id = 1000
 
-    async def send_message(self, **kwargs) -> None:
+    async def send_message(self, **kwargs):
         self.messages.append(kwargs)
+        self._next_message_id += 1
+        return SimpleNamespace(message_id=self._next_message_id, date=datetime(2026, 4, 20, 8, 0, 0))
 
 
 class _FailFirstBot:
@@ -31,12 +35,15 @@ class _FailFirstBot:
         self.failing_chat_id = failing_chat_id
         self.attempts: list[dict] = []
         self.messages: list[dict] = []
+        self._next_message_id = 2000
 
-    async def send_message(self, **kwargs) -> None:
+    async def send_message(self, **kwargs):
         self.attempts.append(kwargs)
         if kwargs.get("chat_id") == self.failing_chat_id:
             raise RuntimeError("primary chat unavailable")
         self.messages.append(kwargs)
+        self._next_message_id += 1
+        return SimpleNamespace(message_id=self._next_message_id, date=datetime(2026, 4, 20, 8, 30, 0))
 
 
 class _AlwaysFailBot:
@@ -140,6 +147,9 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].severity, "critical")
         self.assertTrue(events[0].sent_to_telegram)
+        self.assertEqual(events[0].telegram_chat_id, 555001)
+        self.assertEqual(events[0].telegram_message_id, 1001)
+        self.assertIsNotNone(events[0].telegram_sent_at)
         self.assertEqual(len(bot.messages), 1)
         self.assertIsNone(bot.messages[0].get("parse_mode"))
         self.assertNotIn("<b>", bot.messages[0].get("text", ""))
@@ -191,6 +201,9 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertEqual(config.last_alert_hash, "hash-fallback")
         self.assertEqual(len(events), 1)
         self.assertTrue(events[0].sent_to_telegram)
+        self.assertEqual(events[0].telegram_chat_id, 555001)
+        self.assertEqual(events[0].telegram_message_id, 2001)
+        self.assertIsNotNone(events[0].telegram_sent_at)
 
     def test_run_blanks_monitor_retries_hashless_red_alert_after_delivery_failure(self):
         failing_bot = _AlwaysFailBot()

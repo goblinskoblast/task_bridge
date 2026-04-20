@@ -78,6 +78,12 @@ class Message(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     text = Column(Text, nullable=True)
     date = Column(DateTime, nullable=False)
+    reply_to_message_id = Column(BigInteger, nullable=True)
+    reply_to_from_bot = Column(Boolean, nullable=True)
+    is_forwarded = Column(Boolean, default=False)
+    forward_origin_type = Column(String(50), nullable=True)
+    forward_origin_title = Column(String(500), nullable=True)
+    forward_from_bot = Column(Boolean, nullable=True)
     has_task = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -503,6 +509,9 @@ class DataAgentMonitorEvent(Base):
     body = Column(Text, nullable=True)
     event_hash = Column(String(255), nullable=True, index=True)
     sent_to_telegram = Column(Boolean, default=False)
+    telegram_chat_id = Column(BigInteger, nullable=True, index=True)
+    telegram_message_id = Column(BigInteger, nullable=True)
+    telegram_sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     user = relationship("User", back_populates="data_agent_monitor_events")
