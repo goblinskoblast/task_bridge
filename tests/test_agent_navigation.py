@@ -33,6 +33,7 @@ from bot.handlers import (
     PANEL_BUTTON_TEXT,
     _build_help_message,
     _build_main_reply_keyboard,
+    _build_start_shortcuts_keyboard,
     _build_welcome_message,
 )
 
@@ -153,6 +154,12 @@ class AgentNavigationTest(unittest.TestCase):
         self.assertNotIn("⚡ Быстрые отчёты", texts)
         self.assertNotIn("📡 Мониторы", texts)
         self.assertEqual(keyboard.input_field_placeholder, "Напишите задачу или запрос агенту")
+
+    def test_start_shortcuts_keyboard_has_two_primary_buttons(self):
+        keyboard = _build_start_shortcuts_keyboard("https://example.com/webapp")
+
+        self.assertEqual(_flatten_inline_texts(keyboard), [PANEL_BUTTON_TEXT, AGENT_MAIN_BUTTON_TEXT])
+        self.assertEqual(_flatten_callback_data(keyboard), ["agent_open"])
 
     def test_help_message_prefers_free_text_over_legacy_report_commands(self):
         text = _build_help_message()

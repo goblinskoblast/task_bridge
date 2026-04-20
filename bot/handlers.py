@@ -407,6 +407,23 @@ def _build_main_reply_keyboard(webapp_url: str) -> ReplyKeyboardMarkup:
     )
 
 
+def _build_start_shortcuts_keyboard(webapp_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=PANEL_BUTTON_TEXT,
+                    web_app=WebAppInfo(url=webapp_url),
+                ),
+                InlineKeyboardButton(
+                    text=AGENT_MAIN_BUTTON_TEXT,
+                    callback_data="agent_open",
+                ),
+            ]
+        ]
+    )
+
+
 def _build_welcome_message(is_first_auth: bool, pending_count: int) -> str:
     if pending_count:
         intro = (
@@ -537,8 +554,15 @@ async def cmd_start(message: Message):
 
         webapp_url = build_taskbridge_webapp_url(user_id=user.id, mode="executor")
         reply_keyboard = _build_main_reply_keyboard(webapp_url)
+        start_shortcuts_keyboard = _build_start_shortcuts_keyboard(webapp_url)
         welcome_message = _build_welcome_message(is_first_auth, len(pending_tasks))
-        await message.answer(welcome_message, reply_markup=reply_keyboard, parse_mode="HTML")
+        await message.answer(welcome_message, reply_markup=start_shortcuts_keyboard, parse_mode="HTML")
+        service_message = await message.answer("Меню обновлено.", reply_markup=reply_keyboard)
+        if service_message and hasattr(service_message, "delete"):
+            try:
+                await service_message.delete()
+            except TelegramBadRequest:
+                pass
     except Exception as e:
         logger.error(f"Error in /start command: {e}", exc_info=True)
         await message.answer("Произошла ошибка. Попробуйте позже.")

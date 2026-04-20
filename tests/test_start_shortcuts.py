@@ -14,6 +14,10 @@ def _flatten_reply_texts(keyboard) -> list[str]:
     return [button.text for row in keyboard.keyboard for button in row]
 
 
+def _flatten_inline_texts(keyboard) -> list[str]:
+    return [button.text for row in keyboard.inline_keyboard for button in row]
+
+
 class _DummyActionableQuery:
     def join(self, *_args, **_kwargs):
         return self
@@ -51,13 +55,21 @@ class _DummyMessage:
             is_bot=False,
         )
         self.answers: list[dict] = []
+        self.deleted_messages = 0
 
     async def answer(self, text: str, **kwargs):
         self.answers.append({"text": text, **kwargs})
+        parent = self
+
+        class _SentMessage:
+            async def delete(self_nonlocal) -> None:
+                parent.deleted_messages += 1
+
+        return _SentMessage()
 
 
 class StartShortcutsFlowTest(unittest.IsolatedAsyncioTestCase):
-    async def test_cmd_start_sends_single_welcome_with_reply_menu(self):
+    async def test_cmd_start_sends_welcome_shortcuts_and_refreshes_reply_menu(self):
         message = _DummyMessage()
         db = _DummyDbSession()
         user = SimpleNamespace(id=42, telegram_id=17, username="tester")
@@ -69,13 +81,19 @@ class StartShortcutsFlowTest(unittest.IsolatedAsyncioTestCase):
                         await cmd_start(message)
 
         self.assertTrue(db.closed)
-        self.assertEqual(len(message.answers), 1)
+        self.assertEqual(len(message.answers), 2)
+        self.assertEqual(message.deleted_messages, 1)
 
         welcome = message.answers[0]
         self.assertEqual(welcome["parse_mode"], "HTML")
-        self.assertEqual(welcome["reply_markup"].keyboard[0][0].web_app.url, "https://example.com/webapp")
-        self.assertIn(PANEL_BUTTON_TEXT, _flatten_reply_texts(welcome["reply_markup"]))
-        self.assertIn(AGENT_MAIN_BUTTON_TEXT, _flatten_reply_texts(welcome["reply_markup"]))
+        self.assertEqual(welcome["reply_markup"].inline_keyboard[0][0].web_app.url, "https://example.com/webapp")
+        self.assertEqual(_flatten_inline_texts(welcome["reply_markup"]), [PANEL_BUTTON_TEXT, AGENT_MAIN_BUTTON_TEXT])
+        self.assertEqual(welcome["reply_markup"].inline_keyboard[0][1].callback_data, "agent_open")
+
+        refresh = message.answers[1]
+        self.assertEqual(refresh["text"], "Меню обновлено.")
+        self.assertIn(PANEL_BUTTON_TEXT, _flatten_reply_texts(refresh["reply_markup"]))
+        self.assertIn(AGENT_MAIN_BUTTON_TEXT, _flatten_reply_texts(refresh["reply_markup"]))
 
 
 if __name__ == "__main__":
