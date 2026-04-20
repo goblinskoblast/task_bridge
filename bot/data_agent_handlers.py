@@ -44,6 +44,7 @@ POINT_CALLBACK_PREFIX = "agent_point:"
 POINT_REPORT_CALLBACK_PREFIX = "agent_point_report:"
 POINT_DELIVERY_CALLBACK_PREFIX = "agent_point_delivery:"
 SETTINGS_BUTTON_TEXT = "⚙️ Настройки"
+SYSTEMS_MENU_BUTTON_TEXT = "🔌 Подключённые системы"
 REPORT_CHATS_BUTTON_TEXT = "💬 Чаты отчётов"
 CONNECT_SYSTEM_BUTTON_TEXT = "➕ Подключить систему"
 MONITORS_MENU_BUTTON_TEXT = "📡 Что включено"
@@ -72,6 +73,7 @@ AGENT_REPORTS_MENU_KEYBOARD = InlineKeyboardMarkup(
 
 AGENT_SETTINGS_MENU_KEYBOARD = InlineKeyboardMarkup(
     inline_keyboard=[
+        [InlineKeyboardButton(text=SYSTEMS_MENU_BUTTON_TEXT, callback_data="agent_show_systems")],
         [InlineKeyboardButton(text=CONNECT_SYSTEM_BUTTON_TEXT, callback_data="agent_connect_system")],
         [InlineKeyboardButton(text=REPORT_CHATS_BUTTON_TEXT, callback_data="agent_choose_report_chat")],
     ]

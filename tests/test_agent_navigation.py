@@ -107,6 +107,7 @@ class AgentNavigationTest(unittest.TestCase):
         keyboard = _build_agent_settings_menu_keyboard()
         texts = _flatten_inline_texts(keyboard)
 
+        self.assertIn("🔌 Подключённые системы", texts)
         self.assertIn("➕ Подключить систему", texts)
         self.assertIn("💬 Чаты отчётов", texts)
         self.assertNotIn("📡 Что включено", texts)
