@@ -74,6 +74,17 @@ class SystemOrientationTest(unittest.TestCase):
                 ],
                 "starter_step": "Войти и подтвердить контур организации",
             },
+            scan_progress={
+                "status": "in_progress",
+                "status_label": "идёт scan",
+                "current_step_id": "map_organizations",
+                "current_step_label": "Снять карту организаций и точек",
+                "next_step_id": "map_organizations",
+                "next_step_label": "Снять карту организаций и точек",
+                "discovered_entities": ["организация"],
+                "discovered_sections": ["организации"],
+                "evidence_summary": "после входа виден список организаций",
+            },
             created_at=datetime(2026, 4, 21, 17, 0, 0),
         )
 
@@ -90,6 +101,10 @@ class SystemOrientationTest(unittest.TestCase):
         self.assertIn("сигналы: доступность, меню, операционка", answer)
         self.assertIn("надёжность:", answer)
         self.assertIn("старт: Войти и подтвердить контур организации", answer)
+        self.assertIn("прогресс: идёт scan; текущий шаг: Снять карту организаций и точек", answer)
+        self.assertIn("найденные сущности: организация", answer)
+        self.assertIn("найденные разделы: организации", answer)
+        self.assertIn("что уже подтвердили: после входа виден список организаций", answer)
 
     def test_build_orientation_answer_for_known_but_not_connected_system(self):
         answer = build_orientation_answer("Что умеешь по keeper?", [])
@@ -100,6 +115,7 @@ class SystemOrientationTest(unittest.TestCase):
         self.assertIn("стадия: каркас / scan-first", answer)
         self.assertIn("авторизация: web-авторизация", answer)
         self.assertIn("старт: Войти и открыть рабочий объект", answer)
+        self.assertIn("прогресс: ещё не начинали; следующий шаг: Войти и открыть рабочий объект", answer)
         self.assertIn("разделы: объекты, кассы, отчёты, меню", answer)
 
     def test_build_orientation_answer_can_expand_detailed_scan_plan(self):

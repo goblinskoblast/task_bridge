@@ -44,6 +44,20 @@ class SystemScanContractItem(BaseModel):
     starter_step: Optional[str] = None
 
 
+class SystemScanProgressItem(BaseModel):
+    status: str
+    status_label: Optional[str] = None
+    current_step_id: Optional[str] = None
+    current_step_label: Optional[str] = None
+    next_step_id: Optional[str] = None
+    next_step_label: Optional[str] = None
+    discovered_entities: List[str] = Field(default_factory=list)
+    discovered_sections: List[str] = Field(default_factory=list)
+    evidence_summary: Optional[str] = None
+    blocked_reason: Optional[str] = None
+    last_scanned_at: Optional[datetime] = None
+
+
 class ConnectedSystem(BaseModel):
     system_id: str
     user_id: int
@@ -64,6 +78,7 @@ class ConnectedSystem(BaseModel):
     orientation_summary: Optional[str] = None
     next_step_hint: Optional[str] = None
     scan_contract: Optional[SystemScanContractItem] = None
+    scan_progress: Optional[SystemScanProgressItem] = None
     created_at: datetime
 
 

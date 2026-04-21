@@ -189,6 +189,18 @@ def _render_system_block(
     capability_matrix = list(getattr(contract, "capability_matrix", None) or fallback_contract.get("capability_matrix") or ())
     scan_steps = list(getattr(contract, "scan_steps", None) or fallback_contract.get("scan_steps") or ())
     starter_step = str(getattr(contract, "starter_step", None) or fallback_contract.get("starter_step") or "")
+    progress = getattr(connected_system, "scan_progress", None)
+    progress_status = str(getattr(progress, "status_label", None) or "").strip()
+    current_step_label = str(getattr(progress, "current_step_label", None) or "").strip()
+    next_step_label = str(getattr(progress, "next_step_label", None) or "").strip()
+    discovered_entities = list(getattr(progress, "discovered_entities", None) or ())
+    discovered_sections = list(getattr(progress, "discovered_sections", None) or ())
+    evidence_summary = str(getattr(progress, "evidence_summary", None) or "").strip()
+    blocked_reason = str(getattr(progress, "blocked_reason", None) or "").strip()
+    if not progress_status and starter_step:
+        progress_status = "ещё не начинали"
+    if not current_step_label and not next_step_label and starter_step:
+        next_step_label = starter_step
 
     lines = [f"{index}. {title} — {family}"]
     if not connected:
@@ -218,6 +230,21 @@ def _render_system_block(
         lines.append(f"ориентир: {orientation}")
     if starter_step:
         lines.append(f"старт: {starter_step}")
+    if progress_status:
+        progress_parts = [progress_status]
+        if current_step_label:
+            progress_parts.append(f"текущий шаг: {current_step_label}")
+        elif next_step_label:
+            progress_parts.append(f"следующий шаг: {next_step_label}")
+        lines.append("прогресс: " + "; ".join(progress_parts))
+    if discovered_entities:
+        lines.append(f"найденные сущности: {', '.join(discovered_entities)}")
+    if discovered_sections:
+        lines.append(f"найденные разделы: {', '.join(discovered_sections)}")
+    if evidence_summary:
+        lines.append(f"что уже подтвердили: {evidence_summary}")
+    if blocked_reason:
+        lines.append(f"где упёрлись: {blocked_reason}")
     if detailed_scan and scan_steps:
         lines.append("scan-план:")
         for step_index, step in enumerate(scan_steps, start=1):

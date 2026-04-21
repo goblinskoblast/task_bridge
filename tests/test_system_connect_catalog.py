@@ -65,6 +65,11 @@ class SystemConnectCatalogTest(unittest.TestCase):
         self.assertEqual(response.system.scan_contract.starter_step, "Войти и подтвердить контур организации")
         self.assertTrue(response.system.scan_contract.scan_steps)
         self.assertTrue(response.system.scan_contract.capability_matrix)
+        self.assertIsNotNone(response.system.scan_progress)
+        self.assertEqual(response.system.scan_progress.status, "not_started")
+        self.assertEqual(response.system.scan_progress.status_label, "ещё не начинали")
+        self.assertEqual(response.system.scan_progress.next_step_id, "login")
+        self.assertEqual(response.system.scan_progress.next_step_label, "Войти и подтвердить контур организации")
 
         session = self.SessionLocal()
         try:
@@ -75,6 +80,11 @@ class SystemConnectCatalogTest(unittest.TestCase):
         self.assertIsNotNone(item)
         self.assertEqual(item.system_name, "iiko")
         self.assertEqual((item.metadata_json or {}).get("catalog_family"), "restaurant_operations")
+        self.assertEqual((item.metadata_json or {}).get("scan_progress", {}).get("status"), "not_started")
+        self.assertEqual(
+            (item.metadata_json or {}).get("scan_progress", {}).get("next_step_label"),
+            "Войти и подтвердить контур организации",
+        )
 
     def test_connect_system_detects_keeper(self):
         payload = SystemConnectRequest(
@@ -97,6 +107,52 @@ class SystemConnectCatalogTest(unittest.TestCase):
         self.assertEqual(response.system.scan_contract.stage, "scaffold")
         self.assertEqual(response.system.scan_contract.auth_mode, "web_login")
         self.assertEqual(response.system.scan_contract.starter_step, "Войти и открыть рабочий объект")
+        self.assertEqual(response.system.scan_progress.status_label, "ещё не начинали")
+        self.assertEqual(response.system.scan_progress.next_step_label, "Войти и открыть рабочий объект")
+
+    def test_reconnect_system_preserves_existing_scan_progress(self):
+        payload = SystemConnectRequest(
+            user_id=137236883,
+            url="https://sso.iiko.biz/auth",
+            username="priority",
+            password="secret",
+        )
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch("data_agent.service.encrypt_password", return_value="encrypted-secret"):
+                first_response = asyncio.run(self.service.connect_system(payload))
+
+        self.assertTrue(first_response.success)
+
+        session = self.SessionLocal()
+        try:
+            item = session.query(DataAgentSystem).first()
+            metadata = dict(item.metadata_json or {})
+            metadata["scan_progress"] = {
+                "status": "in_progress",
+                "current_step_id": "map_organizations",
+                "current_step_label": "Снять карту организаций и точек",
+                "next_step_id": "map_organizations",
+                "next_step_label": "Снять карту организаций и точек",
+                "discovered_entities": ["организация"],
+                "discovered_sections": ["организации"],
+                "evidence_summary": "после входа виден список организаций",
+            }
+            item.metadata_json = metadata
+            session.commit()
+        finally:
+            session.close()
+
+        with patch("data_agent.service.get_db_session", side_effect=self.SessionLocal):
+            with patch("data_agent.service.encrypt_password", return_value="encrypted-secret-2"):
+                second_response = asyncio.run(self.service.connect_system(payload))
+
+        self.assertTrue(second_response.success)
+        self.assertEqual(second_response.system.scan_progress.status, "in_progress")
+        self.assertEqual(second_response.system.scan_progress.status_label, "идёт scan")
+        self.assertEqual(second_response.system.scan_progress.current_step_id, "map_organizations")
+        self.assertEqual(second_response.system.scan_progress.current_step_label, "Снять карту организаций и точек")
+        self.assertEqual(second_response.system.scan_progress.discovered_entities, ["организация"])
 
 
 if __name__ == "__main__":

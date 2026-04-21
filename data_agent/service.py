@@ -3,7 +3,7 @@
 import logging
 import time
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import uuid4
 
 from db.database import get_db_session
@@ -28,6 +28,7 @@ from .models import (
     MonitorConfigItem,
     MonitorDeleteResponse,
     SystemScanContractItem,
+    SystemScanProgressItem,
     SystemConnectRequest,
     SystemConnectResponse,
 )
@@ -63,6 +64,13 @@ _MONITOR_RETRY_STATUSES = {
 
 
 class DataAgentService:
+    _SCAN_PROGRESS_STATUS_LABELS = {
+        "not_started": "ещё не начинали",
+        "in_progress": "идёт scan",
+        "mapped": "карта системы собрана",
+        "blocked": "нужна ручная проверка",
+    }
+
     @staticmethod
     def _merge_answer_with_monitor_note(answer: str, monitor_note: str | None) -> str:
         normalized_answer = (answer or "").strip()
@@ -90,6 +98,90 @@ class DataAgentService:
             "reviews": "отзывов",
         }
         return labels.get(monitor_type, monitor_type)
+
+    @classmethod
+    def _scan_progress_status_label(cls, status: str | None) -> str:
+        normalized = str(status or "not_started").strip().lower()
+        return cls._SCAN_PROGRESS_STATUS_LABELS.get(normalized, "состояние не уточнено")
+
+    @classmethod
+    def _default_scan_progress_payload(cls, descriptor) -> dict[str, Any]:
+        contract = build_scan_contract_payload(descriptor)
+        steps = list(contract.get("scan_steps") or ())
+        first_step = steps[0] if steps else {}
+        return {
+            "status": "not_started",
+            "status_label": cls._scan_progress_status_label("not_started"),
+            "current_step_id": None,
+            "current_step_label": None,
+            "next_step_id": str(first_step.get("step_id") or "") or None,
+            "next_step_label": str(first_step.get("label") or "") or None,
+            "discovered_entities": [],
+            "discovered_sections": [],
+            "evidence_summary": None,
+            "blocked_reason": None,
+            "last_scanned_at": None,
+        }
+
+    @classmethod
+    def _normalize_scan_progress_payload(cls, descriptor, payload: Any) -> dict[str, Any]:
+        default_payload = cls._default_scan_progress_payload(descriptor)
+        raw_payload = payload if isinstance(payload, dict) else {}
+        normalized_status = str(raw_payload.get("status") or default_payload["status"]).strip().lower() or "not_started"
+
+        def _clean_text(value: Any) -> str | None:
+            text = str(value or "").strip()
+            return text or None
+
+        def _clean_list(value: Any) -> list[str]:
+            if not isinstance(value, (list, tuple)):
+                return []
+            items: list[str] = []
+            for item in value:
+                text = _clean_text(item)
+                if text:
+                    items.append(text)
+            return items
+
+        last_scanned_at = raw_payload.get("last_scanned_at")
+        if isinstance(last_scanned_at, datetime):
+            last_scanned_at = last_scanned_at.isoformat()
+        elif last_scanned_at is not None:
+            last_scanned_at = _clean_text(last_scanned_at)
+
+        return {
+            "status": normalized_status,
+            "status_label": cls._scan_progress_status_label(normalized_status),
+            "current_step_id": _clean_text(raw_payload.get("current_step_id")),
+            "current_step_label": _clean_text(raw_payload.get("current_step_label")),
+            "next_step_id": _clean_text(raw_payload.get("next_step_id")) or default_payload["next_step_id"],
+            "next_step_label": _clean_text(raw_payload.get("next_step_label")) or default_payload["next_step_label"],
+            "discovered_entities": _clean_list(raw_payload.get("discovered_entities")),
+            "discovered_sections": _clean_list(raw_payload.get("discovered_sections")),
+            "evidence_summary": _clean_text(raw_payload.get("evidence_summary")),
+            "blocked_reason": _clean_text(raw_payload.get("blocked_reason")),
+            "last_scanned_at": last_scanned_at,
+        }
+
+    @classmethod
+    def _build_system_metadata_payload(cls, descriptor, existing_metadata: Any = None) -> dict[str, Any]:
+        existing = existing_metadata if isinstance(existing_metadata, dict) else {}
+        metadata_payload = {
+            **existing,
+            "phase": 2,
+            "catalog_title": descriptor.title,
+            "catalog_family": descriptor.family,
+            "entry_surface": descriptor.entry_surface,
+            "supports_scan": descriptor.supports_scan,
+            "supports_points": descriptor.supports_points,
+            "supports_monitoring": descriptor.supports_monitoring,
+            "supports_chat_delivery": descriptor.supports_chat_delivery,
+        }
+        metadata_payload["scan_progress"] = cls._normalize_scan_progress_payload(
+            descriptor,
+            existing.get("scan_progress"),
+        )
+        return metadata_payload
 
     def _build_monitor_disable_clarification(self, *, point_name: str, monitor_types: list[str]) -> str:
         labels = [self._plain_monitor_type_label(item) for item in monitor_types]
@@ -330,16 +422,6 @@ class DataAgentService:
 
             descriptor = resolve_system_descriptor(url=str(payload.url))
             system_name = descriptor.system_name
-            metadata_payload = {
-                "phase": 2,
-                "catalog_title": descriptor.title,
-                "catalog_family": descriptor.family,
-                "entry_surface": descriptor.entry_surface,
-                "supports_scan": descriptor.supports_scan,
-                "supports_points": descriptor.supports_points,
-                "supports_monitoring": descriptor.supports_monitoring,
-                "supports_chat_delivery": descriptor.supports_chat_delivery,
-            }
 
             existing = (
                 db.query(DataAgentSystem)
@@ -353,16 +435,18 @@ class DataAgentService:
 
             encrypted_password = encrypt_password(payload.password)
             if existing:
+                metadata_payload = self._build_system_metadata_payload(descriptor, existing.metadata_json)
                 existing.system_name = system_name
                 existing.encrypted_password = encrypted_password
                 existing.is_active = True
-                existing.metadata_json = {**(existing.metadata_json or {}), **metadata_payload}
+                existing.metadata_json = metadata_payload
                 existing.last_connected_at = datetime.utcnow()
                 existing.updated_at = datetime.utcnow()
                 db.commit()
                 db.refresh(existing)
                 return SystemConnectResponse(success=True, system=self._to_connected_system(existing))
 
+            metadata_payload = self._build_system_metadata_payload(descriptor)
             system = DataAgentSystem(
                 user_id=user.id,
                 system_name=system_name,
@@ -1282,6 +1366,7 @@ class DataAgentService:
 
     def _to_connected_system(self, system: DataAgentSystem) -> ConnectedSystem:
         descriptor = resolve_system_descriptor(system_name=system.system_name, url=system.url)
+        metadata = system.metadata_json if isinstance(system.metadata_json, dict) else {}
         return ConnectedSystem(
             system_id=str(system.id),
             user_id=system.user.telegram_id if system.user else system.user_id,
@@ -1302,6 +1387,9 @@ class DataAgentService:
             orientation_summary=orientation_summary(descriptor),
             next_step_hint=descriptor.next_step_hint or None,
             scan_contract=SystemScanContractItem(**build_scan_contract_payload(descriptor)),
+            scan_progress=SystemScanProgressItem(
+                **self._normalize_scan_progress_payload(descriptor, metadata.get("scan_progress"))
+            ),
             created_at=system.created_at,
         )
 
