@@ -37,6 +37,7 @@ class ConnectedSystem(BaseModel):
     system_title: Optional[str] = None
     system_family: Optional[str] = None
     entry_surface: Optional[str] = None
+    point_entity_label: Optional[str] = None
     url: str
     login: str
     is_active: bool = True
@@ -44,6 +45,10 @@ class ConnectedSystem(BaseModel):
     supports_points: bool = False
     supports_monitoring: bool = False
     supports_chat_delivery: bool = False
+    capability_labels: List[str] = Field(default_factory=list)
+    scan_order: List[str] = Field(default_factory=list)
+    orientation_summary: Optional[str] = None
+    next_step_hint: Optional[str] = None
     created_at: datetime
 
 

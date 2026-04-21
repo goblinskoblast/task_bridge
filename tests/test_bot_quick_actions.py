@@ -8,6 +8,7 @@ os.environ.setdefault("AI_PROVIDER", "openai")
 
 from bot.data_agent_handlers import (
     AGENT_WELCOME,
+    _build_systems_summary_text,
     _build_points_summary_text,
     _build_quick_report_request,
     _is_italian_pizza_system,
@@ -51,6 +52,29 @@ class BotQuickActionsTest(unittest.TestCase):
         self.assertIn("обычным сообщением", summary)
         self.assertIn("пришли стоп-лист", summary)
         self.assertNotIn("в кнопках", summary)
+
+    def test_systems_summary_text_shows_orientation_and_next_step(self):
+        summary = _build_systems_summary_text(
+            [
+                {
+                    "system_name": "iiko",
+                    "system_title": "iiko",
+                    "system_family": "restaurant_operations",
+                    "entry_surface": "web_portal",
+                    "url": "https://sso.iiko.biz/auth",
+                    "capability_labels": ["scan", "точки", "мониторинг"],
+                    "orientation_summary": "логин -> организация -> точки -> отчёты / операционные разделы",
+                    "next_step_hint": "Следом нужен scan структуры iiko и карта сущностей: точки, отчёты, доставка, склад.",
+                }
+            ]
+        )
+
+        self.assertIn("Подключённые системы: 1", summary)
+        self.assertIn("iiko", summary)
+        self.assertIn("ресторанная операционка", summary)
+        self.assertIn("умеем: scan, точки, мониторинг", summary)
+        self.assertIn("ориентир: логин -&gt; организация -&gt; точки -&gt; отчёты / операционные разделы", summary)
+        self.assertIn("дальше: Следом нужен scan структуры iiko", summary)
 
 
 if __name__ == "__main__":

@@ -822,6 +822,57 @@ def _is_italian_pizza_system(item: dict | None) -> bool:
     )
 
 
+def _system_family_label(family: str | None) -> str:
+    labels = {
+        "restaurant_operations": "ресторанная операционка",
+        "restaurant_analytics": "репутация и аналитика",
+        "generic_web": "универсальный web-контур",
+        "messenger_channel": "клиентский канал",
+        "messenger_automation": "автоматизация мессенджеров",
+        "first_party_surface": "собственная поверхность",
+        "backoffice": "бэк-офис",
+        "crm": "CRM-контур",
+    }
+    return labels.get(str(family or ""), "внешняя система")
+
+
+def _entry_surface_label(surface: str | None) -> str:
+    labels = {
+        "web_portal": "web portal",
+        "api_or_sheet": "api / sheet",
+        "messenger": "messenger",
+        "native_app": "native app",
+        "account_agent": "account agent",
+    }
+    return labels.get(str(surface or ""), "surface")
+
+
+def _build_systems_summary_text(systems: list[dict]) -> str:
+    lines = [f"🔌 <b>Подключённые системы: {len(systems)}</b>", ""]
+    for item in systems:
+        title = html.escape(str(item.get("system_title") or item.get("system_name") or "Web System"))
+        family_label = html.escape(_system_family_label(item.get("system_family")))
+        url = html.escape(str(item.get("url") or ""))
+        capability_labels = [html.escape(str(label)) for label in (item.get("capability_labels") or []) if label]
+        orientation = html.escape(str(item.get("orientation_summary") or ""))
+        next_step_hint = html.escape(str(item.get("next_step_hint") or ""))
+        surface_label = html.escape(_entry_surface_label(item.get("entry_surface")))
+
+        lines.append(f"• <b>{title}</b> — {family_label}")
+        lines.append(f"  {url}")
+        lines.append(f"  вход: {surface_label}")
+        if capability_labels:
+            lines.append(f"  умеем: {', '.join(capability_labels)}")
+        if orientation:
+            lines.append(f"  ориентир: {orientation}")
+        if next_step_hint:
+            lines.append(f"  дальше: {next_step_hint}")
+        lines.append("")
+
+    lines.append("Если нужная система уже подключена, следующий шаг — добавить точку или продолжить scan её структуры.")
+    return "\n".join(lines)
+
+
 async def _user_has_connected_italian_pizza_system(telegram_user_id: int) -> bool:
     try:
         systems = await data_agent_client.list_systems(telegram_user_id)
@@ -962,22 +1013,17 @@ async def _send_systems_summary(message: Message, *, telegram_user_id: int | Non
     if not systems:
         await message.answer(
             "🔌 <b>Подключённых систем пока нет</b>\n\n"
-            "Сначала подключите Italian Pizza. Потом можно будет добавить точку и писать запросы обычным сообщением.",
+            "Сначала подключите первую систему. Сейчас боевой контур уже есть для Italian Pizza, а дальше готовим iiko, keeper и новые каналы.",
             reply_markup=_build_agent_systems_keyboard(),
             parse_mode="HTML",
         )
         return
 
-    lines = [f"🔌 <b>Подключённые системы: {len(systems)}</b>", ""]
-    for item in systems:
-        lines.append(f"• <b>{item.get('system_name', 'web-system')}</b> — {item.get('url')}")
-    lines.extend(
-        [
-            "",
-            "Если нужная система уже подключена, следующий шаг — добавить точку и дальше писать запросы обычным сообщением.",
-        ]
+    await message.answer(
+        _build_systems_summary_text(systems),
+        reply_markup=_build_agent_systems_keyboard(),
+        parse_mode="HTML",
     )
-    await message.answer("\n".join(lines), reply_markup=_build_agent_systems_keyboard(), parse_mode="HTML")
 
 
 async def _send_monitors_summary(message: Message, *, telegram_user_id: int | None = None) -> None:
@@ -1994,10 +2040,15 @@ async def connect_waiting_for_password(message: Message, state: FSMContext) -> N
         )
         if result.get("success"):
             system = result.get("system") or {}
+            system_title = html.escape(str(system.get("system_title") or system.get("system_name") or "web-system"))
+            family_label = html.escape(_system_family_label(system.get("system_family")))
+            next_step_hint = html.escape(str(system.get("next_step_hint") or "Следом можно продолжить настройку и подключить первую точку."))
             await waiting.edit_text(
                 "✅ <b>Система подключена</b>\n\n"
-                f"<b>Тип:</b> {system.get('system_name', 'web-system')}\n"
-                f"<b>URL:</b> {system.get('url', data.get('url', ''))}",
+                f"<b>Тип:</b> {system_title}\n"
+                f"<b>Контур:</b> {family_label}\n"
+                f"<b>URL:</b> {html.escape(str(system.get('url', data.get('url', ''))))}\n\n"
+                f"{next_step_hint}",
                 parse_mode="HTML",
             )
         else:

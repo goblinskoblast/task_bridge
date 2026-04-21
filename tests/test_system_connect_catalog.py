@@ -54,6 +54,9 @@ class SystemConnectCatalogTest(unittest.TestCase):
         self.assertEqual(response.system.system_family, "restaurant_operations")
         self.assertTrue(response.system.supports_scan)
         self.assertTrue(response.system.supports_points)
+        self.assertIn("точки", response.system.capability_labels)
+        self.assertIn("организация", response.system.orientation_summary or "")
+        self.assertIn("scan структуры iiko", response.system.next_step_hint or "")
 
         session = self.SessionLocal()
         try:
@@ -82,6 +85,7 @@ class SystemConnectCatalogTest(unittest.TestCase):
         self.assertEqual(response.system.system_name, "keeper")
         self.assertEqual(response.system.system_title, "Keeper")
         self.assertTrue(response.system.supports_monitoring)
+        self.assertIn("объект", response.system.orientation_summary or "")
 
 
 if __name__ == "__main__":

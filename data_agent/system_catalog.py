@@ -10,6 +10,11 @@ class SystemDescriptor:
     title: str
     family: str
     entry_surface: str
+    point_entity_label: str = "точка"
+    scan_order: tuple[str, ...] = ()
+    report_entry_labels: tuple[str, ...] = ()
+    monitor_targets: tuple[str, ...] = ()
+    next_step_hint: str = ""
     supports_scan: bool = False
     supports_points: bool = False
     supports_monitoring: bool = False
@@ -22,6 +27,8 @@ _DEFAULT_DESCRIPTOR = SystemDescriptor(
     title="Web System",
     family="generic_web",
     entry_surface="web_portal",
+    scan_order=("логин", "первичная навигация", "поиск ключевых разделов"),
+    next_step_hint="Следом нужен scan структуры системы, чтобы понять точки, отчёты и рабочие разделы.",
 )
 
 
@@ -31,6 +38,11 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
         title="Italian Pizza",
         family="restaurant_operations",
         entry_surface="web_portal",
+        point_entity_label="точка продаж",
+        scan_order=("логин", "выбрать точку", "отчёты", "мониторинг"),
+        report_entry_labels=("Стоп-Лист", "Бланк загрузки", "Отчёты"),
+        monitor_targets=("stoplist", "blanks"),
+        next_step_hint="Дальше можно добавить точку и сразу работать со stoplist и blanks обычным сообщением.",
         supports_scan=True,
         supports_points=True,
         supports_monitoring=True,
@@ -40,6 +52,11 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
         title="iiko",
         family="restaurant_operations",
         entry_surface="web_portal",
+        point_entity_label="ресторан / точка",
+        scan_order=("логин", "организация", "точки", "отчёты / операционные разделы"),
+        report_entry_labels=("организации", "точки", "отчёты", "доставка", "склад"),
+        monitor_targets=("availability", "menu_status", "operations"),
+        next_step_hint="Следом нужен scan структуры iiko и карта сущностей: точки, отчёты, доставка, склад.",
         supports_scan=True,
         supports_points=True,
         supports_monitoring=True,
@@ -49,6 +66,11 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
         title="Keeper",
         family="restaurant_operations",
         entry_surface="web_portal",
+        point_entity_label="ресторан / объект",
+        scan_order=("логин", "объект", "операционные разделы", "отчёты"),
+        report_entry_labels=("объекты", "кассы", "отчёты", "меню"),
+        monitor_targets=("availability", "menu_status", "operations"),
+        next_step_hint="Следом нужен scan структуры Keeper и карта объектов, меню и отчётных разделов.",
         supports_scan=True,
         supports_points=True,
         supports_monitoring=True,
@@ -58,6 +80,10 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
         title="RocketData",
         family="restaurant_analytics",
         entry_surface="api_or_sheet",
+        point_entity_label="карточка / локация",
+        scan_order=("авторизация", "источник отзывов", "локации", "аналитика"),
+        report_entry_labels=("отзывы", "рейтинги", "площадки"),
+        next_step_hint="Дальше можно собирать отзывы и аналитику по локациям.",
         supports_monitoring=False,
     ),
     "1C": SystemDescriptor(
@@ -65,6 +91,9 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
         title="1C",
         family="backoffice",
         entry_surface="web_portal",
+        point_entity_label="объект",
+        scan_order=("логин", "разделы учёта", "объекты", "отчёты"),
+        next_step_hint="Следом нужен scan рабочей конфигурации и сущностей учёта.",
         supports_scan=True,
     ),
     "CRM": SystemDescriptor(
@@ -72,6 +101,9 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
         title="CRM",
         family="crm",
         entry_surface="web_portal",
+        point_entity_label="клиент / объект",
+        scan_order=("логин", "воронки / объекты", "карточки", "действия"),
+        next_step_hint="Следом нужен scan CRM-сущностей и рабочих карточек.",
         supports_scan=True,
     ),
     "web-system": _DEFAULT_DESCRIPTOR,
@@ -80,6 +112,9 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
         title="Telegram",
         family="messenger_channel",
         entry_surface="messenger",
+        point_entity_label="чат",
+        scan_order=("чат", "сценарии бота", "доставка", "реакции"),
+        next_step_hint="Канал уже боевой: держим parity UX и прозрачную доставку.",
         supports_chat_delivery=True,
     ),
     "max": SystemDescriptor(
@@ -87,6 +122,9 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
         title="MAX",
         family="messenger_channel",
         entry_surface="messenger",
+        point_entity_label="чат",
+        scan_order=("чат", "сценарии бота", "доставка", "реакции"),
+        next_step_hint="Следом нужен parity-контур с Telegram: тот же free-text-first UX и те же продуктовые сценарии.",
         supports_chat_delivery=True,
     ),
     "mobile-app": SystemDescriptor(
@@ -94,6 +132,9 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
         title="TaskBridge App",
         family="first_party_surface",
         entry_surface="native_app",
+        point_entity_label="рабочая поверхность",
+        scan_order=("вход", "рабочий обзор", "точки", "alerts"),
+        next_step_hint="Позже app станет first-party поверхностью для обзора, настройки и аналитики.",
         supports_chat_delivery=True,
     ),
     "messenger-agent": SystemDescriptor(
@@ -101,6 +142,9 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
         title="Messenger Account Agent",
         family="messenger_automation",
         entry_surface="account_agent",
+        point_entity_label="аккаунт / чат",
+        scan_order=("авторизация", "контур аккаунта", "чаты", "действия агента"),
+        next_step_hint="Этот слой идёт позже: сначала нужны trust-модель, audit trail и границы действий.",
         supports_chat_delivery=True,
         supports_account_agent=True,
     ),
@@ -170,3 +214,24 @@ def resolve_system_descriptor(*, system_name: str | None = None, url: str | None
 
 def is_italian_pizza_descriptor(*, system_name: str | None = None, url: str | None = None) -> bool:
     return resolve_system_descriptor(system_name=system_name, url=url).system_name == "italian_pizza"
+
+
+def capability_labels(descriptor: SystemDescriptor) -> list[str]:
+    labels: list[str] = []
+    if descriptor.supports_scan:
+        labels.append("scan")
+    if descriptor.supports_points:
+        labels.append("точки")
+    if descriptor.supports_monitoring:
+        labels.append("мониторинг")
+    if descriptor.supports_chat_delivery:
+        labels.append("доставка в чат")
+    if descriptor.supports_account_agent:
+        labels.append("account agent")
+    return labels
+
+
+def orientation_summary(descriptor: SystemDescriptor) -> str | None:
+    if not descriptor.scan_order:
+        return None
+    return " -> ".join(descriptor.scan_order)

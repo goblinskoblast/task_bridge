@@ -1,9 +1,11 @@
 import unittest
 
 from data_agent.system_catalog import (
+    capability_labels,
     detect_system_name_from_url,
     is_italian_pizza_descriptor,
     normalize_system_name,
+    orientation_summary,
     resolve_system_descriptor,
 )
 
@@ -49,6 +51,13 @@ class SystemCatalogTest(unittest.TestCase):
         self.assertEqual(descriptor.system_name, "max")
         self.assertEqual(descriptor.family, "messenger_channel")
         self.assertTrue(descriptor.supports_chat_delivery)
+
+    def test_capability_labels_and_orientation_summary_for_iiko(self):
+        descriptor = resolve_system_descriptor(system_name="iiko")
+
+        self.assertIn("scan", capability_labels(descriptor))
+        self.assertIn("мониторинг", capability_labels(descriptor))
+        self.assertIn("организация", orientation_summary(descriptor))
 
     def test_is_italian_pizza_descriptor(self):
         self.assertTrue(is_italian_pizza_descriptor(system_name="italian_pizza"))
