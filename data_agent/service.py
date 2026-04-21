@@ -45,6 +45,7 @@ from .monitoring import (
     user_monitor_window_to_service_hours,
 )
 from .scenario_engine import scenario_engine
+from .system_catalog import resolve_system_descriptor
 
 logger = logging.getLogger(__name__)
 _MONITOR_RETRY_STATUSES = {
@@ -326,19 +327,18 @@ class DataAgentService:
                 db.add(user)
                 db.flush()
 
-            domain = payload.url.host.lower()
-            if "iiko" in domain:
-                system_name = "iiko"
-            elif "italianpizza" in domain or "tochka.italianpizza" in domain:
-                system_name = "italian_pizza"
-            elif "rocketdata" in domain:
-                system_name = "rocketdata"
-            elif "1c" in domain or "1С" in domain:
-                system_name = "1C"
-            elif "crm" in domain:
-                system_name = "CRM"
-            else:
-                system_name = "web-system"
+            descriptor = resolve_system_descriptor(url=str(payload.url))
+            system_name = descriptor.system_name
+            metadata_payload = {
+                "phase": 2,
+                "catalog_title": descriptor.title,
+                "catalog_family": descriptor.family,
+                "entry_surface": descriptor.entry_surface,
+                "supports_scan": descriptor.supports_scan,
+                "supports_points": descriptor.supports_points,
+                "supports_monitoring": descriptor.supports_monitoring,
+                "supports_chat_delivery": descriptor.supports_chat_delivery,
+            }
 
             existing = (
                 db.query(DataAgentSystem)
@@ -355,6 +355,7 @@ class DataAgentService:
                 existing.system_name = system_name
                 existing.encrypted_password = encrypted_password
                 existing.is_active = True
+                existing.metadata_json = {**(existing.metadata_json or {}), **metadata_payload}
                 existing.last_connected_at = datetime.utcnow()
                 existing.updated_at = datetime.utcnow()
                 db.commit()
@@ -369,7 +370,7 @@ class DataAgentService:
                 encrypted_password=encrypted_password,
                 secret_storage="fernet_local",
                 is_active=True,
-                metadata_json={"phase": 2},
+                metadata_json=metadata_payload,
                 last_connected_at=datetime.utcnow(),
             )
             db.add(system)
@@ -1279,13 +1280,21 @@ class DataAgentService:
             db.close()
 
     def _to_connected_system(self, system: DataAgentSystem) -> ConnectedSystem:
+        descriptor = resolve_system_descriptor(system_name=system.system_name, url=system.url)
         return ConnectedSystem(
             system_id=str(system.id),
             user_id=system.user.telegram_id if system.user else system.user_id,
-            system_name=system.system_name,
+            system_name=descriptor.system_name,
+            system_title=descriptor.title,
+            system_family=descriptor.family,
+            entry_surface=descriptor.entry_surface,
             url=system.url,
             login=system.login,
             is_active=system.is_active,
+            supports_scan=descriptor.supports_scan,
+            supports_points=descriptor.supports_points,
+            supports_monitoring=descriptor.supports_monitoring,
+            supports_chat_delivery=descriptor.supports_chat_delivery,
             created_at=system.created_at,
         )
 

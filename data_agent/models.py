@@ -34,9 +34,16 @@ class ConnectedSystem(BaseModel):
     system_id: str
     user_id: int
     system_name: str
+    system_title: Optional[str] = None
+    system_family: Optional[str] = None
+    entry_surface: Optional[str] = None
     url: str
     login: str
     is_active: bool = True
+    supports_scan: bool = False
+    supports_points: bool = False
+    supports_monitoring: bool = False
+    supports_chat_delivery: bool = False
     created_at: datetime
 
 

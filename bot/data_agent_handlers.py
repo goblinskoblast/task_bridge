@@ -26,6 +26,7 @@ from db.models import Chat, DataAgentProfile, Message as MessageModel, SavedPoin
 from data_agent.italian_pizza import resolve_italian_pizza_point
 from data_agent.monitoring import REPORT_CHAT_FALLBACK_LABEL, resolve_user_facing_chat_title
 from data_agent.saved_points import SavedPointError, saved_point_service
+from data_agent.system_catalog import is_italian_pizza_descriptor
 
 logger = logging.getLogger(__name__)
 
@@ -815,13 +816,9 @@ def _build_points_summary_text(points: list[SavedPoint]) -> str:
 
 def _is_italian_pizza_system(item: dict | None) -> bool:
     payload = item or {}
-    system_name = str(payload.get("system_name") or "").strip().lower()
-    url = str(payload.get("url") or "").strip().lower()
-    return (
-        system_name == "italian_pizza"
-        or "italianpizza" in url
-        or "tochka.italianpizza" in url
-        or ("tochka" in url and "pizza" in url)
+    return is_italian_pizza_descriptor(
+        system_name=str(payload.get("system_name") or ""),
+        url=str(payload.get("url") or ""),
     )
 
 
