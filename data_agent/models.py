@@ -39,6 +39,9 @@ class SystemScanContractItem(BaseModel):
     report_sections: List[str] = Field(default_factory=list)
     monitor_signals: List[str] = Field(default_factory=list)
     reliability_policy: List[str] = Field(default_factory=list)
+    capability_matrix: List[Dict[str, str]] = Field(default_factory=list)
+    scan_steps: List[Dict[str, Any]] = Field(default_factory=list)
+    starter_step: Optional[str] = None
 
 
 class ConnectedSystem(BaseModel):

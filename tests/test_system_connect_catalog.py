@@ -62,6 +62,9 @@ class SystemConnectCatalogTest(unittest.TestCase):
         self.assertEqual(response.system.scan_contract.auth_mode, "sso_web")
         self.assertIn("организация", response.system.scan_contract.primary_entities)
         self.assertIn("доступность", response.system.scan_contract.monitor_signals)
+        self.assertEqual(response.system.scan_contract.starter_step, "Войти и подтвердить контур организации")
+        self.assertTrue(response.system.scan_contract.scan_steps)
+        self.assertTrue(response.system.scan_contract.capability_matrix)
 
         session = self.SessionLocal()
         try:
@@ -93,6 +96,7 @@ class SystemConnectCatalogTest(unittest.TestCase):
         self.assertIn("объект", response.system.orientation_summary or "")
         self.assertEqual(response.system.scan_contract.stage, "scaffold")
         self.assertEqual(response.system.scan_contract.auth_mode, "web_login")
+        self.assertEqual(response.system.scan_contract.starter_step, "Войти и открыть рабочий объект")
 
 
 if __name__ == "__main__":

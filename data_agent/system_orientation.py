@@ -42,6 +42,16 @@ _SYSTEM_ORIENTATION_MARKERS = (
     "scan",
 )
 
+_DETAILED_SCAN_MARKERS = (
+    "пошаг",
+    "с чего начать",
+    "как начать",
+    "какой план",
+    "план scan",
+    "scan план",
+    "как проходить",
+)
+
 _SYSTEM_HINTS: tuple[tuple[str, str], ...] = (
     ("italian pizza", "italian_pizza"),
     ("italianpizza", "italian_pizza"),
@@ -88,6 +98,7 @@ def detect_requested_system_names(message: str) -> list[str]:
 def build_orientation_answer(message: str, systems: Sequence[ConnectedSystem]) -> str:
     requested_names = detect_requested_system_names(message)
     connected_map = {normalize_system_name(item.system_name): item for item in systems}
+    detailed_scan = _wants_detailed_scan_plan(message)
 
     if requested_names:
         blocks: list[str] = []
@@ -97,7 +108,13 @@ def build_orientation_answer(message: str, systems: Sequence[ConnectedSystem]) -
         if requested_connected:
             blocks.append("По подключённым системам ориентир такой:\n")
             blocks.extend(
-                _render_system_block(index, system_name=name, connected_system=connected_map[name], connected=True)
+                _render_system_block(
+                    index,
+                    system_name=name,
+                    connected_system=connected_map[name],
+                    connected=True,
+                    detailed_scan=detailed_scan,
+                )
                 for index, name in enumerate(requested_connected, start=1)
             )
 
@@ -106,7 +123,13 @@ def build_orientation_answer(message: str, systems: Sequence[ConnectedSystem]) -
                 blocks.append("")
             blocks.append(f"{_missing_systems_heading(len(requested_missing))}, но базовый ориентир уже такой:\n")
             blocks.extend(
-                _render_system_block(index, system_name=name, connected_system=None, connected=False)
+                _render_system_block(
+                    index,
+                    system_name=name,
+                    connected_system=None,
+                    connected=False,
+                    detailed_scan=detailed_scan,
+                )
                 for index, name in enumerate(requested_missing, start=1)
             )
 
@@ -126,7 +149,13 @@ def build_orientation_answer(message: str, systems: Sequence[ConnectedSystem]) -
 
     lines = [f"{_connected_systems_heading(len(systems))}.\n"]
     lines.extend(
-        _render_system_block(index, system_name=item.system_name, connected_system=item, connected=True)
+        _render_system_block(
+            index,
+            system_name=item.system_name,
+            connected_system=item,
+            connected=True,
+            detailed_scan=detailed_scan,
+        )
         for index, item in enumerate(systems, start=1)
     )
     lines.append("")
@@ -134,7 +163,14 @@ def build_orientation_answer(message: str, systems: Sequence[ConnectedSystem]) -
     return "\n".join(lines)
 
 
-def _render_system_block(index: int, *, system_name: str, connected_system: ConnectedSystem | None, connected: bool) -> str:
+def _render_system_block(
+    index: int,
+    *,
+    system_name: str,
+    connected_system: ConnectedSystem | None,
+    connected: bool,
+    detailed_scan: bool,
+) -> str:
     descriptor = resolve_system_descriptor(system_name=system_name, url=getattr(connected_system, "url", None))
     title = _system_title(connected_system) if connected_system else descriptor.title
     family = system_family_label(getattr(connected_system, "system_family", None) or descriptor.family)
@@ -150,6 +186,9 @@ def _render_system_block(index: int, *, system_name: str, connected_system: Conn
     report_entries = list(getattr(contract, "report_sections", None) or report_sections(descriptor))
     monitor_targets = list(getattr(contract, "monitor_signals", None) or monitor_signal_labels(descriptor))
     reliability_policy = list(getattr(contract, "reliability_policy", None) or fallback_contract.get("reliability_policy") or ())
+    capability_matrix = list(getattr(contract, "capability_matrix", None) or fallback_contract.get("capability_matrix") or ())
+    scan_steps = list(getattr(contract, "scan_steps", None) or fallback_contract.get("scan_steps") or ())
+    starter_step = str(getattr(contract, "starter_step", None) or fallback_contract.get("starter_step") or "")
 
     lines = [f"{index}. {title} — {family}"]
     if not connected:
@@ -163,6 +202,12 @@ def _render_system_block(index: int, *, system_name: str, connected_system: Conn
         lines.append(f"сущности: {', '.join(primary_entities)}")
     if capabilities:
         lines.append(f"можем: {', '.join(capabilities)}")
+    if capability_matrix:
+        readiness = "; ".join(
+            f"{item.get('label', item.get('capability', 'capability'))} — {item.get('stage_label', item.get('stage', 'неизвестно'))}"
+            for item in capability_matrix
+        )
+        lines.append(f"готовность: {readiness}")
     if report_entries:
         lines.append(f"разделы: {', '.join(report_entries)}")
     if monitor_targets:
@@ -171,6 +216,23 @@ def _render_system_block(index: int, *, system_name: str, connected_system: Conn
         lines.append(f"надёжность: {'; '.join(reliability_policy)}")
     if orientation:
         lines.append(f"ориентир: {orientation}")
+    if starter_step:
+        lines.append(f"старт: {starter_step}")
+    if detailed_scan and scan_steps:
+        lines.append("scan-план:")
+        for step_index, step in enumerate(scan_steps, start=1):
+            label = str(step.get("label") or f"Шаг {step_index}")
+            objective = str(step.get("objective") or "").strip()
+            automation_label = str(step.get("automation_label") or step.get("automation_stage") or "").strip()
+            evidence_hint = str(step.get("evidence_hint") or "").strip()
+            parts = [label]
+            if automation_label:
+                parts.append(automation_label)
+            if objective:
+                parts.append(objective)
+            if evidence_hint:
+                parts.append(f"проверка: {evidence_hint}")
+            lines.append(f"{step_index}. " + " — ".join(parts))
     if next_step:
         lines.append(f"дальше: {next_step}")
     return "\n".join(lines)
@@ -196,3 +258,8 @@ def _missing_systems_heading(count: int) -> str:
 
 def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").lower()).strip()
+
+
+def _wants_detailed_scan_plan(message: str) -> bool:
+    lowered = _normalize_text(message)
+    return any(marker in lowered for marker in _DETAILED_SCAN_MARKERS)

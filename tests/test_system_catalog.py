@@ -68,6 +68,10 @@ class SystemCatalogTest(unittest.TestCase):
         self.assertEqual(payload["auth_mode"], "sso_web")
         self.assertIn("организация", payload["primary_entities"])
         self.assertIn("доступность", payload["monitor_signals"])
+        self.assertEqual(payload["starter_step"], "Войти и подтвердить контур организации")
+        self.assertTrue(payload["scan_steps"])
+        self.assertTrue(payload["capability_matrix"])
+        self.assertEqual(payload["capability_matrix"][0]["capability"], "scan")
         self.assertTrue(payload["reliability_policy"])
 
     def test_is_italian_pizza_descriptor(self):

@@ -5,6 +5,16 @@ from urllib.parse import urlparse
 
 
 @dataclass(frozen=True)
+class ScanStepDescriptor:
+    step_id: str
+    label: str
+    objective: str
+    evidence_hint: str = ""
+    outputs: tuple[str, ...] = ()
+    automation_stage: str = "planned"
+
+
+@dataclass(frozen=True)
 class SystemDescriptor:
     system_name: str
     title: str
@@ -16,6 +26,7 @@ class SystemDescriptor:
     monitor_targets: tuple[str, ...] = ()
     primary_entities: tuple[str, ...] = ()
     reliability_policy: tuple[str, ...] = ()
+    scan_steps: tuple[ScanStepDescriptor, ...] = ()
     auth_mode: str = "login_password"
     product_stage: str = "scaffold"
     next_step_hint: str = ""
@@ -34,6 +45,32 @@ _DEFAULT_DESCRIPTOR = SystemDescriptor(
     scan_order=("логин", "первичная навигация", "поиск ключевых разделов"),
     primary_entities=("системные разделы", "точки / объекты", "отчёты"),
     reliability_policy=("сначала читаем и картируем разделы", "без боевых действий до понятного scan"),
+    scan_steps=(
+        ScanStepDescriptor(
+            step_id="login",
+            label="Войти в систему",
+            objective="Проверить, что логин работает и сессия открывается без дополнительных препятствий.",
+            evidence_hint="дошли до первой рабочей страницы после авторизации",
+            outputs=("session_ok",),
+            automation_stage="scaffold",
+        ),
+        ScanStepDescriptor(
+            step_id="map_root",
+            label="Снять карту первого уровня",
+            objective="Зафиксировать главные разделы, меню и рабочие входы.",
+            evidence_hint="видны основные разделы и названия пунктов меню",
+            outputs=("root_sections",),
+            automation_stage="scaffold",
+        ),
+        ScanStepDescriptor(
+            step_id="find_entities",
+            label="Найти точки и отчёты",
+            objective="Понять, где в системе живут объекты, точки и отчётные разделы.",
+            evidence_hint="найдены разделы с объектами и отчётами",
+            outputs=("point_area", "report_area"),
+            automation_stage="planned",
+        ),
+    ),
     auth_mode="login_password",
     product_stage="scaffold",
     next_step_hint="Следом нужен scan структуры системы, чтобы понять точки, отчёты и рабочие разделы.",
@@ -55,6 +92,40 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
             "читаем данные в read-only логике",
             "жёлтые blanks не считаем красной зоной",
             "алертим только по подтверждённым красным сигналам",
+        ),
+        scan_steps=(
+            ScanStepDescriptor(
+                step_id="login",
+                label="Войти в Italian Pizza",
+                objective="Открыть портал и убедиться, что сессия работает стабильно.",
+                evidence_hint="после логина доступно меню портала",
+                outputs=("session_ok",),
+                automation_stage="live",
+            ),
+            ScanStepDescriptor(
+                step_id="point_switch",
+                label="Переключить точку",
+                objective="Найти селектор точки и подтвердить, что нужная пиццерия выбрана.",
+                evidence_hint="в интерфейсе видно имя выбранной точки",
+                outputs=("selected_point",),
+                automation_stage="live",
+            ),
+            ScanStepDescriptor(
+                step_id="reports_map",
+                label="Открыть stoplist и blanks",
+                objective="Проверить рабочие входы в stoplist и blanks без лишней навигации.",
+                evidence_hint="страницы stoplist и blanks открываются из меню",
+                outputs=("stoplist_entry", "blanks_entry"),
+                automation_stage="live",
+            ),
+            ScanStepDescriptor(
+                step_id="monitor_ready",
+                label="Подтвердить сигнал для мониторинга",
+                objective="Понять, что данные читаются корректно и годятся для пользовательского алерта.",
+                evidence_hint="по stoplist/blanks собирается человекочитаемый результат",
+                outputs=("monitor_signal_ready",),
+                automation_stage="live",
+            ),
         ),
         auth_mode="login_password",
         product_stage="production",
@@ -78,6 +149,40 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
             "не выполняем боевые действия до понятного scan",
             "мониторинг включаем только после привязки точки",
         ),
+        scan_steps=(
+            ScanStepDescriptor(
+                step_id="login",
+                label="Войти и подтвердить контур организации",
+                objective="Открыть iiko через web SSO и понять, на каком уровне начинается рабочий контур.",
+                evidence_hint="после входа видны организация или список организаций",
+                outputs=("session_ok", "organization_scope"),
+                automation_stage="scaffold",
+            ),
+            ScanStepDescriptor(
+                step_id="map_organizations",
+                label="Снять карту организаций и точек",
+                objective="Найти сущности организация, ресторан и точка, чтобы потом привязывать их к продуктовой модели.",
+                evidence_hint="найдены списки организаций, ресторанов или точек",
+                outputs=("organization_list", "point_entities"),
+                automation_stage="scaffold",
+            ),
+            ScanStepDescriptor(
+                step_id="map_reports",
+                label="Найти отчёты и операционные разделы",
+                objective="Понять, где живут отчёты, доставка, склад и другие рабочие блоки.",
+                evidence_hint="видны входы в отчёты, доставку, склад или соседние операционные разделы",
+                outputs=("report_sections", "ops_sections"),
+                automation_stage="planned",
+            ),
+            ScanStepDescriptor(
+                step_id="bind_monitor_targets",
+                label="Подготовить точки для сигналов",
+                objective="Определить, какие сущности могут стать monitor target и как их стабильно выбирать.",
+                evidence_hint="понятно, как выбирать точку и повторять вход в нужный раздел",
+                outputs=("stable_point_selector", "monitor_targets"),
+                automation_stage="planned",
+            ),
+        ),
         auth_mode="sso_web",
         product_stage="scaffold",
         next_step_hint="Следом нужен scan структуры iiko и карта сущностей: точки, отчёты, доставка, склад.",
@@ -99,6 +204,40 @@ _SYSTEM_CATALOG: dict[str, SystemDescriptor] = {
             "сначала собираем карту объектов и отчётных входов",
             "без автоматических действий до понятного scan",
             "сигналы привязываем к конкретному объекту",
+        ),
+        scan_steps=(
+            ScanStepDescriptor(
+                step_id="login",
+                label="Войти и открыть рабочий объект",
+                objective="Зайти в Keeper и понять, где начинается объектный контур.",
+                evidence_hint="после входа виден список объектов или активный объект",
+                outputs=("session_ok", "object_scope"),
+                automation_stage="scaffold",
+            ),
+            ScanStepDescriptor(
+                step_id="map_objects",
+                label="Снять карту объектов и касс",
+                objective="Зафиксировать объекты, кассы и другие сущности первого уровня.",
+                evidence_hint="найдены объекты, кассы или похожие сущности операционки",
+                outputs=("object_list", "cashdesk_entities"),
+                automation_stage="scaffold",
+            ),
+            ScanStepDescriptor(
+                step_id="map_menu_reports",
+                label="Найти меню и отчётные разделы",
+                objective="Понять, где в Keeper живут меню, отчёты и операционные блоки.",
+                evidence_hint="видны входы в меню и отчёты",
+                outputs=("menu_sections", "report_sections"),
+                automation_stage="planned",
+            ),
+            ScanStepDescriptor(
+                step_id="bind_monitor_targets",
+                label="Подготовить объект для сигналов",
+                objective="Определить стабильный способ выбирать объект и читать нужные сигналы повторяемо.",
+                evidence_hint="понятно, как повторно открывать тот же объект и нужный раздел",
+                outputs=("stable_object_selector", "monitor_targets"),
+                automation_stage="planned",
+            ),
         ),
         auth_mode="web_login",
         product_stage="scaffold",
@@ -361,13 +500,57 @@ def auth_mode_label(auth_mode: str | None) -> str:
 def product_stage_label(stage: str | None) -> str:
     labels = {
         "production": "боевой контур",
+        "live": "боевой контур",
         "scaffold": "каркас / scan-first",
         "planned": "запланировано",
     }
     return labels.get(str(stage or ""), "стадия не уточнена")
 
 
+def capability_matrix_payload(descriptor: SystemDescriptor) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    matrix = (
+        ("scan", "scan", descriptor.supports_scan),
+        ("points", "точки", descriptor.supports_points),
+        ("monitoring", "мониторинг", descriptor.supports_monitoring),
+        ("chat_delivery", "доставка в чат", descriptor.supports_chat_delivery),
+        ("account_agent", "account agent", descriptor.supports_account_agent),
+    )
+    for capability, label, supported in matrix:
+        if not supported:
+            continue
+        stage = _capability_stage(descriptor, capability)
+        items.append(
+            {
+                "capability": capability,
+                "label": label,
+                "stage": stage,
+                "stage_label": product_stage_label(stage),
+            }
+        )
+    return items
+
+
+def scan_steps_payload(descriptor: SystemDescriptor) -> list[dict[str, object]]:
+    steps = descriptor.scan_steps or _generic_scan_steps(descriptor)
+    payload: list[dict[str, object]] = []
+    for step in steps:
+        payload.append(
+            {
+                "step_id": step.step_id,
+                "label": step.label,
+                "objective": step.objective,
+                "evidence_hint": step.evidence_hint,
+                "outputs": [item for item in step.outputs if item],
+                "automation_stage": step.automation_stage,
+                "automation_label": product_stage_label(step.automation_stage),
+            }
+        )
+    return payload
+
+
 def build_scan_contract_payload(descriptor: SystemDescriptor) -> dict[str, object]:
+    scan_steps = scan_steps_payload(descriptor)
     return {
         "stage": descriptor.product_stage,
         "stage_label": product_stage_label(descriptor.product_stage),
@@ -377,4 +560,32 @@ def build_scan_contract_payload(descriptor: SystemDescriptor) -> dict[str, objec
         "report_sections": report_sections(descriptor),
         "monitor_signals": monitor_signal_labels(descriptor),
         "reliability_policy": [item for item in descriptor.reliability_policy if item],
+        "capability_matrix": capability_matrix_payload(descriptor),
+        "scan_steps": scan_steps,
+        "starter_step": str(scan_steps[0].get("label")) if scan_steps else None,
     }
+
+
+def _capability_stage(descriptor: SystemDescriptor, capability: str) -> str:
+    if descriptor.product_stage == "production":
+        return "live"
+    if descriptor.product_stage == "scaffold":
+        return "scaffold" if capability == "scan" else "planned"
+    return "planned"
+
+
+def _generic_scan_steps(descriptor: SystemDescriptor) -> tuple[ScanStepDescriptor, ...]:
+    steps: list[ScanStepDescriptor] = []
+    for idx, label in enumerate(descriptor.scan_order, start=1):
+        step_id = f"step_{idx}"
+        steps.append(
+            ScanStepDescriptor(
+                step_id=step_id,
+                label=f"Проверить шаг: {label}",
+                objective=f"Зафиксировать раздел или рабочую точку входа «{label}».",
+                evidence_hint=f"виден и понятен шаг «{label}»",
+                outputs=(label,),
+                automation_stage="scaffold" if idx == 1 else "planned",
+            )
+        )
+    return tuple(steps)

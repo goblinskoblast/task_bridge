@@ -47,6 +47,32 @@ class SystemOrientationTest(unittest.TestCase):
                     "не выполняем боевые действия до понятного scan",
                     "мониторинг включаем только после привязки точки",
                 ],
+                "capability_matrix": [
+                    {"capability": "scan", "label": "scan", "stage": "scaffold", "stage_label": "каркас / scan-first"},
+                    {"capability": "points", "label": "точки", "stage": "planned", "stage_label": "запланировано"},
+                    {"capability": "monitoring", "label": "мониторинг", "stage": "planned", "stage_label": "запланировано"},
+                ],
+                "scan_steps": [
+                    {
+                        "step_id": "login",
+                        "label": "Войти и подтвердить контур организации",
+                        "objective": "Открыть iiko через web SSO и понять, на каком уровне начинается рабочий контур.",
+                        "evidence_hint": "после входа видны организация или список организаций",
+                        "outputs": ["session_ok", "organization_scope"],
+                        "automation_stage": "scaffold",
+                        "automation_label": "каркас / scan-first",
+                    },
+                    {
+                        "step_id": "map_organizations",
+                        "label": "Снять карту организаций и точек",
+                        "objective": "Найти сущности организация, ресторан и точка, чтобы потом привязывать их к продуктовой модели.",
+                        "evidence_hint": "найдены списки организаций, ресторанов или точек",
+                        "outputs": ["organization_list", "point_entities"],
+                        "automation_stage": "scaffold",
+                        "automation_label": "каркас / scan-first",
+                    },
+                ],
+                "starter_step": "Войти и подтвердить контур организации",
             },
             created_at=datetime(2026, 4, 21, 17, 0, 0),
         )
@@ -59,9 +85,11 @@ class SystemOrientationTest(unittest.TestCase):
         self.assertIn("авторизация: web SSO", answer)
         self.assertIn("сущности: организация, ресторан / точка, доставка, склад, отчёты", answer)
         self.assertIn("можем: scan, точки, мониторинг", answer)
+        self.assertIn("готовность: scan — каркас / scan-first; точки — запланировано; мониторинг — запланировано", answer)
         self.assertIn("разделы: организации, точки, отчёты, доставка, склад", answer)
         self.assertIn("сигналы: доступность, меню, операционка", answer)
         self.assertIn("надёжность:", answer)
+        self.assertIn("старт: Войти и подтвердить контур организации", answer)
 
     def test_build_orientation_answer_for_known_but_not_connected_system(self):
         answer = build_orientation_answer("Что умеешь по keeper?", [])
@@ -71,7 +99,15 @@ class SystemOrientationTest(unittest.TestCase):
         self.assertIn("не подключена", answer)
         self.assertIn("стадия: каркас / scan-first", answer)
         self.assertIn("авторизация: web-авторизация", answer)
+        self.assertIn("старт: Войти и открыть рабочий объект", answer)
         self.assertIn("разделы: объекты, кассы, отчёты, меню", answer)
+
+    def test_build_orientation_answer_can_expand_detailed_scan_plan(self):
+        answer = build_orientation_answer("Покажи scan план по iiko пошагово", [])
+
+        self.assertIn("scan-план:", answer)
+        self.assertIn("1. Войти и подтвердить контур организации", answer)
+        self.assertIn("2. Снять карту организаций и точек", answer)
 
 
 if __name__ == "__main__":
