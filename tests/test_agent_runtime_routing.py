@@ -237,6 +237,28 @@ class AgentRuntimeRoutingTest(unittest.TestCase):
                 self.assertEqual(decision.slots.get("monitor_action"), "list")
                 self.assertEqual(decision.missing_slots, [])
 
+    def test_rule_based_decision_routes_systems_summary_to_system_orientation(self):
+        decision = self.runtime._rule_based_decision(
+            "Какие системы у меня подключены?",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "system_orientation")
+        self.assertEqual(decision.selected_tools, ["orchestrator"])
+        self.assertEqual(decision.missing_slots, [])
+
+    def test_rule_based_decision_routes_iiko_orientation_question(self):
+        decision = self.runtime._rule_based_decision(
+            "Что умеешь по iiko?",
+            AgentSessionSnapshot(user_id=1),
+            1,
+        )
+
+        self.assertEqual(decision.scenario, "system_orientation")
+        self.assertEqual(decision.selected_tools, ["orchestrator"])
+        self.assertEqual(decision.missing_slots, [])
+
     def test_rule_based_decision_routes_generic_monitor_disable_by_point(self):
         expected_point_name = resolve_italian_pizza_point("Сухой Лог Белинского 40").display_name
         decision = self.runtime._rule_based_decision(

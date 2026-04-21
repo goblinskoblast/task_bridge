@@ -11,12 +11,14 @@ from db.database import get_db_session
 from db.models import DataAgentSession, User
 
 from .italian_pizza import resolve_italian_pizza_point
+from .system_orientation import wants_system_orientation
 
 logger = logging.getLogger(__name__)
 
 SCENARIO_TOOL_MAP = {
     "general": ["orchestrator"],
     "monitor_management": ["orchestrator"],
+    "system_orientation": ["orchestrator"],
     "browser_report": ["browser_tool"],
     "reviews_report": ["review_tool"],
     "stoplist_report": ["stoplist_tool"],
@@ -279,6 +281,9 @@ class DataAgentRuntime:
         elif any(token in lowered for token in ["отзыв", "отзывы", "рейтинг", "2гис", "2gis", "яндекс карты"]):
             scenario = "reviews_report"
             reasoning = "Определен сценарий отзывов"
+        elif wants_system_orientation(message):
+            scenario = "system_orientation"
+            reasoning = "Запрошен ориентир по системам"
         elif monitor_action == "update" and self._looks_like_generic_monitor_update(lowered, message):
             scenario = "monitor_management"
             reasoning = "Запрошено изменение настроек мониторинга без ID"
@@ -342,7 +347,7 @@ class DataAgentRuntime:
         provider = get_ai_provider()
         prompt = (
             "Ты интерпретатор запросов data-agent. Верни только JSON. "
-            "Сценарии: general, browser_report, reviews_report, stoplist_report, blanks_report. "
+            "Сценарии: general, system_orientation, browser_report, reviews_report, stoplist_report, blanks_report. "
             "Вытащи scenario, point_name, period_hint, reasoning. Если не уверен, используй general."
         )
         user_prompt = {

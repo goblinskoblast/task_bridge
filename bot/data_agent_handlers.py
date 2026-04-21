@@ -26,7 +26,7 @@ from db.models import Chat, DataAgentProfile, Message as MessageModel, SavedPoin
 from data_agent.italian_pizza import resolve_italian_pizza_point
 from data_agent.monitoring import REPORT_CHAT_FALLBACK_LABEL, resolve_user_facing_chat_title
 from data_agent.saved_points import SavedPointError, saved_point_service
-from data_agent.system_catalog import is_italian_pizza_descriptor
+from data_agent.system_catalog import entry_surface_label, is_italian_pizza_descriptor, system_family_label
 
 logger = logging.getLogger(__name__)
 
@@ -822,41 +822,16 @@ def _is_italian_pizza_system(item: dict | None) -> bool:
     )
 
 
-def _system_family_label(family: str | None) -> str:
-    labels = {
-        "restaurant_operations": "ресторанная операционка",
-        "restaurant_analytics": "репутация и аналитика",
-        "generic_web": "универсальный web-контур",
-        "messenger_channel": "клиентский канал",
-        "messenger_automation": "автоматизация мессенджеров",
-        "first_party_surface": "собственная поверхность",
-        "backoffice": "бэк-офис",
-        "crm": "CRM-контур",
-    }
-    return labels.get(str(family or ""), "внешняя система")
-
-
-def _entry_surface_label(surface: str | None) -> str:
-    labels = {
-        "web_portal": "web portal",
-        "api_or_sheet": "api / sheet",
-        "messenger": "messenger",
-        "native_app": "native app",
-        "account_agent": "account agent",
-    }
-    return labels.get(str(surface or ""), "surface")
-
-
 def _build_systems_summary_text(systems: list[dict]) -> str:
     lines = [f"🔌 <b>Подключённые системы: {len(systems)}</b>", ""]
     for item in systems:
         title = html.escape(str(item.get("system_title") or item.get("system_name") or "Web System"))
-        family_label = html.escape(_system_family_label(item.get("system_family")))
+        family_label = html.escape(system_family_label(item.get("system_family")))
         url = html.escape(str(item.get("url") or ""))
         capability_labels = [html.escape(str(label)) for label in (item.get("capability_labels") or []) if label]
         orientation = html.escape(str(item.get("orientation_summary") or ""))
         next_step_hint = html.escape(str(item.get("next_step_hint") or ""))
-        surface_label = html.escape(_entry_surface_label(item.get("entry_surface")))
+        surface_label = html.escape(entry_surface_label(item.get("entry_surface")))
 
         lines.append(f"• <b>{title}</b> — {family_label}")
         lines.append(f"  {url}")

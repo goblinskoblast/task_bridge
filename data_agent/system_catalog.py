@@ -235,3 +235,28 @@ def orientation_summary(descriptor: SystemDescriptor) -> str | None:
     if not descriptor.scan_order:
         return None
     return " -> ".join(descriptor.scan_order)
+
+
+def system_family_label(family: str | None) -> str:
+    labels = {
+        "restaurant_operations": "ресторанная операционка",
+        "restaurant_analytics": "репутация и аналитика",
+        "generic_web": "универсальный web-контур",
+        "messenger_channel": "клиентский канал",
+        "messenger_automation": "автоматизация мессенджеров",
+        "first_party_surface": "собственная поверхность",
+        "backoffice": "бэк-офис",
+        "crm": "CRM-контур",
+    }
+    return labels.get(str(family or ""), "внешняя система")
+
+
+def entry_surface_label(surface: str | None) -> str:
+    labels = {
+        "web_portal": "web portal",
+        "api_or_sheet": "api / sheet",
+        "messenger": "messenger",
+        "native_app": "native app",
+        "account_agent": "account agent",
+    }
+    return labels.get(str(surface or ""), "surface")

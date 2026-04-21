@@ -17,6 +17,7 @@ from .point_statistics import point_statistics_service
 from .review_report import review_report_service
 from .saved_points import saved_point_service
 from .stoplist_tool import stoplist_tool
+from .system_orientation import build_orientation_answer
 
 logger = logging.getLogger(__name__)
 DIRECT_ANSWER_SCENARIOS = {"reviews_report", "stoplist_report", "blanks_report"}
@@ -169,6 +170,19 @@ class BrowserReportScenario(BaseScenario):
             db.close()
 
 
+class SystemOrientationScenario(BaseScenario):
+    name = "system_orientation"
+    selected_tools = ["orchestrator"]
+
+    async def execute(self, *, user_id: int, user_message: str, slots: dict, systems: List[ConnectedSystem]) -> ScenarioExecution:
+        answer = build_orientation_answer(user_message, systems)
+        return ScenarioExecution(
+            selected_tools=list(self.selected_tools),
+            tool_results={"system_orientation": {"status": "ok", "systems_count": len(systems)}},
+            answer=answer,
+        )
+
+
 class GeneralScenario(BaseScenario):
     name = "general"
     selected_tools = ["orchestrator"]
@@ -179,6 +193,7 @@ class DataAgentScenarioEngine:
         self._scenarios = {
             "general": GeneralScenario(),
             "browser_report": BrowserReportScenario(),
+            "system_orientation": SystemOrientationScenario(),
             "reviews_report": ReviewsReportScenario(),
             "stoplist_report": StoplistReportScenario(),
             "blanks_report": BlanksReportScenario(),
