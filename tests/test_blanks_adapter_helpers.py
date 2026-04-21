@@ -219,6 +219,46 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         )
         self.assertEqual(values, ["9", "12", "15", "18", "21"])
 
+    def test_filter_blank_signals_to_rolling_window_excludes_stale_morning_slot(self):
+        filtered = self.adapter._filter_blank_signals_to_rolling_window(
+            [
+                {
+                    "slot_id": "2026-04-21T09:00",
+                    "service": "\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430",
+                    "time_range": "09:45 - 10:00",
+                    "column": "\u041f\u0438\u0446\u0446\u0430",
+                },
+                {
+                    "slot_id": "2026-04-21T12:00",
+                    "service": "\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430",
+                    "time_range": "12:45 - 13:00",
+                    "column": "\u0420\u043e\u043b\u043b\u044b",
+                },
+            ],
+            period_hint="\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 3 \u0447\u0430\u0441\u0430",
+            reference_time=datetime(2026, 4, 21, 13, 1),
+        )
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["time_range"], "12:45 - 13:00")
+
+    def test_filter_blank_signals_to_rolling_window_keeps_boundary_overlap(self):
+        filtered = self.adapter._filter_blank_signals_to_rolling_window(
+            [
+                {
+                    "slot_id": "2026-04-21T10:00",
+                    "service": "\u0414\u043e\u0441\u0442\u0430\u0432\u043a\u0430",
+                    "time_range": "10:00 - 10:15",
+                    "column": "\u0417\u0430\u043a\u0443\u0441\u043a\u0438",
+                }
+            ],
+            period_hint="\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 3 \u0447\u0430\u0441\u0430",
+            reference_time=datetime(2026, 4, 21, 13, 1),
+        )
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["time_range"], "10:00 - 10:15")
+
     def test_build_blank_report_from_signals_summarizes_red_zones(self):
         report_text, has_red_flags = self.adapter._build_blank_report_from_signals(
             point_name="Test point",

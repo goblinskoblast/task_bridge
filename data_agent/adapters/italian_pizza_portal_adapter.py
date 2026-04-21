@@ -10,6 +10,7 @@ from email_integration.encryption import decrypt_password
 
 logger = logging.getLogger(__name__)
 MSK_TZ = ZoneInfo("Europe/Moscow")
+YEKATERINBURG_TZ = ZoneInfo("Asia/Yekaterinburg")
 
 
 class ItalianPizzaPortalAdapter:
@@ -1337,6 +1338,84 @@ class ItalianPizzaPortalAdapter:
         current_hour = max(0, min(21, (reference.hour // 3) * 3))
         return [str(current_hour)]
 
+    def _coerce_blank_reference_time(
+        self,
+        reference_time: datetime | None,
+        timezone: ZoneInfo = YEKATERINBURG_TZ,
+    ) -> datetime:
+        if reference_time is None:
+            return datetime.now(timezone)
+        if reference_time.tzinfo is None:
+            return reference_time.replace(tzinfo=timezone)
+        return reference_time.astimezone(timezone)
+
+    def _blank_signal_time_window(
+        self,
+        signal: dict,
+        *,
+        reference_time: datetime,
+    ) -> tuple[datetime, datetime] | None:
+        base_date = reference_time.date()
+        slot_id = str(signal.get("slot_id") or "").strip()
+        if slot_id:
+            for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M"):
+                try:
+                    parsed_slot = datetime.strptime(slot_id, fmt).replace(tzinfo=reference_time.tzinfo)
+                    base_date = parsed_slot.date()
+                    break
+                except ValueError:
+                    continue
+
+        time_range = str(signal.get("time_range") or "").strip()
+        match = re.search(r"(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})", time_range)
+        if not match:
+            return None
+
+        start_hour, start_minute, end_hour, end_minute = (int(part) for part in match.groups())
+        slot_start = datetime(
+            base_date.year,
+            base_date.month,
+            base_date.day,
+            start_hour,
+            start_minute,
+            tzinfo=reference_time.tzinfo,
+        )
+        slot_end = datetime(
+            base_date.year,
+            base_date.month,
+            base_date.day,
+            end_hour,
+            end_minute,
+            tzinfo=reference_time.tzinfo,
+        )
+        if slot_end <= slot_start:
+            slot_end += timedelta(days=1)
+        return slot_start, slot_end
+
+    def _filter_blank_signals_to_rolling_window(
+        self,
+        signals: list[dict],
+        *,
+        period_hint: str,
+        reference_time: datetime | None = None,
+    ) -> list[dict]:
+        rolling_hours = self._rolling_blank_hours(period_hint)
+        if not rolling_hours:
+            return list(signals)
+
+        reference = self._coerce_blank_reference_time(reference_time)
+        range_start = reference - timedelta(hours=rolling_hours)
+        filtered: list[dict] = []
+        for signal in signals:
+            time_window = self._blank_signal_time_window(signal, reference_time=reference)
+            if time_window is None:
+                filtered.append(signal)
+                continue
+            slot_start, slot_end = time_window
+            if slot_end > range_start and slot_start < reference:
+                filtered.append(signal)
+        return filtered
+
     async def _read_blank_red_signals(self, page) -> dict:
         return await page.evaluate(
             """
@@ -1823,7 +1902,12 @@ class ItalianPizzaPortalAdapter:
             seen_keys.add(key)
             unique_signals.append(signal)
 
-        filtered_signals = self._filter_red_blank_signals(unique_signals)
+        filtered_signals = self._filter_red_blank_signals(
+            self._filter_blank_signals_to_rolling_window(
+                unique_signals,
+                period_hint=period_hint,
+            )
+        )
         report_text, has_red_flags = self._build_blank_report_from_signals(
             point_name=point_name,
             period_hint=period_hint,
