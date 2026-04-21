@@ -5,10 +5,13 @@ from typing import Sequence
 
 from .models import ConnectedSystem
 from .system_catalog import (
+    build_scan_contract_payload,
     capability_labels,
     entry_surface_label,
+    monitor_signal_labels,
     normalize_system_name,
     orientation_summary,
+    report_sections,
     resolve_system_descriptor,
     system_family_label,
 )
@@ -57,16 +60,6 @@ _SYSTEM_HINTS: tuple[tuple[str, str], ...] = (
     ("макс", "max"),
     ("max", "max"),
 )
-
-_MONITOR_TARGET_LABELS = {
-    "availability": "доступность",
-    "menu_status": "меню",
-    "operations": "операционка",
-    "stoplist": "стоп-лист",
-    "blanks": "бланки",
-    "reviews": "отзывы",
-}
-
 
 def wants_system_orientation(message: str) -> bool:
     lowered = _normalize_text(message)
@@ -149,19 +142,33 @@ def _render_system_block(index: int, *, system_name: str, connected_system: Conn
     capabilities = getattr(connected_system, "capability_labels", None) or capability_labels(descriptor)
     orientation = getattr(connected_system, "orientation_summary", None) or orientation_summary(descriptor)
     next_step = getattr(connected_system, "next_step_hint", None) or descriptor.next_step_hint
-    report_entries = [entry for entry in descriptor.report_entry_labels if entry]
-    monitor_targets = [_MONITOR_TARGET_LABELS.get(item, item) for item in descriptor.monitor_targets if item]
+    contract = getattr(connected_system, "scan_contract", None)
+    fallback_contract = build_scan_contract_payload(descriptor)
+    stage_label = str(getattr(contract, "stage_label", None) or fallback_contract.get("stage_label") or "")
+    auth_label = str(getattr(contract, "auth_mode_label", None) or fallback_contract.get("auth_mode_label") or "")
+    primary_entities = list(getattr(contract, "primary_entities", None) or fallback_contract.get("primary_entities") or ())
+    report_entries = list(getattr(contract, "report_sections", None) or report_sections(descriptor))
+    monitor_targets = list(getattr(contract, "monitor_signals", None) or monitor_signal_labels(descriptor))
+    reliability_policy = list(getattr(contract, "reliability_policy", None) or fallback_contract.get("reliability_policy") or ())
 
     lines = [f"{index}. {title} — {family}"]
     if not connected:
         lines.append("не подключена")
+    if stage_label:
+        lines.append(f"стадия: {stage_label}")
     lines.append(f"вход: {surface}")
+    if auth_label:
+        lines.append(f"авторизация: {auth_label}")
+    if primary_entities:
+        lines.append(f"сущности: {', '.join(primary_entities)}")
     if capabilities:
         lines.append(f"можем: {', '.join(capabilities)}")
     if report_entries:
         lines.append(f"разделы: {', '.join(report_entries)}")
     if monitor_targets:
         lines.append(f"сигналы: {', '.join(monitor_targets)}")
+    if reliability_policy:
+        lines.append(f"надёжность: {'; '.join(reliability_policy)}")
     if orientation:
         lines.append(f"ориентир: {orientation}")
     if next_step:

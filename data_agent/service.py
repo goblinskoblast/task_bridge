@@ -27,6 +27,7 @@ from .models import (
     DataAgentDebugResponse,
     MonitorConfigItem,
     MonitorDeleteResponse,
+    SystemScanContractItem,
     SystemConnectRequest,
     SystemConnectResponse,
 )
@@ -45,7 +46,7 @@ from .monitoring import (
     user_monitor_window_to_service_hours,
 )
 from .scenario_engine import scenario_engine
-from .system_catalog import capability_labels, orientation_summary, resolve_system_descriptor
+from .system_catalog import build_scan_contract_payload, capability_labels, orientation_summary, resolve_system_descriptor
 
 logger = logging.getLogger(__name__)
 _MONITOR_RETRY_STATUSES = {
@@ -1300,6 +1301,7 @@ class DataAgentService:
             scan_order=list(descriptor.scan_order),
             orientation_summary=orientation_summary(descriptor),
             next_step_hint=descriptor.next_step_hint or None,
+            scan_contract=SystemScanContractItem(**build_scan_contract_payload(descriptor)),
             created_at=system.created_at,
         )
 

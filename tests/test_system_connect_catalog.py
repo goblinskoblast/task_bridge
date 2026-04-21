@@ -57,6 +57,11 @@ class SystemConnectCatalogTest(unittest.TestCase):
         self.assertIn("точки", response.system.capability_labels)
         self.assertIn("организация", response.system.orientation_summary or "")
         self.assertIn("scan структуры iiko", response.system.next_step_hint or "")
+        self.assertIsNotNone(response.system.scan_contract)
+        self.assertEqual(response.system.scan_contract.stage, "scaffold")
+        self.assertEqual(response.system.scan_contract.auth_mode, "sso_web")
+        self.assertIn("организация", response.system.scan_contract.primary_entities)
+        self.assertIn("доступность", response.system.scan_contract.monitor_signals)
 
         session = self.SessionLocal()
         try:
@@ -86,6 +91,8 @@ class SystemConnectCatalogTest(unittest.TestCase):
         self.assertEqual(response.system.system_title, "Keeper")
         self.assertTrue(response.system.supports_monitoring)
         self.assertIn("объект", response.system.orientation_summary or "")
+        self.assertEqual(response.system.scan_contract.stage, "scaffold")
+        self.assertEqual(response.system.scan_contract.auth_mode, "web_login")
 
 
 if __name__ == "__main__":

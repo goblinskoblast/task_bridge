@@ -30,6 +30,17 @@ class SystemConnectRequest(BaseModel):
     password: str = Field(min_length=1, max_length=2048)
 
 
+class SystemScanContractItem(BaseModel):
+    stage: str
+    stage_label: Optional[str] = None
+    auth_mode: str
+    auth_mode_label: Optional[str] = None
+    primary_entities: List[str] = Field(default_factory=list)
+    report_sections: List[str] = Field(default_factory=list)
+    monitor_signals: List[str] = Field(default_factory=list)
+    reliability_policy: List[str] = Field(default_factory=list)
+
+
 class ConnectedSystem(BaseModel):
     system_id: str
     user_id: int
@@ -49,6 +60,7 @@ class ConnectedSystem(BaseModel):
     scan_order: List[str] = Field(default_factory=list)
     orientation_summary: Optional[str] = None
     next_step_hint: Optional[str] = None
+    scan_contract: Optional[SystemScanContractItem] = None
     created_at: datetime
 
 

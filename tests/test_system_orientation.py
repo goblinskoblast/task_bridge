@@ -34,6 +34,20 @@ class SystemOrientationTest(unittest.TestCase):
             capability_labels=["scan", "точки", "мониторинг"],
             orientation_summary="логин -> организация -> точки -> отчёты / операционные разделы",
             next_step_hint="Следом нужен scan структуры iiko и карта сущностей: точки, отчёты, доставка, склад.",
+            scan_contract={
+                "stage": "scaffold",
+                "stage_label": "каркас / scan-first",
+                "auth_mode": "sso_web",
+                "auth_mode_label": "web SSO",
+                "primary_entities": ["организация", "ресторан / точка", "доставка", "склад", "отчёты"],
+                "report_sections": ["организации", "точки", "отчёты", "доставка", "склад"],
+                "monitor_signals": ["доступность", "меню", "операционка"],
+                "reliability_policy": [
+                    "сначала строим карту разделов и сущностей",
+                    "не выполняем боевые действия до понятного scan",
+                    "мониторинг включаем только после привязки точки",
+                ],
+            },
             created_at=datetime(2026, 4, 21, 17, 0, 0),
         )
 
@@ -41,9 +55,13 @@ class SystemOrientationTest(unittest.TestCase):
 
         self.assertIn("Сейчас вижу 1 подключённую систему.", answer)
         self.assertIn("1. iiko — ресторанная операционка", answer)
+        self.assertIn("стадия: каркас / scan-first", answer)
+        self.assertIn("авторизация: web SSO", answer)
+        self.assertIn("сущности: организация, ресторан / точка, доставка, склад, отчёты", answer)
         self.assertIn("можем: scan, точки, мониторинг", answer)
         self.assertIn("разделы: организации, точки, отчёты, доставка, склад", answer)
         self.assertIn("сигналы: доступность, меню, операционка", answer)
+        self.assertIn("надёжность:", answer)
 
     def test_build_orientation_answer_for_known_but_not_connected_system(self):
         answer = build_orientation_answer("Что умеешь по keeper?", [])
@@ -51,6 +69,8 @@ class SystemOrientationTest(unittest.TestCase):
         self.assertIn("Эта система у вас пока не подключена", answer)
         self.assertIn("1. Keeper — ресторанная операционка", answer)
         self.assertIn("не подключена", answer)
+        self.assertIn("стадия: каркас / scan-first", answer)
+        self.assertIn("авторизация: web-авторизация", answer)
         self.assertIn("разделы: объекты, кассы, отчёты, меню", answer)
 
 

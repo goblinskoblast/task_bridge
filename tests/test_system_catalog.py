@@ -1,6 +1,7 @@
 import unittest
 
 from data_agent.system_catalog import (
+    build_scan_contract_payload,
     capability_labels,
     detect_system_name_from_url,
     is_italian_pizza_descriptor,
@@ -58,6 +59,16 @@ class SystemCatalogTest(unittest.TestCase):
         self.assertIn("scan", capability_labels(descriptor))
         self.assertIn("мониторинг", capability_labels(descriptor))
         self.assertIn("организация", orientation_summary(descriptor))
+
+    def test_build_scan_contract_payload_for_iiko(self):
+        descriptor = resolve_system_descriptor(system_name="iiko")
+        payload = build_scan_contract_payload(descriptor)
+
+        self.assertEqual(payload["stage"], "scaffold")
+        self.assertEqual(payload["auth_mode"], "sso_web")
+        self.assertIn("организация", payload["primary_entities"])
+        self.assertIn("доступность", payload["monitor_signals"])
+        self.assertTrue(payload["reliability_policy"])
 
     def test_is_italian_pizza_descriptor(self):
         self.assertTrue(is_italian_pizza_descriptor(system_name="italian_pizza"))
