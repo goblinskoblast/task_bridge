@@ -30,16 +30,18 @@
 
 ## Важно про внутренний адрес
 
-`web` должен обращаться к `data_agent` по внутреннему адресу Northflank внутри проекта:
+После создания каждого сервиса открой его в Northflank и скопируй внутренний endpoint из раздела сети / networking.
+
+Дальше:
+
+- `web` должен ходить в `data_agent` по его внутреннему HTTP endpoint
+- `data_agent` должен ходить обратно в `web` по его внутреннему HTTP endpoint с суффиксом `/api/internal/data-agent`
+
+Пример формы значений:
 
 ```env
-DATA_AGENT_URL=http://taskbridge-data-agent:8010
-```
-
-`data_agent` должен ходить обратно во внутренний API `web`:
-
-```env
-INTERNAL_API_URL=http://taskbridge-web:8000/api/internal/data-agent
+DATA_AGENT_URL=http://<internal-data-agent-endpoint>:8010
+INTERNAL_API_URL=http://<internal-web-endpoint>:8000/api/internal/data-agent
 ```
 
 ## Шаг 1. Создать базу
@@ -71,7 +73,7 @@ BOT_TOKEN=...
 OPENAI_API_KEY=...
 AI_PROVIDER=openai
 DATABASE_URL=postgresql://...
-INTERNAL_API_URL=http://taskbridge-web:8000/api/internal/data-agent
+INTERNAL_API_URL=http://<internal-web-endpoint>:8000/api/internal/data-agent
 INTERNAL_API_TOKEN=<shared-random-token>
 DATA_AGENT_TIMEOUT=45
 TIMEZONE=Asia/Yekaterinburg
@@ -109,7 +111,7 @@ WEBHOOK_URL=https://taskbridge-web-<slug>.northflank.app
 WEBHOOK_PATH=/webhook
 WEB_APP_DOMAIN=https://taskbridge-web-<slug>.northflank.app
 MINI_APP_URL=https://taskbridge-web-<slug>.northflank.app/webapp/index.html
-DATA_AGENT_URL=http://taskbridge-data-agent:8010
+DATA_AGENT_URL=http://<internal-data-agent-endpoint>:8010
 INTERNAL_API_TOKEN=<shared-random-token>
 TIMEZONE=Asia/Yekaterinburg
 ALLOW_INSECURE_USER_ID_AUTH=true
@@ -168,7 +170,7 @@ https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo
 Проверь:
 
 ```env
-DATA_AGENT_URL=http://taskbridge-data-agent:8010
+DATA_AGENT_URL=http://<internal-data-agent-endpoint>:8010
 ```
 
 ### 2. `data_agent` не достаёт internal API `web`
@@ -176,7 +178,7 @@ DATA_AGENT_URL=http://taskbridge-data-agent:8010
 Проверь:
 
 ```env
-INTERNAL_API_URL=http://taskbridge-web:8000/api/internal/data-agent
+INTERNAL_API_URL=http://<internal-web-endpoint>:8000/api/internal/data-agent
 INTERNAL_API_TOKEN=<тот же токен что и в web>
 ```
 
@@ -212,11 +214,11 @@ INTERNAL_API_TOKEN=<тот же токен что и в web>
 - `WEBHOOK_PATH=/webhook`
 - `WEB_APP_DOMAIN`
 - `MINI_APP_URL`
-- `DATA_AGENT_URL=http://taskbridge-data-agent:8010`
+- `DATA_AGENT_URL=http://<internal-data-agent-endpoint>:8010`
 
 Только у `data_agent`:
 
-- `INTERNAL_API_URL=http://taskbridge-web:8000/api/internal/data-agent`
+- `INTERNAL_API_URL=http://<internal-web-endpoint>:8000/api/internal/data-agent`
 
 ## После миграции
 
