@@ -19,6 +19,7 @@ from .debugging import build_debug_artifacts
 from .point_statistics import point_statistics_service
 from .point_delivery import resolve_point_report_chat
 from .review_report import review_report_service
+from .stoplist_chat_cards import build_stoplist_monitor_card
 from .stoplist_incidents import upsert_stoplist_incident
 from .stoplist_tool import stoplist_tool
 
@@ -554,6 +555,11 @@ async def _run_stoplist_monitor(
         changed = bool(report_hash and report_hash != previous_hash)
 
         if report_text:
+            event_title = (
+                f"Обновился стоп-лист: {config.point_name}"
+                if changed
+                else f"Стоп-лист по расписанию: {config.point_name}"
+            )
             event = DataAgentMonitorEvent(
                 user_id=config.user_id,
                 config_id=config.id,
@@ -561,7 +567,7 @@ async def _run_stoplist_monitor(
                 monitor_type=config.monitor_type,
                 point_name=config.point_name,
                 severity="info",
-                title=(f"Обновился стоп-лист: {config.point_name}" if changed else f"Стоп-лист по расписанию: {config.point_name}"),
+                title=event_title,
                 body=report_text,
                 event_hash=hashlib.sha256(
                     f"{report_hash or 'stoplist'}:{datetime.utcnow().isoformat()}".encode("utf-8", errors="ignore")
@@ -569,16 +575,25 @@ async def _run_stoplist_monitor(
                 sent_to_telegram=False,
             )
             db.add(event)
-            db.commit()
-            db.refresh(event)
-            upsert_stoplist_incident(
+            db.flush()
+            incident = upsert_stoplist_incident(
                 db,
                 config=config,
                 result=result,
                 monitor_event=event,
                 observed_at=event.created_at,
             )
+            stoplist_card = build_stoplist_monitor_card(
+                point_name=config.point_name,
+                report_text=report_text,
+                incident=incident,
+                changed=changed,
+                now=event.created_at,
+            )
+            event.title = stoplist_card.event_title
+            event.body = stoplist_card.plain_text
             db.commit()
+            db.refresh(event)
 
             delivery_chat_id = _resolve_monitor_delivery_chat_id(
                 db,
@@ -589,11 +604,7 @@ async def _run_stoplist_monitor(
             if notify_user and delivery_chat_id:
                 sent_message = await bot.send_message(
                     chat_id=delivery_chat_id,
-                    text=(
-                        f"{'Стоп-лист изменился' if changed else 'Стоп-лист по расписанию'}\n\n"
-                        f"<b>Точка:</b> {config.point_name}\n\n"
-                        f"{report_text[:3500]}"
-                    ),
+                    text=stoplist_card.html_text[:3500],
                     parse_mode="HTML",
                 )
                 _mark_event_delivered(
