@@ -71,6 +71,21 @@ class PointDeliveryRoutingTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(matched)
         self.assertEqual(matched.display_name, "Верхний Уфалей, Ленина 147")
 
+    def test_match_saved_point_to_chat_title_matches_short_city_alias(self):
+        points = [
+            SimpleNamespace(
+                display_name="Артёмовский, Гагарина 2а",
+                city="Артёмовский",
+                address="Гагарина 2а",
+                external_point_key=None,
+            ),
+        ]
+
+        matched = match_saved_point_to_chat_title(points, "ТурбоБот Артём")
+
+        self.assertIsNotNone(matched)
+        self.assertEqual(matched.display_name, "Артёмовский, Гагарина 2а")
+
     async def test_deliver_report_prefers_point_specific_chat_over_profile_chat(self):
         session = self.SessionLocal()
         try:

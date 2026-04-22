@@ -29,6 +29,12 @@ def _city_variants(city: str | None) -> set[str]:
     parts = normalized_city.split()
     if len(parts) > 1:
         variants.add(parts[-1])
+    if normalized_city.endswith("овский") and len(normalized_city) > len("овский") + 2:
+        variants.add(normalized_city[: -len("овский")])
+    if normalized_city.endswith("евский") and len(normalized_city) > len("евский") + 2:
+        variants.add(normalized_city[: -len("евский")])
+    if normalized_city.endswith("ёвский") and len(normalized_city) > len("ёвский") + 2:
+        variants.add(normalized_city[: -len("ёвский")])
     return {item for item in variants if item}
 
 
