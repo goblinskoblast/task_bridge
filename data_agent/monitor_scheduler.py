@@ -12,11 +12,12 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import BOT_TOKEN, TIMEZONE
 from db.database import get_db_session
-from db.models import DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentProfile, DataAgentSystem, User
+from db.models import DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentProfile, DataAgentSystem, SavedPoint, User
 
 from .blanks_tool import blanks_tool
 from .debugging import build_debug_artifacts
 from .point_statistics import point_statistics_service
+from .point_delivery import resolve_point_report_chat
 from .review_report import review_report_service
 from .stoplist_tool import stoplist_tool
 
@@ -136,9 +137,32 @@ def _load_monitor_config(db, config: DataAgentMonitorConfig | None) -> DataAgent
     return db.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == config_id).first()
 
 
-def _resolve_monitor_delivery_chat_id(db, user: User | None, category: str | None = None) -> int | None:
+def _resolve_monitor_delivery_chat_id(
+    db,
+    user: User | None,
+    category: str | None = None,
+    *,
+    point_name: str | None = None,
+) -> int | None:
     if not user:
         return None
+
+    if category and point_name:
+        points = (
+            db.query(SavedPoint)
+            .filter(
+                SavedPoint.user_id == user.id,
+                SavedPoint.is_active.is_(True),
+            )
+            .all()
+        )
+        point_chat_id, _, _ = resolve_point_report_chat(
+            points,
+            point_name=point_name,
+            category=category,
+        )
+        if point_chat_id:
+            return int(point_chat_id)
 
     profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user.id).first()
     if profile and category:
@@ -436,7 +460,12 @@ async def _run_blanks_monitor(
             db.refresh(event)
 
             user = db.query(User).filter(User.id == config.user_id).first()
-            delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "blanks")
+            delivery_chat_id = _resolve_monitor_delivery_chat_id(
+                db,
+                user,
+                "blanks",
+                point_name=config.point_name,
+            )
             if notify_user and delivery_chat_id:
                 delivery = await _send_with_direct_fallback(
                     bot,
@@ -542,7 +571,12 @@ async def _run_stoplist_monitor(
             db.commit()
             db.refresh(event)
 
-            delivery_chat_id = _resolve_monitor_delivery_chat_id(db, user, "stoplist")
+            delivery_chat_id = _resolve_monitor_delivery_chat_id(
+                db,
+                user,
+                "stoplist",
+                point_name=config.point_name,
+            )
             if notify_user and delivery_chat_id:
                 sent_message = await bot.send_message(
                     chat_id=delivery_chat_id,

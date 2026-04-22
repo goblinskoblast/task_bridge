@@ -98,7 +98,7 @@ nano .env
 
 ```env
 # Telegram Bot
-BOT_TOKEN=8082995988:AAHvzDG4Y2v-yQXqXoQOryVEOg4eEYrKiqo
+BOT_TOKEN=your_telegram_bot_token
 
 # AI Provider - используем OpenClaw через ngrok
 AI_PROVIDER=openclaw

@@ -160,7 +160,7 @@ OPENCLAW_BASE_URL=http://ваш-vps-ip:3000
 
 ### .env (локально для разработки)
 ```env
-BOT_TOKEN=8082995988:AAHvzDG4Y2v-yQXqXoQOryVEOg4eEYrKiqo
+BOT_TOKEN=your_telegram_bot_token
 AI_PROVIDER=openclaw
 OPENCLAW_BASE_URL=http://localhost:3000
 OPENCLAW_MODEL=openai/gpt-4o
@@ -169,7 +169,7 @@ OPENAI_API_KEY=ваш_ключ
 
 ### Railway Variables (для тестирования с ngrok)
 ```env
-BOT_TOKEN=8082995988:AAHvzDG4Y2v-yQXqXoQOryVEOg4eEYrKiqo
+BOT_TOKEN=your_telegram_bot_token
 AI_PROVIDER=openclaw
 OPENCLAW_BASE_URL=https://abc123.ngrok-free.app  # <<<< ngrok URL
 OPENCLAW_MODEL=openai/gpt-4o

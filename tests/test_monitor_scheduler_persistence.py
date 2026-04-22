@@ -15,7 +15,7 @@ os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 
-from db.models import Base, DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentProfile, DataAgentSystem, User
+from db.models import Base, DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentProfile, DataAgentSystem, SavedPoint, User
 from data_agent import monitor_scheduler
 
 
@@ -204,6 +204,58 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertEqual(events[0].telegram_chat_id, 555001)
         self.assertEqual(events[0].telegram_message_id, 2001)
         self.assertIsNotNone(events[0].telegram_sent_at)
+
+    def test_run_blanks_monitor_prefers_point_specific_chat_over_profile_chat(self):
+        primary_chat_id = -100777001
+        point_chat_id = -100888002
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 555001).first()
+            session.add(
+                DataAgentProfile(
+                    user_id=user.id,
+                    blanks_report_chat_id=primary_chat_id,
+                    blanks_report_chat_title="Blanks room",
+                )
+            )
+            session.add(
+                SavedPoint(
+                    user_id=user.id,
+                    system_id=1,
+                    provider="italian_pizza",
+                    city="Сухой Лог",
+                    address="Белинского 40",
+                    display_name="РЎСѓС…РѕР№ Р›РѕРі, Р‘РµР»РёРЅСЃРєРѕРіРѕ 40",
+                    external_point_key=None,
+                    is_active=True,
+                    report_delivery_enabled=True,
+                    blanks_report_chat_id=point_chat_id,
+                    blanks_report_chat_title="Point room",
+                    stats_interval_minutes=240,
+                )
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        bot = _DummyBot()
+        result = {
+            "status": "ok",
+            "report_text": "point specific delivery",
+            "has_red_flags": True,
+            "alert_hash": "hash-point-chat",
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.blanks_tool,
+                "inspect_point",
+                new=AsyncMock(return_value=result),
+            ):
+                asyncio.run(monitor_scheduler._run_blanks_monitor(bot, self.detached_config))
+
+        self.assertEqual(len(bot.messages), 1)
+        self.assertEqual(bot.messages[0].get("chat_id"), point_chat_id)
 
     def test_run_blanks_monitor_retries_hashless_red_alert_after_delivery_failure(self):
         failing_bot = _AlwaysFailBot()

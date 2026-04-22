@@ -305,6 +305,22 @@ def _ensure_saved_point_columns():
         alter_statements.append(
             f"ALTER TABLE saved_points ADD COLUMN report_delivery_enabled {boolean_type} DEFAULT {default_literal}"
         )
+    if "stoplist_report_chat_id" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE saved_points ADD COLUMN stoplist_report_chat_id BIGINT"
+        )
+    if "stoplist_report_chat_title" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE saved_points ADD COLUMN stoplist_report_chat_title VARCHAR(500)"
+        )
+    if "blanks_report_chat_id" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE saved_points ADD COLUMN blanks_report_chat_id BIGINT"
+        )
+    if "blanks_report_chat_title" not in column_names:
+        alter_statements.append(
+            "ALTER TABLE saved_points ADD COLUMN blanks_report_chat_title VARCHAR(500)"
+        )
 
     if not alter_statements:
         return

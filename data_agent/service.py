@@ -14,6 +14,7 @@ from db.models import (
     DataAgentRequestLog,
     DataAgentSession,
     DataAgentSystem,
+    SavedPoint,
     User,
 )
 from email_integration.encryption import encrypt_password
@@ -46,6 +47,7 @@ from .monitoring import (
     service_monitor_window_to_user_hours,
     user_monitor_window_to_service_hours,
 )
+from .point_delivery import get_point_report_chat
 from .scenario_engine import scenario_engine
 from .system_catalog import build_scan_contract_payload, capability_labels, orientation_summary, resolve_system_descriptor
 
@@ -503,13 +505,23 @@ class DataAgentService:
                 .all()
             )
             profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user.id).first()
+            points = (
+                db.query(SavedPoint)
+                .filter(SavedPoint.user_id == user.id, SavedPoint.is_active.is_(True))
+                .all()
+            )
+            points_by_name = {item.display_name: item for item in points}
             latest_events = self._load_latest_user_facing_events(db, items)
             monitors: List[MonitorConfigItem] = []
             for item in items:
                 description = self._describe_monitor_item(
                     item,
                     latest_event=latest_events.get(item.id),
-                    delivery_label=self._resolve_monitor_delivery_label(profile, item.monitor_type),
+                    delivery_label=self._resolve_monitor_delivery_label(
+                        profile,
+                        item.monitor_type,
+                        point=points_by_name.get(item.point_name),
+                    ),
                 )
                 monitors.append(
                     MonitorConfigItem(
@@ -564,6 +576,12 @@ class DataAgentService:
                 )
 
             profile = db.query(DataAgentProfile).filter(DataAgentProfile.user_id == user.id).first()
+            points = (
+                db.query(SavedPoint)
+                .filter(SavedPoint.user_id == user.id, SavedPoint.is_active.is_(True))
+                .all()
+            )
+            points_by_name = {item.display_name: item for item in points}
             latest_events = self._load_latest_user_facing_events(db, items)
             described_items: list[tuple[DataAgentMonitorConfig, dict[str, object]]] = []
             for item in items:
@@ -573,7 +591,11 @@ class DataAgentService:
                         self._describe_monitor_item(
                             item,
                             latest_event=latest_events.get(item.id),
-                            delivery_label=self._resolve_monitor_delivery_label(profile, item.monitor_type),
+                            delivery_label=self._resolve_monitor_delivery_label(
+                                profile,
+                                item.monitor_type,
+                                point=points_by_name.get(item.point_name),
+                            ),
                         ),
                     )
                 )
@@ -824,7 +846,17 @@ class DataAgentService:
         label = f"{event_time}, {'было уведомление' if sent_to_telegram else 'событие зафиксировано'}"
         return {"title": title, "label": label}
 
-    def _resolve_monitor_delivery_label(self, profile: DataAgentProfile | None, monitor_type: str) -> str | None:
+    def _resolve_monitor_delivery_label(
+        self,
+        profile: DataAgentProfile | None,
+        monitor_type: str,
+        *,
+        point: SavedPoint | None = None,
+    ) -> str | None:
+        point_chat_id, point_chat_title = get_point_report_chat(point, monitor_type)
+        if point_chat_id:
+            return format_user_facing_chat_label(point_chat_title)
+
         if profile is None:
             return None
 

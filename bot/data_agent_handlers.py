@@ -25,6 +25,11 @@ from db.database import get_db_session
 from db.models import Chat, DataAgentProfile, Message as MessageModel, SavedPoint, User
 from data_agent.italian_pizza import resolve_italian_pizza_point
 from data_agent.monitoring import REPORT_CHAT_FALLBACK_LABEL, resolve_user_facing_chat_title
+from data_agent.point_delivery import (
+    build_point_delivery_aliases,
+    find_delivery_points_for_text,
+    get_point_report_chat,
+)
 from data_agent.saved_points import SavedPointError, saved_point_service
 from data_agent.system_catalog import entry_surface_label, is_italian_pizza_descriptor, system_family_label
 
@@ -566,6 +571,25 @@ def _find_delivery_points_for_message(
     return matched
 
 
+def _build_delivery_point_aliases(point: SavedPoint) -> set[str]:
+    return build_point_delivery_aliases(point)
+
+
+def _find_delivery_points_for_message(
+    db,
+    telegram_user_id: int,
+    user_message: str,
+    *,
+    require_delivery_enabled: bool = True,
+) -> list[SavedPoint]:
+    points = saved_point_service.list_points(db, telegram_user_id)
+    if require_delivery_enabled:
+        points = [item for item in points if item.report_delivery_enabled]
+    if not points:
+        return []
+    return find_delivery_points_for_text(points, user_message)
+
+
 def _build_delivery_disabled_notice(points: list[SavedPoint]) -> str:
     if not points:
         return "В чат не отправлено: для выбранной точки выключена отправка."
@@ -620,6 +644,94 @@ async def _deliver_report_to_selected_chat(
             )
             .first()
         )
+        chat_title = (
+            (chat.title if chat and chat.title else None)
+            or (chat.username if chat and chat.username else None)
+            or target_chat_title
+            or str(target_chat_id)
+        )
+        logger.info(
+            "Report delivery attempt telegram_user_id=%s user_id=%s category=%s target_chat_id=%s title=%s",
+            effective_telegram_user_id,
+            user.id,
+            report_category,
+            target_chat_id,
+            chat_title,
+        )
+
+        delivery_text = build_report_delivery_message(
+            requester_name=requester_name or _get_requester_name(message),
+            user_message=user_message,
+            answer=answer,
+        )
+        await message.bot.send_message(
+            chat_id=target_chat_id,
+            text=trim_telegram_text(delivery_text),
+            parse_mode=None,
+        )
+        logger.info(
+            "Report delivery success telegram_user_id=%s user_id=%s category=%s target_chat_id=%s",
+            effective_telegram_user_id,
+            user.id,
+            report_category,
+            target_chat_id,
+        )
+        return chat_title
+    except Exception as exc:
+        logger.error("Report delivery to selected chat failed: %s", exc, exc_info=True)
+        return None
+    finally:
+        db.close()
+
+
+async def _deliver_report_to_selected_chat(
+    message: Message,
+    user_message: str,
+    answer: str,
+    *,
+    report_category: str | None = None,
+    telegram_user_id: int | None = None,
+    requester_name: str | None = None,
+) -> str | None:
+    db = get_db_session()
+    try:
+        effective_telegram_user_id = telegram_user_id or message.from_user.id
+        logger.info(
+            "Report delivery requested telegram_user_id=%s category=%s answer_len=%s",
+            effective_telegram_user_id,
+            report_category,
+            len((answer or "").strip()),
+        )
+        user = db.query(User).filter(User.telegram_id == effective_telegram_user_id).first()
+        if not user:
+            logger.warning("Report delivery skipped: user not found telegram_user_id=%s", effective_telegram_user_id)
+            return None
+
+        profile = _get_or_create_profile(db, user.id)
+        target_chat_id = None
+        target_chat_title = None
+
+        if report_category:
+            candidate_points = _find_delivery_points_for_message(
+                db,
+                effective_telegram_user_id,
+                user_message,
+                require_delivery_enabled=False,
+            )
+            if len(candidate_points) == 1:
+                target_chat_id, target_chat_title = get_point_report_chat(candidate_points[0], report_category)
+
+        if not target_chat_id:
+            target_chat_id, target_chat_title = _get_profile_report_chat(profile, report_category or "")
+        if not target_chat_id:
+            logger.info(
+                "Report delivery skipped: no report chat user_id=%s category=%s",
+                user.id,
+                report_category,
+            )
+            return None
+
+        chat = db.query(Chat).filter(Chat.chat_id == target_chat_id).first()
         chat_title = (
             (chat.title if chat and chat.title else None)
             or (chat.username if chat and chat.username else None)
