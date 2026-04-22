@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Boolean, ForeignKey, JSON, Table, LargeBinary
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, Date, Boolean, ForeignKey, JSON, Table, LargeBinary, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -62,6 +62,11 @@ class User(Base):
     data_agent_monitor_configs = relationship("DataAgentMonitorConfig", back_populates="user", cascade="all, delete-orphan")
     data_agent_monitor_events = relationship("DataAgentMonitorEvent", back_populates="user", cascade="all, delete-orphan")
     stoplist_incidents = relationship("StopListIncident", back_populates="user", cascade="all, delete-orphan")
+    stoplist_weekly_digest_deliveries = relationship(
+        "StopListWeeklyDigestDelivery",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     saved_points = relationship("SavedPoint", back_populates="user", cascade="all, delete-orphan")
     point_stat_runs = relationship("PointStatRun", back_populates="user", cascade="all, delete-orphan")
 
@@ -563,6 +568,36 @@ class StopListIncident(Base):
         return (
             f"<StopListIncident(id={self.id}, point={self.point_name}, "
             f"status={self.status}, lifecycle={self.lifecycle_state})>"
+        )
+
+
+class StopListWeeklyDigestDelivery(Base):
+    """Ledger for scheduled weekly stoplist digests."""
+    __tablename__ = "stoplist_weekly_digest_deliveries"
+    __table_args__ = (
+        UniqueConstraint("user_id", "week_start_date", name="uq_stoplist_weekly_digest_user_week"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False, index=True)
+    week_start_date = Column(Date, nullable=False, index=True)
+    digest_window_days = Column(Integer, nullable=False, default=7)
+    chat_id = Column(BigInteger, nullable=False, index=True)
+    telegram_message_id = Column(BigInteger, nullable=True)
+    digest_hash = Column(String(255), nullable=True, index=True)
+    incidents_count = Column(Integer, nullable=False, default=0)
+    affected_points_count = Column(Integer, nullable=False, default=0)
+    recurring_points_count = Column(Integer, nullable=False, default=0)
+    need_attention_points_count = Column(Integer, nullable=False, default=0)
+    sent_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="stoplist_weekly_digest_deliveries")
+
+    def __repr__(self):
+        return (
+            f"<StopListWeeklyDigestDelivery(id={self.id}, user_id={self.user_id}, "
+            f"week_start_date={self.week_start_date})>"
         )
 
 
