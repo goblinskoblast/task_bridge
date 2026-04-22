@@ -6,7 +6,8 @@ from typing import Any
 
 from db.models import DataAgentMonitorConfig, DataAgentMonitorEvent, StopListIncident
 
-from .stoplist_task_engine import sync_stoplist_incident_task
+from .stoplist_audit import append_stoplist_audit_entry
+from .stoplist_task_engine import sync_stoplist_incident_task_with_audit
 
 logger = logging.getLogger(__name__)
 
@@ -116,8 +117,28 @@ def upsert_stoplist_incident(
             )
             db.add(incident)
             db.flush()
+            append_stoplist_audit_entry(
+                db,
+                incident=incident,
+                event_type="incident_opened",
+                source="monitor_scheduler",
+                summary_text=f"Открыт новый кейс по стоп-листу для точки {config.point_name}.",
+                payload={
+                    "monitor_config_id": config.id,
+                    "event_id": getattr(monitor_event, "id", None),
+                    "current_items": current_items,
+                    "delta": delta,
+                    "report_hash": report_hash,
+                },
+                created_at=observed_at,
+            )
             try:
-                sync_stoplist_incident_task(db, incident=incident, observed_at=observed_at)
+                sync_stoplist_incident_task_with_audit(
+                    db,
+                    incident=incident,
+                    observed_at=observed_at,
+                    source="monitor_scheduler",
+                )
             except Exception:
                 logger.exception("Failed to sync stoplist task for new incident id=%s", getattr(incident, "id", None))
             return incident
@@ -143,8 +164,29 @@ def upsert_stoplist_incident(
         active_incident.resolved_at = None
         active_incident.update_count = max(int(active_incident.update_count or 0), 1) + 1
         db.flush()
+        append_stoplist_audit_entry(
+            db,
+            incident=active_incident,
+            event_type="incident_updated",
+            source="monitor_scheduler",
+            summary_text=f"Кейс по стоп-листу для точки {config.point_name} всё ещё активен.",
+            payload={
+                "monitor_config_id": config.id,
+                "event_id": getattr(monitor_event, "id", None),
+                "current_items": current_items,
+                "delta": delta,
+                "report_hash": report_hash,
+                "manager_status": active_incident.manager_status,
+            },
+            created_at=observed_at,
+        )
         try:
-            sync_stoplist_incident_task(db, incident=active_incident, observed_at=observed_at)
+            sync_stoplist_incident_task_with_audit(
+                db,
+                incident=active_incident,
+                observed_at=observed_at,
+                source="monitor_scheduler",
+            )
         except Exception:
             logger.exception("Failed to sync stoplist task for ongoing incident id=%s", getattr(active_incident, "id", None))
         return active_incident
@@ -166,8 +208,27 @@ def upsert_stoplist_incident(
     active_incident.resolved_at = observed_at
     active_incident.update_count = max(int(active_incident.update_count or 0), 1) + 1
     db.flush()
+    append_stoplist_audit_entry(
+        db,
+        incident=active_incident,
+        event_type="incident_resolved",
+        source="monitor_scheduler",
+        summary_text=f"Кейс по стоп-листу для точки {config.point_name} нормализовался.",
+        payload={
+            "monitor_config_id": config.id,
+            "event_id": getattr(monitor_event, "id", None),
+            "delta": delta,
+            "report_hash": report_hash,
+        },
+        created_at=observed_at,
+    )
     try:
-        sync_stoplist_incident_task(db, incident=active_incident, observed_at=observed_at)
+        sync_stoplist_incident_task_with_audit(
+            db,
+            incident=active_incident,
+            observed_at=observed_at,
+            source="monitor_scheduler",
+        )
     except Exception:
         logger.exception("Failed to sync stoplist task for resolved incident id=%s", getattr(active_incident, "id", None))
     return active_incident

@@ -7,7 +7,8 @@ import logging
 from db.models import SavedPoint, StopListIncident, User
 
 from .point_delivery import find_delivery_points_for_text, normalize_delivery_text
-from .stoplist_task_engine import format_stoplist_task_followup, sync_stoplist_incident_task
+from .stoplist_audit import append_stoplist_audit_entry
+from .stoplist_task_engine import format_stoplist_task_followup, sync_stoplist_incident_task_with_audit
 
 logger = logging.getLogger(__name__)
 
@@ -252,12 +253,29 @@ def apply_stoplist_reaction(
     incident.manager_updated_chat_id = int(chat_id)
     incident.manager_updated_message_id = int(message_id) if message_id is not None else None
     db.flush()
+    append_stoplist_audit_entry(
+        db,
+        incident=incident,
+        event_type="manager_reaction",
+        source="telegram_reaction",
+        summary_text=f"Управляющий отметил статус {format_manager_status_label(manager_status)}.",
+        payload={
+            "manager_status": manager_status,
+            "matched_by": matched_by,
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reply_to_message_id": reply_to_message_id,
+            "text": str(text or "").strip() or None,
+        },
+        created_at=observed_at,
+    )
     task_sync_result = None
     try:
-        task_sync_result = sync_stoplist_incident_task(
+        task_sync_result = sync_stoplist_incident_task_with_audit(
             db,
             incident=incident,
             observed_at=observed_at,
+            source="telegram_reaction",
         )
     except Exception:
         logger.exception("Failed to sync stoplist task from reaction incident_id=%s", getattr(incident, "id", None))

@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 
 from db.models import StopListIncident, Task, User
 
+from .stoplist_audit import append_stoplist_audit_entry
+
 _ACTIVE_TASK_MANAGER_STATUSES = {"accepted", "needs_help", "escalated"}
 _TASK_PRIORITY_BY_MANAGER_STATUS = {
     "accepted": "high",
@@ -214,3 +216,43 @@ def format_stoplist_task_followup(sync_result: StopListTaskSyncResult | None) ->
     if sync_result.action == "cancelled":
         return "Связанную задачу снял."
     return None
+
+
+def sync_stoplist_incident_task_with_audit(
+    db,
+    *,
+    incident: StopListIncident | None,
+    observed_at: datetime | None = None,
+    source: str = "task_engine",
+) -> StopListTaskSyncResult:
+    result = sync_stoplist_incident_task(
+        db,
+        incident=incident,
+        observed_at=observed_at,
+    )
+    if incident is None or result.action in {"none", ""}:
+        return result
+
+    task_event_type = {
+        "created": "task_created",
+        "updated": "task_updated",
+        "reopened": "task_reopened",
+        "completed": "task_completed",
+        "cancelled": "task_cancelled",
+    }.get(result.action, "task_updated")
+    status_label = str(result.task_status or "unknown").strip() or "unknown"
+    summary_text = f"Связанная задача: {result.action}; статус {status_label}."
+    append_stoplist_audit_entry(
+        db,
+        incident=incident,
+        event_type=task_event_type,
+        source=source,
+        summary_text=summary_text,
+        payload={
+            "task_id": result.task_id,
+            "task_action": result.action,
+            "task_status": result.task_status,
+        },
+        created_at=observed_at,
+    )
+    return result

@@ -566,11 +566,41 @@ class StopListIncident(Base):
     first_event = relationship("DataAgentMonitorEvent", foreign_keys=[first_event_id])
     last_event = relationship("DataAgentMonitorEvent", foreign_keys=[last_event_id])
     linked_task = relationship("Task", foreign_keys=[linked_task_id])
+    audit_entries = relationship(
+        "StopListIncidentAuditEntry",
+        back_populates="incident",
+        cascade="all, delete-orphan",
+        order_by="StopListIncidentAuditEntry.created_at.asc()",
+    )
 
     def __repr__(self):
         return (
             f"<StopListIncident(id={self.id}, point={self.point_name}, "
             f"status={self.status}, lifecycle={self.lifecycle_state})>"
+        )
+
+
+class StopListIncidentAuditEntry(Base):
+    """Audit trail for business actions around one stoplist incident."""
+    __tablename__ = "stoplist_incident_audit_entries"
+
+    id = Column(Integer, primary_key=True)
+    incident_id = Column(Integer, ForeignKey("stoplist_incidents.id", ondelete='CASCADE'), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False, index=True)
+    point_name = Column(String(255), nullable=False, index=True)
+    event_type = Column(String(100), nullable=False, index=True)
+    source = Column(String(100), nullable=False, index=True)
+    summary_text = Column(Text, nullable=False)
+    payload_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    incident = relationship("StopListIncident", back_populates="audit_entries")
+    user = relationship("User")
+
+    def __repr__(self):
+        return (
+            f"<StopListIncidentAuditEntry(id={self.id}, incident_id={self.incident_id}, "
+            f"event_type={self.event_type}, source={self.source})>"
         )
 
 
