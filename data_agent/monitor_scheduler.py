@@ -19,6 +19,7 @@ from .debugging import build_debug_artifacts
 from .point_statistics import point_statistics_service
 from .point_delivery import resolve_point_report_chat
 from .review_report import review_report_service
+from .stoplist_incidents import upsert_stoplist_incident
 from .stoplist_tool import stoplist_tool
 
 logger = logging.getLogger(__name__)
@@ -570,6 +571,14 @@ async def _run_stoplist_monitor(
             db.add(event)
             db.commit()
             db.refresh(event)
+            upsert_stoplist_incident(
+                db,
+                config=config,
+                result=result,
+                monitor_event=event,
+                observed_at=event.created_at,
+            )
+            db.commit()
 
             delivery_chat_id = _resolve_monitor_delivery_chat_id(
                 db,

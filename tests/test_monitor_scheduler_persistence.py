@@ -15,7 +15,7 @@ os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
 os.environ.setdefault("AI_PROVIDER", "openai")
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 
-from db.models import Base, DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentProfile, DataAgentSystem, SavedPoint, User
+from db.models import Base, DataAgentMonitorConfig, DataAgentMonitorEvent, DataAgentProfile, DataAgentSystem, SavedPoint, StopListIncident, User
 from data_agent import monitor_scheduler
 
 
@@ -837,6 +837,145 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertEqual(config.last_alert_hash, "review-hash-1")
         self.assertEqual(len(events), 1)
         self.assertEqual(len(bot.messages), 0)
+
+    def test_run_stoplist_monitor_creates_new_incident_from_active_report(self):
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 555001).first()
+            stoplist_config = DataAgentMonitorConfig(
+                user_id=user.id,
+                system_name="italian_pizza",
+                monitor_type="stoplist",
+                point_name="Сухой Лог, Белинского 40",
+                check_interval_minutes=180,
+                is_active=True,
+            )
+            session.add(stoplist_config)
+            session.commit()
+            session.refresh(stoplist_config)
+            detached_stoplist_config = stoplist_config
+            stoplist_config_id = stoplist_config.id
+        finally:
+            session.close()
+
+        bot = _DummyBot()
+        result = {
+            "status": "ok",
+            "report_text": "Точка: Сухой Лог, Белинского 40\nСтоп-лист:\n- Маргарита",
+            "items": ["Маргарита"],
+            "delta": {"added": ["Маргарита"], "removed": [], "stayed": []},
+            "alert_hash": "stoplist-open",
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.stoplist_tool,
+                "collect_for_point",
+                new=AsyncMock(return_value=result),
+            ):
+                with patch.object(
+                    monitor_scheduler.point_statistics_service,
+                    "enrich_stoplist_report",
+                    return_value=result,
+                ):
+                    asyncio.run(monitor_scheduler._run_stoplist_monitor(bot, detached_stoplist_config))
+
+        session = self.SessionLocal()
+        try:
+            events = (
+                session.query(DataAgentMonitorEvent)
+                .filter(DataAgentMonitorEvent.config_id == stoplist_config_id)
+                .order_by(DataAgentMonitorEvent.created_at.asc(), DataAgentMonitorEvent.id.asc())
+                .all()
+            )
+            incidents = (
+                session.query(StopListIncident)
+                .filter(StopListIncident.monitor_config_id == stoplist_config_id)
+                .order_by(StopListIncident.id.asc())
+                .all()
+            )
+        finally:
+            session.close()
+
+        self.assertEqual(len(bot.messages), 1)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(len(incidents), 1)
+        self.assertEqual(incidents[0].status, "open")
+        self.assertEqual(incidents[0].lifecycle_state, "new")
+        self.assertEqual(incidents[0].current_items_json, ["Маргарита"])
+        self.assertEqual(incidents[0].first_event_id, events[0].id)
+        self.assertEqual(incidents[0].last_event_id, events[0].id)
+        self.assertEqual(incidents[0].update_count, 1)
+
+    def test_run_stoplist_monitor_resolves_existing_incident_when_items_clear(self):
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 555001).first()
+            stoplist_config = DataAgentMonitorConfig(
+                user_id=user.id,
+                system_name="italian_pizza",
+                monitor_type="stoplist",
+                point_name="Сухой Лог, Белинского 40",
+                check_interval_minutes=180,
+                is_active=True,
+            )
+            session.add(stoplist_config)
+            session.commit()
+            session.refresh(stoplist_config)
+            detached_stoplist_config = stoplist_config
+            stoplist_config_id = stoplist_config.id
+        finally:
+            session.close()
+
+        bot = _DummyBot()
+        open_result = {
+            "status": "ok",
+            "report_text": "Точка: Сухой Лог, Белинского 40\nСтоп-лист:\n- Маргарита",
+            "items": ["Маргарита"],
+            "delta": {"added": ["Маргарита"], "removed": [], "stayed": []},
+            "alert_hash": "stoplist-open",
+        }
+        resolved_result = {
+            "status": "ok",
+            "report_text": "Точка: Сухой Лог, Белинского 40\nСтоп-лист: недоступных позиций не найдено.",
+            "items": [],
+            "delta": {"added": [], "removed": ["Маргарита"], "stayed": []},
+            "alert_hash": "stoplist-clear",
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.stoplist_tool,
+                "collect_for_point",
+                new=AsyncMock(side_effect=[open_result, resolved_result]),
+            ):
+                with patch.object(
+                    monitor_scheduler.point_statistics_service,
+                    "enrich_stoplist_report",
+                    side_effect=[open_result, resolved_result],
+                ):
+                    asyncio.run(monitor_scheduler._run_stoplist_monitor(bot, detached_stoplist_config))
+                    asyncio.run(monitor_scheduler._run_stoplist_monitor(bot, detached_stoplist_config))
+
+        session = self.SessionLocal()
+        try:
+            incidents = (
+                session.query(StopListIncident)
+                .filter(StopListIncident.monitor_config_id == stoplist_config_id)
+                .order_by(StopListIncident.id.asc())
+                .all()
+            )
+        finally:
+            session.close()
+
+        self.assertEqual(len(bot.messages), 2)
+        self.assertEqual(len(incidents), 1)
+        self.assertEqual(incidents[0].status, "resolved")
+        self.assertEqual(incidents[0].lifecycle_state, "resolved")
+        self.assertEqual(incidents[0].current_items_json, [])
+        self.assertEqual(incidents[0].last_delta_json, {"added": [], "removed": ["Маргарита"], "stayed": []})
+        self.assertIsNotNone(incidents[0].resolved_at)
+        self.assertEqual(incidents[0].update_count, 2)
 
 
 if __name__ == "__main__":

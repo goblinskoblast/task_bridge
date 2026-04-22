@@ -61,6 +61,7 @@ class User(Base):
     data_agent_request_logs = relationship("DataAgentRequestLog", back_populates="user", cascade="all, delete-orphan")
     data_agent_monitor_configs = relationship("DataAgentMonitorConfig", back_populates="user", cascade="all, delete-orphan")
     data_agent_monitor_events = relationship("DataAgentMonitorEvent", back_populates="user", cascade="all, delete-orphan")
+    stoplist_incidents = relationship("StopListIncident", back_populates="user", cascade="all, delete-orphan")
     saved_points = relationship("SavedPoint", back_populates="user", cascade="all, delete-orphan")
     point_stat_runs = relationship("PointStatRun", back_populates="user", cascade="all, delete-orphan")
 
@@ -519,6 +520,45 @@ class DataAgentMonitorEvent(Base):
 
     def __repr__(self):
         return f"<DataAgentMonitorEvent(id={self.id}, type={self.monitor_type}, point={self.point_name})>"
+
+
+class StopListIncident(Base):
+    """Business-level lifecycle for stoplist incidents by point."""
+    __tablename__ = "stoplist_incidents"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete='CASCADE'), nullable=False, index=True)
+    monitor_config_id = Column(Integer, ForeignKey("data_agent_monitor_configs.id", ondelete='SET NULL'), nullable=True, index=True)
+    first_event_id = Column(Integer, ForeignKey("data_agent_monitor_events.id", ondelete='SET NULL'), nullable=True, index=True)
+    last_event_id = Column(Integer, ForeignKey("data_agent_monitor_events.id", ondelete='SET NULL'), nullable=True, index=True)
+    system_name = Column(String(100), nullable=False, default="italian_pizza")
+    point_name = Column(String(255), nullable=False, index=True)
+    status = Column(String(50), nullable=False, default="open", index=True)  # open, resolved
+    lifecycle_state = Column(String(50), nullable=False, default="new", index=True)  # new, ongoing, resolved
+    manager_status = Column(String(50), nullable=False, default="unreviewed", index=True)
+    title = Column(String(500), nullable=False)
+    summary_text = Column(Text, nullable=True)
+    current_items_json = Column(JSON, nullable=True)
+    last_delta_json = Column(JSON, nullable=True)
+    last_report_hash = Column(String(255), nullable=True, index=True)
+    opened_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    first_seen_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_seen_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    resolved_at = Column(DateTime, nullable=True, index=True)
+    update_count = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User", back_populates="stoplist_incidents")
+    monitor_config = relationship("DataAgentMonitorConfig", backref="stoplist_incidents")
+    first_event = relationship("DataAgentMonitorEvent", foreign_keys=[first_event_id])
+    last_event = relationship("DataAgentMonitorEvent", foreign_keys=[last_event_id])
+
+    def __repr__(self):
+        return (
+            f"<StopListIncident(id={self.id}, point={self.point_name}, "
+            f"status={self.status}, lifecycle={self.lifecycle_state})>"
+        )
 
 
 
