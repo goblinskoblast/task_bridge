@@ -20,7 +20,7 @@ from db.models import (
 )
 from email_integration.encryption import encrypt_password
 
-from .agent_runtime import agent_runtime
+from .agent_runtime import AgentDecision, agent_runtime
 from .debugging import build_debug_artifacts, derive_response_status
 from .models import (
     ConnectedSystem,
@@ -55,6 +55,7 @@ from .stoplist_digest import (
     describe_open_stoplist_incident,
     format_stoplist_digest_text,
 )
+from .stoplist_skill import build_stoplist_skill_snapshot, format_stoplist_skill_answer
 from .system_catalog import build_scan_contract_payload, capability_labels, orientation_summary, resolve_system_descriptor
 
 logger = logging.getLogger(__name__)
@@ -826,6 +827,127 @@ class DataAgentService:
             return 1
         return 7
 
+    @staticmethod
+    def _contains_stoplist_intent_text(message: str) -> bool:
+        lowered = str(message or "").strip().lower()
+        return any(
+            token in lowered
+            for token in (
+                "стоп-лист",
+                "стоп лист",
+                "стоплист",
+                "по стопам",
+                "стопы",
+                "стопам",
+                "стопах",
+                "недоступн",
+                "нет в наличии",
+            )
+        )
+
+    @staticmethod
+    def _contains_stoplist_digest_intent_text(message: str) -> bool:
+        lowered = str(message or "").strip().lower()
+        if not DataAgentService._contains_stoplist_intent_text(lowered):
+            return False
+        has_digest_marker = any(
+            token in lowered
+            for token in (
+                "дайджест",
+                "digest",
+                "сводк",
+                "резюме",
+                "итоги",
+                "что было",
+                "как прошла неделя",
+            )
+        )
+        has_period_marker = any(
+            token in lowered
+            for token in (
+                "недел",
+                "7 дней",
+                "за неделю",
+                "за последнюю неделю",
+                "еженедель",
+            )
+        )
+        return has_digest_marker and has_period_marker
+
+    @staticmethod
+    def _contains_stoplist_skill_intent_text(message: str) -> bool:
+        lowered = str(message or "").strip().lower()
+        if not DataAgentService._contains_stoplist_intent_text(lowered):
+            return False
+        if any(
+            token in lowered
+            for token in (
+                "покажи стоп-лист",
+                "покажи стоплист",
+                "собери стоп-лист",
+                "отчет по стоп-листу",
+                "отчёт по стоп-листу",
+                "список позиций",
+            )
+        ):
+            return False
+        return any(
+            token in lowered
+            for token in (
+                "что по стоп",
+                "что со стоп",
+                "статус по стоп",
+                "статус кейс",
+                "кейсы по стоп",
+                "какие кейсы",
+                "требует реакции",
+                "требуют реакции",
+                "нужна помощь",
+                "нужны помощь",
+                "в работе",
+                "открытые кейсы",
+                "открытый кейс",
+                "открытые проблемы",
+                "нормализов",
+                "закрыт",
+                "закрытые кейсы",
+                "приоритет по стоп",
+            )
+        )
+
+    @staticmethod
+    def _extract_stoplist_skill_focus(message: str, *, point_name: str | None = None) -> str:
+        lowered = str(message or "").strip().lower()
+        if any(token in lowered for token in ("требует реакции", "требуют реакции", "нужна помощь", "эскал")):
+            return "attention"
+        if point_name and any(token in lowered for token in ("статус", "что по стоп", "что со стоп", "кейс", "по точке")):
+            return "point_status"
+        return "overview"
+
+    def _maybe_override_stoplist_skill(self, decision: AgentDecision, message: str) -> AgentDecision:
+        if decision.scenario == "stoplist_digest":
+            return decision
+        if self._contains_stoplist_digest_intent_text(message):
+            return decision
+        if not self._contains_stoplist_skill_intent_text(message):
+            return decision
+
+        slots = dict(decision.slots or {})
+        point_name = slots.get("point_name")
+        slots["source_message"] = message
+        slots["stoplist_skill_focus"] = self._extract_stoplist_skill_focus(
+            message,
+            point_name=point_name if isinstance(point_name, str) else None,
+        )
+        return AgentDecision(
+            scenario="stoplist_skill",
+            selected_tools=["orchestrator"],
+            slots=slots,
+            missing_slots=[],
+            reasoning="StopListSkill override",
+            response_style=decision.response_style,
+        )
+
     def _build_stoplist_digest(self, user_id: int, *, period_hint: str | None = None) -> str:
         days = self._resolve_stoplist_digest_days(period_hint)
         db = get_db_session()
@@ -849,6 +971,51 @@ class DataAgentService:
         except Exception:
             logger.exception("Failed to build stoplist digest")
             return "Не удалось собрать digest по стоп-листу. Попробуйте позже."
+        finally:
+            db.close()
+
+    def _build_stoplist_skill(
+        self,
+        user_id: int,
+        *,
+        point_name: str | None = None,
+        focus: str | None = None,
+        period_hint: str | None = None,
+    ) -> str:
+        days = self._resolve_stoplist_digest_days(period_hint)
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                snapshot = build_stoplist_skill_snapshot([], days=days)
+                return format_stoplist_skill_answer(
+                    snapshot,
+                    focus=focus or "overview",
+                    point_name=point_name,
+                )
+
+            since = datetime.utcnow() - timedelta(days=days)
+            incidents_query = (
+                db.query(StopListIncident)
+                .filter(
+                    StopListIncident.user_id == user.id,
+                    StopListIncident.last_seen_at >= since,
+                )
+                .order_by(StopListIncident.last_seen_at.desc(), StopListIncident.id.desc())
+            )
+            if point_name:
+                incidents_query = incidents_query.filter(StopListIncident.point_name == point_name)
+
+            incidents = incidents_query.all()
+            snapshot = build_stoplist_skill_snapshot(incidents, days=days)
+            return format_stoplist_skill_answer(
+                snapshot,
+                focus=focus or "overview",
+                point_name=point_name,
+            )
+        except Exception:
+            logger.exception("Failed to build stoplist skill answer")
+            return "Не удалось собрать статус по стоп-листу. Попробуйте позже."
         finally:
             db.close()
 
@@ -1190,6 +1357,8 @@ class DataAgentService:
                 decision.reasoning,
                 routing_elapsed,
             )
+            decision = self._maybe_override_stoplist_skill(decision, normalized_message)
+            selected_tools = decision.selected_tools
 
             if decision.missing_slots:
                 answer = agent_runtime.build_missing_slots_answer(decision)
@@ -1225,6 +1394,39 @@ class DataAgentService:
             if decision.scenario == "stoplist_digest":
                 answer = self._build_stoplist_digest(
                     payload.user_id,
+                    period_hint=decision.slots.get("period_hint"),
+                )
+                debug_payload, debug_summary = build_debug_artifacts(
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="completed",
+                    selected_tools=selected_tools,
+                    tool_results={},
+                )
+                agent_runtime.save_session(
+                    payload.user_id,
+                    decision,
+                    user_message=normalized_message,
+                    answer=answer,
+                    status="completed",
+                    trace_id=trace_id,
+                    debug_summary=debug_summary,
+                    debug_payload=debug_payload,
+                )
+                return DataAgentChatResponse(
+                    answer=answer,
+                    selected_tools=selected_tools,
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="completed",
+                    debug_summary=debug_summary,
+                )
+
+            if decision.scenario == "stoplist_skill":
+                answer = self._build_stoplist_skill(
+                    payload.user_id,
+                    point_name=point_name if isinstance(point_name, str) else None,
+                    focus=decision.slots.get("stoplist_skill_focus"),
                     period_hint=decision.slots.get("period_hint"),
                 )
                 debug_payload, debug_summary = build_debug_artifacts(

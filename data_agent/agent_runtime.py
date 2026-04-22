@@ -20,6 +20,7 @@ SCENARIO_TOOL_MAP = {
     "monitor_management": ["orchestrator"],
     "system_orientation": ["orchestrator"],
     "stoplist_digest": ["orchestrator"],
+    "stoplist_skill": ["orchestrator"],
     "browser_report": ["browser_tool"],
     "reviews_report": ["review_tool"],
     "stoplist_report": ["stoplist_tool"],
