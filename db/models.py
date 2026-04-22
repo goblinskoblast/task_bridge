@@ -546,6 +546,8 @@ class StopListIncident(Base):
     manager_updated_by_user_id = Column(Integer, nullable=True, index=True)
     manager_updated_chat_id = Column(BigInteger, nullable=True)
     manager_updated_message_id = Column(BigInteger, nullable=True)
+    linked_task_id = Column(Integer, ForeignKey("tasks.id", ondelete='SET NULL'), nullable=True, index=True)
+    task_last_synced_at = Column(DateTime, nullable=True, index=True)
     title = Column(String(500), nullable=False)
     summary_text = Column(Text, nullable=True)
     current_items_json = Column(JSON, nullable=True)
@@ -563,6 +565,7 @@ class StopListIncident(Base):
     monitor_config = relationship("DataAgentMonitorConfig", backref="stoplist_incidents")
     first_event = relationship("DataAgentMonitorEvent", foreign_keys=[first_event_id])
     last_event = relationship("DataAgentMonitorEvent", foreign_keys=[last_event_id])
+    linked_task = relationship("Task", foreign_keys=[linked_task_id])
 
     def __repr__(self):
         return (

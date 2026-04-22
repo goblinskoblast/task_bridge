@@ -16,6 +16,7 @@ class StopListSkillPointStatus:
     is_open: bool
     status_label: str
     manager_status_label: str
+    task_status_label: str | None
     age_label: str
     updates_count: int
     requires_attention: bool
@@ -30,6 +31,21 @@ class StopListSkillSnapshot:
     in_progress_points: int
     recent_resolved_points: int
     point_statuses: list[StopListSkillPointStatus]
+
+
+def _format_task_status_label(task) -> str | None:
+    if task is None:
+        return None
+    normalized = str(getattr(task, "status", None) or "").strip().lower()
+    if normalized == "pending":
+        return "задача создана"
+    if normalized == "in_progress":
+        return "задача в работе"
+    if normalized == "completed":
+        return "задача закрыта"
+    if normalized == "cancelled":
+        return "задача снята"
+    return None
 
 
 def _pluralize(value: int, *, one: str, few: str, many: str) -> str:
@@ -75,12 +91,14 @@ def _build_point_status(
     if open_incident is not None:
         meta = describe_open_stoplist_incident(open_incident, now=now) or {}
         manager_status = str(open_incident.manager_status or "unreviewed").strip().lower() or "unreviewed"
+        task_status_label = _format_task_status_label(getattr(open_incident, "linked_task", None))
         opened_at = open_incident.opened_at or open_incident.first_seen_at or open_incident.last_seen_at or now
         return StopListSkillPointStatus(
             point_name=point_name,
             is_open=True,
             status_label=str(meta.get("status_label") or "есть открытый стоп-лист"),
             manager_status_label=str(meta.get("manager_status_label") or format_manager_status_label(manager_status)),
+            task_status_label=task_status_label,
             age_label=_format_duration(max(now - opened_at, timedelta())),
             updates_count=max(int(open_incident.update_count or 0), 1),
             requires_attention=manager_status in {"unreviewed", "needs_help", "escalated"},
@@ -93,6 +111,7 @@ def _build_point_status(
         is_open=False,
         status_label="открытых кейсов сейчас нет",
         manager_status_label=format_manager_status_label(manager_status),
+        task_status_label=_format_task_status_label(getattr(latest, "linked_task", None)),
         age_label=_format_duration(max(now - resolved_at, timedelta())),
         updates_count=max(int(latest.update_count or 0), 1),
         requires_attention=False,
@@ -164,10 +183,12 @@ def format_stoplist_skill_answer(
                 f"Истории за последние {snapshot.days} {_pluralize(snapshot.days, one='день', few='дня', many='дней')} тоже нет."
             )
         if point_status.is_open:
+            task_part = f"Задача: {point_status.task_status_label}. " if point_status.task_status_label else ""
             return (
                 f"По точке {point_status.point_name} сейчас открытый кейс по стоп-листу. "
                 f"Статус: {point_status.status_label}. "
                 f"Реакция: {point_status.manager_status_label}. "
+                f"{task_part}"
                 f"Открыт {point_status.age_label} назад. "
                 f"Обновлялся {point_status.updates_count} {_pluralize(point_status.updates_count, one='раз', few='раза', many='раз')}."
             )
@@ -183,8 +204,9 @@ def format_stoplist_skill_answer(
 
         lines = [f"По стоп-листу сейчас требуют реакции {len(attention_items)} {_pluralize(len(attention_items), one='кейс', few='кейса', many='кейсов')}:"]
         for index, item in enumerate(attention_items, start=1):
+            task_suffix = f"; {item.task_status_label}" if item.task_status_label else ""
             lines.append(
-                f"{index}. {item.point_name} — {item.status_label}; открыт {item.age_label} назад."
+                f"{index}. {item.point_name} — {item.status_label}{task_suffix}; открыт {item.age_label} назад."
             )
         return "\n".join(lines)
 
@@ -204,8 +226,9 @@ def format_stoplist_skill_answer(
     if open_items:
         lines.append("")
         for index, item in enumerate(open_items[:5], start=1):
+            task_suffix = f"; задача: {item.task_status_label}" if item.task_status_label else ""
             lines.append(
-                f"{index}. {item.point_name} — {item.status_label}; реакция: {item.manager_status_label}; открыт {item.age_label} назад."
+                f"{index}. {item.point_name} — {item.status_label}; реакция: {item.manager_status_label}{task_suffix}; открыт {item.age_label} назад."
             )
     else:
         lines.append("")

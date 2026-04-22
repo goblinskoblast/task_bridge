@@ -360,6 +360,14 @@ def _ensure_stoplist_incident_columns():
         alter_statements.append(
             f"ALTER TABLE stoplist_incidents ADD COLUMN manager_updated_message_id {bigint_type}"
         )
+    if "linked_task_id" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE stoplist_incidents ADD COLUMN linked_task_id {integer_type}"
+        )
+    if "task_last_synced_at" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE stoplist_incidents ADD COLUMN task_last_synced_at {datetime_type}"
+        )
 
     if not alter_statements:
         return

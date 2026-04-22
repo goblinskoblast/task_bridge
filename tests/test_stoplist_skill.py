@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from data_agent.agent_runtime import AgentDecision, AgentSessionSnapshot, DataAgentRuntime
 from data_agent.models import DataAgentChatRequest
 from data_agent.service import DataAgentService
-from db.models import Base, DataAgentMonitorConfig, StopListIncident, User
+from db.models import Base, DataAgentMonitorConfig, StopListIncident, Task, User
 
 
 class StopListSkillTest(unittest.TestCase):
@@ -60,6 +60,17 @@ class StopListSkillTest(unittest.TestCase):
                 )
 
             db.flush()
+            task = Task(
+                created_by=user.id,
+                assigned_to=user.id,
+                title="Стоп-лист: Сухой Лог, Белинского 40",
+                description="incident task",
+                status="in_progress",
+                priority="high",
+                due_date=now + timedelta(hours=4),
+            )
+            db.add(task)
+            db.flush()
             db.add_all(
                 [
                     StopListIncident(
@@ -78,6 +89,7 @@ class StopListSkillTest(unittest.TestCase):
                         opened_at=now - timedelta(days=2),
                         first_seen_at=now - timedelta(days=2),
                         last_seen_at=now - timedelta(hours=3),
+                        linked_task_id=task.id,
                         update_count=3,
                     ),
                     StopListIncident(
@@ -176,6 +188,7 @@ class StopListSkillTest(unittest.TestCase):
         self.assertIn("По точке Сухой Лог, Белинского 40", response.answer)
         self.assertIn("в работе у управляющего", response.answer)
         self.assertIn("Реакция: принято", response.answer)
+        self.assertIn("Задача: задача в работе", response.answer)
 
 
 if __name__ == "__main__":

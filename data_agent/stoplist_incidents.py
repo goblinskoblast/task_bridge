@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 
 from db.models import DataAgentMonitorConfig, DataAgentMonitorEvent, StopListIncident
+
+from .stoplist_task_engine import sync_stoplist_incident_task
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_items(value: Any) -> list[str]:
@@ -111,8 +116,19 @@ def upsert_stoplist_incident(
             )
             db.add(incident)
             db.flush()
+            try:
+                sync_stoplist_incident_task(db, incident=incident, observed_at=observed_at)
+            except Exception:
+                logger.exception("Failed to sync stoplist task for new incident id=%s", getattr(incident, "id", None))
             return incident
 
+        if str(active_incident.manager_status or "").strip().lower() in {"fixed", "not_relevant"}:
+            active_incident.manager_status = "unreviewed"
+            active_incident.manager_note = None
+            active_incident.manager_updated_at = None
+            active_incident.manager_updated_by_user_id = None
+            active_incident.manager_updated_chat_id = None
+            active_incident.manager_updated_message_id = None
         active_incident.monitor_config_id = config.id
         active_incident.last_event_id = getattr(monitor_event, "id", None)
         active_incident.system_name = config.system_name
@@ -127,6 +143,10 @@ def upsert_stoplist_incident(
         active_incident.resolved_at = None
         active_incident.update_count = max(int(active_incident.update_count or 0), 1) + 1
         db.flush()
+        try:
+            sync_stoplist_incident_task(db, incident=active_incident, observed_at=observed_at)
+        except Exception:
+            logger.exception("Failed to sync stoplist task for ongoing incident id=%s", getattr(active_incident, "id", None))
         return active_incident
 
     if active_incident is None:
@@ -146,4 +166,8 @@ def upsert_stoplist_incident(
     active_incident.resolved_at = observed_at
     active_incident.update_count = max(int(active_incident.update_count or 0), 1) + 1
     db.flush()
+    try:
+        sync_stoplist_incident_task(db, incident=active_incident, observed_at=observed_at)
+    except Exception:
+        logger.exception("Failed to sync stoplist task for resolved incident id=%s", getattr(active_incident, "id", None))
     return active_incident

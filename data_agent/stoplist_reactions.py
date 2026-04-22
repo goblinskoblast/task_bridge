@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import logging
 
 from db.models import SavedPoint, StopListIncident, User
 
 from .point_delivery import find_delivery_points_for_text, normalize_delivery_text
+from .stoplist_task_engine import format_stoplist_task_followup, sync_stoplist_incident_task
+
+logger = logging.getLogger(__name__)
 
 _REACTION_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("escalated", ("эскал", "подними выше", "руковод", "директор", "старшему")),
@@ -42,6 +46,8 @@ class StopListReactionResult:
     response_text: str
     incident_id: int | None = None
     matched_by: str | None = None
+    task_id: int | None = None
+    task_action: str | None = None
 
 
 def _normalize_text(value: str | None) -> str:
@@ -246,13 +252,29 @@ def apply_stoplist_reaction(
     incident.manager_updated_chat_id = int(chat_id)
     incident.manager_updated_message_id = int(message_id) if message_id is not None else None
     db.flush()
+    task_sync_result = None
+    try:
+        task_sync_result = sync_stoplist_incident_task(
+            db,
+            incident=incident,
+            observed_at=observed_at,
+        )
+    except Exception:
+        logger.exception("Failed to sync stoplist task from reaction incident_id=%s", getattr(incident, "id", None))
+
+    response_text = _reaction_confirmed_text(manager_status, incident.point_name)
+    task_followup = format_stoplist_task_followup(task_sync_result)
+    if task_followup:
+        response_text = f"{response_text} {task_followup}"
 
     return StopListReactionResult(
         handled=True,
         matched=True,
         manager_status=manager_status,
         point_name=incident.point_name,
-        response_text=_reaction_confirmed_text(manager_status, incident.point_name),
+        response_text=response_text,
         incident_id=int(incident.id),
         matched_by=matched_by,
+        task_id=getattr(task_sync_result, "task_id", None),
+        task_action=getattr(task_sync_result, "action", None),
     )
