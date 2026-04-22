@@ -69,6 +69,7 @@ def init_db():
     _ensure_data_agent_monitor_columns()
     _ensure_data_agent_session_columns()
     _ensure_saved_point_columns()
+    _ensure_stoplist_incident_columns()
 
 
 def _ensure_message_columns():
@@ -320,6 +321,44 @@ def _ensure_saved_point_columns():
     if "blanks_report_chat_title" not in column_names:
         alter_statements.append(
             "ALTER TABLE saved_points ADD COLUMN blanks_report_chat_title VARCHAR(500)"
+        )
+
+    if not alter_statements:
+        return
+
+    with sync_engine.begin() as connection:
+        for statement in alter_statements:
+            connection.execute(text(statement))
+
+
+def _ensure_stoplist_incident_columns():
+    inspector = inspect(sync_engine)
+    if "stoplist_incidents" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("stoplist_incidents")}
+    integer_type = "INTEGER"
+    bigint_type = "BIGINT" if sync_engine.dialect.name == "postgresql" else "INTEGER"
+    datetime_type = "TIMESTAMP" if sync_engine.dialect.name == "postgresql" else "DATETIME"
+    alter_statements = []
+
+    if "manager_note" not in column_names:
+        alter_statements.append("ALTER TABLE stoplist_incidents ADD COLUMN manager_note TEXT")
+    if "manager_updated_at" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE stoplist_incidents ADD COLUMN manager_updated_at {datetime_type}"
+        )
+    if "manager_updated_by_user_id" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE stoplist_incidents ADD COLUMN manager_updated_by_user_id {integer_type}"
+        )
+    if "manager_updated_chat_id" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE stoplist_incidents ADD COLUMN manager_updated_chat_id {bigint_type}"
+        )
+    if "manager_updated_message_id" not in column_names:
+        alter_statements.append(
+            f"ALTER TABLE stoplist_incidents ADD COLUMN manager_updated_message_id {bigint_type}"
         )
 
     if not alter_statements:

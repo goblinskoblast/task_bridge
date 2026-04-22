@@ -18,6 +18,7 @@ from bot.report_delivery import (
     is_report_delivery_candidate,
     trim_telegram_text,
 )
+from bot.stoplist_reaction_flow import maybe_handle_stoplist_reaction
 from bot.voice_transcription import VoiceTranscriptionError, transcribe_telegram_voice
 from bot.webapp_links import build_taskbridge_webapp_url
 from config import DEVELOPER_TELEGRAM_ID
@@ -2160,6 +2161,26 @@ async def connect_waiting_for_password(message: Message, state: FSMContext) -> N
 )
 async def handle_private_agent_message(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
+    db = get_db_session()
+    try:
+        user = _get_or_create_user(
+            db=db,
+            telegram_id=getattr(message.from_user, "id"),
+            username=getattr(message.from_user, "username", None),
+            first_name=getattr(message.from_user, "first_name", None),
+            last_name=getattr(message.from_user, "last_name", None),
+            is_bot=bool(getattr(message.from_user, "is_bot", False)),
+        )
+        if await maybe_handle_stoplist_reaction(
+            message,
+            db=db,
+            telegram_user_id=user.telegram_id,
+        ):
+            db.commit()
+            return
+    finally:
+        db.close()
+
     if _looks_like_systems_summary_request(text):
         await _send_systems_summary(message)
         return

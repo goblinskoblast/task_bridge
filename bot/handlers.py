@@ -20,6 +20,7 @@ from db.database import get_db_session
 from db.task_retention import actionable_tasks, visible_tasks
 from bot.ai_extractor import analyze_message, telegram_message_requires_context
 from bot.task_file_binding import extract_task_reference, resolve_task_for_file_upload
+from bot.stoplist_reaction_flow import maybe_handle_stoplist_reaction
 from bot.webapp_links import build_taskbridge_webapp_url
 from bot.task_notifications import (
     format_user_mention,
@@ -947,6 +948,14 @@ async def handle_group_message(message: Message):
         db.add(message_obj)
         db.commit()
         db.refresh(message_obj)
+
+        if await maybe_handle_stoplist_reaction(
+            message,
+            db=db,
+            telegram_user_id=message.from_user.id,
+        ):
+            db.commit()
+            return
 
         context_messages: List[dict] = []
         if telegram_message_requires_context(message.text):

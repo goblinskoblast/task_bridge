@@ -536,6 +536,11 @@ class StopListIncident(Base):
     status = Column(String(50), nullable=False, default="open", index=True)  # open, resolved
     lifecycle_state = Column(String(50), nullable=False, default="new", index=True)  # new, ongoing, resolved
     manager_status = Column(String(50), nullable=False, default="unreviewed", index=True)
+    manager_note = Column(Text, nullable=True)
+    manager_updated_at = Column(DateTime, nullable=True, index=True)
+    manager_updated_by_user_id = Column(Integer, nullable=True, index=True)
+    manager_updated_chat_id = Column(BigInteger, nullable=True)
+    manager_updated_message_id = Column(BigInteger, nullable=True)
     title = Column(String(500), nullable=False)
     summary_text = Column(Text, nullable=True)
     current_items_json = Column(JSON, nullable=True)
