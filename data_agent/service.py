@@ -2,7 +2,7 @@
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, List, Optional
 from uuid import uuid4
 
@@ -15,6 +15,7 @@ from db.models import (
     DataAgentSession,
     DataAgentSystem,
     SavedPoint,
+    StopListIncident,
     User,
 )
 from email_integration.encryption import encrypt_password
@@ -49,6 +50,11 @@ from .monitoring import (
 )
 from .point_delivery import get_point_report_chat
 from .scenario_engine import scenario_engine
+from .stoplist_digest import (
+    build_stoplist_digest_snapshot,
+    describe_open_stoplist_incident,
+    format_stoplist_digest_text,
+)
 from .system_catalog import build_scan_contract_payload, capability_labels, orientation_summary, resolve_system_descriptor
 
 logger = logging.getLogger(__name__)
@@ -512,11 +518,13 @@ class DataAgentService:
             )
             points_by_name = {item.display_name: item for item in points}
             latest_events = self._load_latest_user_facing_events(db, items)
+            open_stoplist_incidents = self._load_open_stoplist_incidents(db, items)
             monitors: List[MonitorConfigItem] = []
             for item in items:
                 description = self._describe_monitor_item(
                     item,
                     latest_event=latest_events.get(item.id),
+                    open_incident=open_stoplist_incidents.get(item.id),
                     delivery_label=self._resolve_monitor_delivery_label(
                         profile,
                         item.monitor_type,
@@ -539,6 +547,8 @@ class DataAgentService:
                         next_check_label=description["next_check_label"],
                         last_event_title=description["last_event_title"],
                         last_event_label=description["last_event_label"],
+                        incident_label=description["incident_label"],
+                        manager_status_label=description["manager_status_label"],
                         delivery_label=description["delivery_label"],
                         behavior_label=description["behavior_label"],
                         status_icon=description["status_icon"],
@@ -583,6 +593,7 @@ class DataAgentService:
             )
             points_by_name = {item.display_name: item for item in points}
             latest_events = self._load_latest_user_facing_events(db, items)
+            open_stoplist_incidents = self._load_open_stoplist_incidents(db, items)
             described_items: list[tuple[DataAgentMonitorConfig, dict[str, object]]] = []
             for item in items:
                 described_items.append(
@@ -591,6 +602,7 @@ class DataAgentService:
                         self._describe_monitor_item(
                             item,
                             latest_event=latest_events.get(item.id),
+                            open_incident=open_stoplist_incidents.get(item.id),
                             delivery_label=self._resolve_monitor_delivery_label(
                                 profile,
                                 item.monitor_type,
@@ -633,12 +645,14 @@ class DataAgentService:
         item: DataAgentMonitorConfig,
         *,
         latest_event: DataAgentMonitorEvent | None = None,
+        open_incident: StopListIncident | None = None,
         delivery_label: str | None = None,
         description: dict[str, object] | None = None,
     ) -> str:
         description = description or self._describe_monitor_item(
             item,
             latest_event=latest_event,
+            open_incident=open_incident,
             delivery_label=delivery_label,
         )
         details = [description["interval_label"]]
@@ -650,6 +664,8 @@ class DataAgentService:
             f"  Сейчас: {description['status_label']}",
             f"  Проверка: {description['last_checked_label']}; дальше: {description['next_check_label']}",
         ]
+        if description["incident_label"]:
+            lines.append(f"  Инцидент: {description['incident_label']}")
         if description["behavior_label"]:
             lines.append(f"  Пришлю: {description['behavior_label']}")
         if description["last_event_label"]:
@@ -663,6 +679,7 @@ class DataAgentService:
         item: DataAgentMonitorConfig,
         *,
         latest_event: DataAgentMonitorEvent | None = None,
+        open_incident: StopListIncident | None = None,
         delivery_label: str | None = None,
     ) -> dict[str, object]:
         labels = {
@@ -680,7 +697,14 @@ class DataAgentService:
             )
             window_label = format_monitor_window(start_hour, end_hour)
         has_active_alert = self._monitor_has_active_alert(item)
-        status_meta = self._describe_monitor_status(item, has_active_alert=has_active_alert)
+        incident_meta = None
+        if item.monitor_type == "stoplist":
+            incident_meta = describe_open_stoplist_incident(open_incident)
+        status_meta = self._describe_monitor_status(
+            item,
+            has_active_alert=has_active_alert,
+            incident_meta=incident_meta,
+        )
         status_label = status_meta["label"]
         behavior_label = self._format_monitor_behavior(item)
         last_checked_label = format_monitor_moment(item.last_checked_at)
@@ -703,6 +727,8 @@ class DataAgentService:
             "next_check_label": next_check_label,
             "last_event_title": last_event_meta["title"],
             "last_event_label": last_event_meta["label"],
+            "incident_label": incident_meta["incident_label"] if incident_meta else None,
+            "manager_status_label": incident_meta["manager_status_label"] if incident_meta else None,
             "delivery_label": delivery_label,
             "has_active_alert": has_active_alert,
         }
@@ -717,9 +743,15 @@ class DataAgentService:
         item: DataAgentMonitorConfig,
         *,
         has_active_alert: bool = False,
+        incident_meta: dict[str, str] | None = None,
     ) -> dict[str, str]:
         if has_active_alert:
             return {"label": "есть красная зона", "tone": "alert"}
+        if item.monitor_type == "stoplist" and incident_meta:
+            return {
+                "label": str(incident_meta.get("status_label") or "есть открытый стоп-лист"),
+                "tone": str(incident_meta.get("status_tone") or "notice"),
+            }
 
         normalized = (item.last_status or "").strip().lower()
         if not normalized:
@@ -760,6 +792,65 @@ class DataAgentService:
         if item.monitor_type == "reviews":
             return "пришлю новые отзывы и плановые сводки"
         return "пришлю новые события по мониторингу"
+
+    def _load_open_stoplist_incidents(
+        self,
+        db,
+        items: List[DataAgentMonitorConfig],
+    ) -> dict[int, StopListIncident]:
+        stoplist_config_ids = [int(item.id) for item in items if item.monitor_type == "stoplist" and item.id]
+        if not stoplist_config_ids:
+            return {}
+
+        rows = (
+            db.query(StopListIncident)
+            .filter(
+                StopListIncident.monitor_config_id.in_(stoplist_config_ids),
+                StopListIncident.status == "open",
+            )
+            .order_by(StopListIncident.monitor_config_id.asc(), StopListIncident.last_seen_at.desc(), StopListIncident.id.desc())
+            .all()
+        )
+
+        incidents: dict[int, StopListIncident] = {}
+        for row in rows:
+            config_id = int(row.monitor_config_id or 0)
+            if config_id and config_id not in incidents:
+                incidents[config_id] = row
+        return incidents
+
+    @staticmethod
+    def _resolve_stoplist_digest_days(period_hint: str | None) -> int:
+        normalized = str(period_hint or "").strip().lower()
+        if "сутк" in normalized or "день" in normalized:
+            return 1
+        return 7
+
+    def _build_stoplist_digest(self, user_id: int, *, period_hint: str | None = None) -> str:
+        days = self._resolve_stoplist_digest_days(period_hint)
+        db = get_db_session()
+        try:
+            user = db.query(User).filter(User.telegram_id == user_id).first()
+            if not user:
+                return f"За последние {days} дней по стоп-листу инцидентов не было."
+
+            since = datetime.utcnow() - timedelta(days=days)
+            incidents = (
+                db.query(StopListIncident)
+                .filter(
+                    StopListIncident.user_id == user.id,
+                    StopListIncident.last_seen_at >= since,
+                )
+                .order_by(StopListIncident.last_seen_at.desc(), StopListIncident.id.desc())
+                .all()
+            )
+            snapshot = build_stoplist_digest_snapshot(incidents, days=days)
+            return format_stoplist_digest_text(snapshot)
+        except Exception:
+            logger.exception("Failed to build stoplist digest")
+            return "Не удалось собрать digest по стоп-листу. Попробуйте позже."
+        finally:
+            db.close()
 
     def _load_latest_user_facing_events(
         self,
@@ -1131,6 +1222,37 @@ class DataAgentService:
 
             monitor_action = str(decision.slots.get("monitor_action") or "").strip().lower()
             point_name = decision.slots.get("point_name")
+            if decision.scenario == "stoplist_digest":
+                answer = self._build_stoplist_digest(
+                    payload.user_id,
+                    period_hint=decision.slots.get("period_hint"),
+                )
+                debug_payload, debug_summary = build_debug_artifacts(
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="completed",
+                    selected_tools=selected_tools,
+                    tool_results={},
+                )
+                agent_runtime.save_session(
+                    payload.user_id,
+                    decision,
+                    user_message=normalized_message,
+                    answer=answer,
+                    status="completed",
+                    trace_id=trace_id,
+                    debug_summary=debug_summary,
+                    debug_payload=debug_payload,
+                )
+                return DataAgentChatResponse(
+                    answer=answer,
+                    selected_tools=selected_tools,
+                    trace_id=trace_id,
+                    scenario=decision.scenario,
+                    status="completed",
+                    debug_summary=debug_summary,
+                )
+
             if monitor_action == "list":
                 answer = self._build_monitors_summary(payload.user_id)
                 debug_payload, debug_summary = build_debug_artifacts(

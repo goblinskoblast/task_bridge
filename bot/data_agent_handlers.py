@@ -1167,6 +1167,9 @@ async def _send_monitors_summary(message: Message, *, telegram_user_id: int | No
         lines.append(
             f"  проверка: {html.escape(str(last_checked_label))}; дальше: {html.escape(str(next_check_label))}"
         )
+        incident_label = item.get("incident_label")
+        if incident_label:
+            lines.append(f"  инцидент: {html.escape(str(incident_label))}")
         if behavior_label:
             lines.append(f"  пришлю: {html.escape(str(behavior_label))}")
         lines.append(f"  {html.escape(str(last_event_title).lower())}: {html.escape(str(last_event_label))}")

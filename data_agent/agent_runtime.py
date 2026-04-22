@@ -19,6 +19,7 @@ SCENARIO_TOOL_MAP = {
     "general": ["orchestrator"],
     "monitor_management": ["orchestrator"],
     "system_orientation": ["orchestrator"],
+    "stoplist_digest": ["orchestrator"],
     "browser_report": ["browser_tool"],
     "reviews_report": ["review_tool"],
     "stoplist_report": ["stoplist_tool"],
@@ -272,6 +273,9 @@ class DataAgentRuntime:
         if self._has_monitor_list_intent(lowered):
             scenario = "monitor_management"
             reasoning = "Запрошен список мониторингов"
+        elif self._contains_stoplist_digest_intent(lowered):
+            scenario = "stoplist_digest"
+            reasoning = "Запрошена digest-сводка по стоп-листу"
         elif self._contains_stoplist_intent(lowered):
             scenario = "stoplist_report"
             reasoning = "Определен сценарий стоп-листа"
@@ -343,11 +347,38 @@ class DataAgentRuntime:
             ]
         )
 
+    def _contains_stoplist_digest_intent(self, lowered: str) -> bool:
+        if not self._contains_stoplist_intent(lowered):
+            return False
+        has_digest_marker = any(
+            token in lowered
+            for token in [
+                "дайджест",
+                "digest",
+                "сводк",
+                "резюме",
+                "итоги",
+                "что было",
+                "как прошла неделя",
+            ]
+        )
+        has_period_marker = any(
+            token in lowered
+            for token in [
+                "недел",
+                "7 дней",
+                "за неделю",
+                "за последнюю неделю",
+                "еженедель",
+            ]
+        )
+        return has_digest_marker and has_period_marker
+
     async def _llm_decision(self, message: str, session: AgentSessionSnapshot, systems_count: int) -> Optional[AgentDecision]:
         provider = get_ai_provider()
         prompt = (
             "Ты интерпретатор запросов data-agent. Верни только JSON. "
-            "Сценарии: general, system_orientation, browser_report, reviews_report, stoplist_report, blanks_report. "
+            "Сценарии: general, system_orientation, stoplist_digest, browser_report, reviews_report, stoplist_report, blanks_report. "
             "Вытащи scenario, point_name, period_hint, reasoning. Если не уверен, используй general."
         )
         user_prompt = {

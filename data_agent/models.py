@@ -107,6 +107,8 @@ class MonitorConfigItem(BaseModel):
     next_check_label: Optional[str] = None
     last_event_title: Optional[str] = None
     last_event_label: Optional[str] = None
+    incident_label: Optional[str] = None
+    manager_status_label: Optional[str] = None
     delivery_label: Optional[str] = None
     behavior_label: Optional[str] = None
     status_icon: Optional[str] = None
