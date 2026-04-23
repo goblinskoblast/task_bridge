@@ -344,6 +344,9 @@ class PointStatisticsService:
         for snapshot in snapshots:
             snapshot_at = snapshot.snapshot_at
             snapshot_items = set(self._normalize_items(snapshot.stoplist_items_json))
+            if previous_items and self._should_reset_stoplist_history(previous_items, snapshot_items):
+                ongoing_start_by_item.clear()
+                previous_items = set()
             ended_items = previous_items - snapshot_items
             for item in ended_items:
                 ongoing_start_by_item.pop(item, None)
@@ -356,6 +359,12 @@ class PointStatisticsService:
         current_days: dict[str, int] = {}
         current_reference = as_of or datetime.utcnow()
         last_snapshot_at = previous_snapshot_at or current_reference
+
+        if previous_items and self._should_reset_stoplist_history(previous_items, current_set):
+            return {
+                "current": {item: 1 for item in current_items},
+                "removed": {item: 1 for item in previous_items - current_set},
+            }
 
         for item in current_items:
             if item in previous_items:
@@ -373,6 +382,17 @@ class PointStatisticsService:
             "current": current_days,
             "removed": removed_days,
         }
+
+    def _should_reset_stoplist_history(self, previous_items: set[str], current_items: set[str]) -> bool:
+        if not previous_items or not current_items:
+            return False
+
+        changed_count = len(previous_items.symmetric_difference(current_items))
+        baseline = max(len(previous_items), len(current_items))
+        if changed_count < 6 or baseline < 6:
+            return False
+
+        return (changed_count / baseline) >= 0.35
 
     def _store_stoplist_snapshot(self, db: Session, point: SavedPoint, current_items: list[str]) -> None:
         now = datetime.utcnow()

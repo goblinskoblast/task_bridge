@@ -136,5 +136,54 @@ class StoplistMemoryTest(unittest.TestCase):
         self.assertIn("ℹ️ Чтобы видеть новые позиции, ушедшие позиции и дни в стопе", text)
 
 
+    def test_build_stoplist_item_history_days_resets_after_large_current_shift(self):
+        snapshots = [
+            SimpleNamespace(
+                snapshot_at=datetime(2026, 4, 22, 8, 0),
+                stoplist_items_json=["A", "B", "C", "D", "E", "F", "G", "H"],
+            ),
+            SimpleNamespace(
+                snapshot_at=datetime(2026, 4, 22, 11, 0),
+                stoplist_items_json=["A", "B", "C", "D", "E", "F", "G", "H"],
+            ),
+        ]
+
+        history = point_statistics_service._build_stoplist_item_history_days(
+            snapshots,
+            ["A", "B", "I"],
+            as_of=datetime(2026, 4, 23, 8, 0),
+        )
+
+        self.assertEqual(history["current"]["A"], 1)
+        self.assertEqual(history["current"]["B"], 1)
+        self.assertEqual(history["current"]["I"], 1)
+        self.assertEqual(history["removed"]["C"], 1)
+
+    def test_build_stoplist_item_history_days_resets_on_large_historical_shift(self):
+        snapshots = [
+            SimpleNamespace(
+                snapshot_at=datetime(2026, 4, 20, 8, 0),
+                stoplist_items_json=["A", "B", "C", "D", "E", "F", "G", "H"],
+            ),
+            SimpleNamespace(
+                snapshot_at=datetime(2026, 4, 21, 8, 0),
+                stoplist_items_json=["A", "B", "C", "D", "E", "F", "G", "H"],
+            ),
+            SimpleNamespace(
+                snapshot_at=datetime(2026, 4, 22, 8, 0),
+                stoplist_items_json=["A", "B", "I", "J", "K", "L"],
+            ),
+        ]
+
+        history = point_statistics_service._build_stoplist_item_history_days(
+            snapshots,
+            ["A", "B", "I", "J", "K", "L"],
+            as_of=datetime(2026, 4, 23, 8, 0),
+        )
+
+        self.assertEqual(history["current"]["A"], 2)
+        self.assertEqual(history["current"]["I"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

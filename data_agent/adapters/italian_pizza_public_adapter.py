@@ -161,7 +161,7 @@ class ItalianPizzaPublicAdapter:
         for category in categories:
             for product in category.get("products") or []:
                 status = str(product.get("status") or "").strip().lower()
-                if status not in {"stop_list", "not_included_menu"}:
+                if status != "stop_list":
                     continue
                 name = re.sub(r"\s+", " ", str(product.get("name") or "").replace("\xa0", " ")).strip()
                 cleaned = self._clean_product_name(name)
@@ -169,6 +169,27 @@ class ItalianPizzaPublicAdapter:
                     items.append(cleaned)
         logger.info("Stoplist public api extracted point=%s products_found=%s", point.display_name, len(items))
         return items
+
+    def _reconcile_stoplist_products(self, api_items: list[str], html_items: list[str] | None) -> list[str]:
+        if not api_items or not html_items:
+            return api_items
+
+        html_set = set(html_items)
+        overlap = [item for item in api_items if item in html_set]
+        if not overlap:
+            return api_items
+
+        api_only_count = len(api_items) - len(overlap)
+        if api_only_count <= 0:
+            return api_items
+
+        logger.info(
+            "Stoplist public reconcile dropped_api_only_items api_count=%s overlap_count=%s html_count=%s",
+            len(api_items),
+            len(overlap),
+            len(html_items),
+        )
+        return overlap
 
     def _confirm_point_from_public_html(self, html: str, point, current_url: str) -> bool:
         normalized_html = self._normalize_text(html)
@@ -597,18 +618,34 @@ class ItalianPizzaPublicAdapter:
         try:
             api_items = await self._fetch_stoplist_products_via_public_api(point)
             if api_items is not None:
-                if api_items:
+                reconciled_items = api_items
+                html_confirmed_items: list[str] | None = None
+                try:
+                    html = await self._fetch_public_html(target_url)
+                    issue = self._detect_public_page_issue(html)
+                    if not issue and self._confirm_point_from_public_html(html, point, target_url):
+                        html_confirmed_items = self._extract_stoplist_products_from_html(html)
+                        reconciled_items = self._reconcile_stoplist_products(api_items, html_confirmed_items)
+                except (aiohttp.ClientError, TimeoutError) as exc:
+                    logger.info("Stoplist public html confirm failed point=%s error=%s", point.display_name, exc)
+                except Exception as exc:
+                    logger.info("Stoplist public html confirm parse failed point=%s error=%s", point.display_name, exc)
+
+                if reconciled_items:
                     report_text = "Точка: {}\nСтоп-лист:\n{}".format(
                         point.display_name,
-                        "\n".join(f"- {item}" for item in api_items[:60]),
+                        "\n".join(f"- {item}" for item in reconciled_items[:60]),
                     )
                 else:
                     report_text = f"Точка: {point.display_name}\nСтоп-лист: недоступных позиций не найдено."
+                source = "public_api"
+                if html_confirmed_items is not None and reconciled_items != api_items:
+                    source = "public_api_reconciled"
                 return {
                     "status": "ok",
                     "point_name": point.display_name,
                     "selected": True,
-                    "items": api_items,
+                    "items": reconciled_items,
                     "report_text": report_text,
                     "alert_hash": None,
                     "diagnostics": self._build_diagnostics(
@@ -616,8 +653,10 @@ class ItalianPizzaPublicAdapter:
                         target_url,
                         address_filled=True,
                         selected=True,
-                        products_found=len(api_items),
-                        source="public_api",
+                        products_found=len(reconciled_items),
+                        source=source,
+                        html_products_found=len(html_confirmed_items) if html_confirmed_items is not None else None,
+                        api_products_found=len(api_items),
                     ),
                 }
             logger.info("Stoplist public api returned no point-specific data point=%s, fallback to html", point.display_name)
