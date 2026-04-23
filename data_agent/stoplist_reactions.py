@@ -8,16 +8,16 @@ from db.models import SavedPoint, StopListIncident, User
 
 from .point_delivery import find_delivery_points_for_text, normalize_delivery_text
 from .stoplist_audit import append_stoplist_audit_entry
-from .stoplist_task_engine import format_stoplist_task_followup, sync_stoplist_incident_task_with_audit
+from .stoplist_task_engine import sync_stoplist_incident_task_with_audit
 
 logger = logging.getLogger(__name__)
 
 _REACTION_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("escalated", ("эскал", "подними выше", "руковод", "директор", "старшему")),
+    ("escalated", ("эскалируй", "эскалировать", "подними выше", "руководителю", "директору", "старшему")),
     ("needs_help", ("нужна помощь", "нужен совет", "помоги", "разберись", "подскажи")),
-    ("not_relevant", ("неакту", "ложн", "ошибоч", "ошибка", "само ушло", "уже не нужно")),
-    ("fixed", ("исправ", "сделано", "готово", "устран", "решено", "починили", "закрыли")),
-    ("accepted", ("принято", "принял", "взял", "беру", "в работе", "ок", "окей")),
+    ("not_relevant", ("не актуально", "неактуально", "ложный", "ложное", "ошибочно", "само ушло", "уже не нужно")),
+    ("fixed", ("исправлено", "исправил", "сделано", "готово", "устранено", "решено", "починили", "закрыли")),
+    ("accepted", ("принято", "принял", "взял", "беру в работу", "в работе")),
 )
 
 _STATUS_RESPONSE_TEXT = {
@@ -66,7 +66,7 @@ def classify_stoplist_reaction(text: str | None) -> str | None:
             normalized_marker = _normalize_text(marker)
             if not normalized_marker:
                 continue
-            if f" {normalized_marker} " in padded or normalized_marker in normalized:
+            if f" {normalized_marker} " in padded:
                 return status
     return None
 
@@ -157,6 +157,8 @@ def _match_incident(
         ]
         if len(direct_matches) == 1:
             return direct_matches[0], "reply_to_alert"
+        if reply_to_from_bot is True:
+            return None, None
 
     points = _load_active_points(db, user_id=user_id)
     matched_points = find_delivery_points_for_text(points, text)
@@ -196,7 +198,7 @@ def _match_incident(
 
 
 def _reaction_not_matched_text() -> str:
-    return "Не понял, к какой точке отнести реакцию. Ответьте на сообщение бота или напишите адрес точки."
+    return "Не понял, к какому сообщению отнести статус. Если понадобится, ответьте прямо на сообщение со стоп-листом."
 
 
 def _reaction_confirmed_text(status: str, point_name: str) -> str:
@@ -215,6 +217,9 @@ def apply_stoplist_reaction(
     reply_to_message_id: int | None = None,
     reply_to_from_bot: bool | None = None,
 ) -> StopListReactionResult | None:
+    if not reply_to_message_id or reply_to_from_bot is not True:
+        return None
+
     manager_status = classify_stoplist_reaction(text)
     if manager_status is None:
         return None
@@ -281,9 +286,6 @@ def apply_stoplist_reaction(
         logger.exception("Failed to sync stoplist task from reaction incident_id=%s", getattr(incident, "id", None))
 
     response_text = _reaction_confirmed_text(manager_status, incident.point_name)
-    task_followup = format_stoplist_task_followup(task_sync_result)
-    if task_followup:
-        response_text = f"{response_text} {task_followup}"
 
     return StopListReactionResult(
         handled=True,

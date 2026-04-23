@@ -133,7 +133,7 @@ class StopListTaskEngineTest(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.task_action, "created")
         self.assertEqual(result.task_id, task.id)
-        self.assertIn("Завёл задачу", result.response_text)
+        self.assertNotIn("Завёл задачу", result.response_text)
         self.assertEqual(task.status, "in_progress")
         self.assertEqual(task.priority, "high")
         self.assertEqual(task.assigned_to, self.user_id)

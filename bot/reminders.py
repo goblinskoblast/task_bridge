@@ -10,7 +10,7 @@ from config import (
     REMINDER_INTERVALS, ASSIGNEE_REMINDER_INTERVALS, CREATOR_REMINDER_INTERVALS,
     REMINDER_TIME_HOUR, REMINDER_CHECK_INTERVAL, TIMEZONE
 )
-from db.models import Task, User
+from db.models import StopListIncident, Task, User
 from db.database import get_db_session
 from db.task_retention import (
     OVERDUE_AUTO_DELETE_GRACE_DAYS,
@@ -50,8 +50,26 @@ def _was_creator_reminder_sent_for_interval(task: Task, interval_days: int) -> b
     return abs(last_days_since_created - interval_days) < 0.5
 
 
+def _is_stoplist_linked_task(task: Task, db: Session | None = None) -> bool:
+    normalized_title = str(getattr(task, "title", "") or "").strip().lower()
+    if normalized_title.startswith("стоп-лист:"):
+        return True
+    if db is None or getattr(task, "id", None) is None:
+        return False
+    return (
+        db.query(StopListIncident.id)
+        .filter(StopListIncident.linked_task_id == int(task.id))
+        .first()
+        is not None
+    )
+
+
 async def send_assignee_reminder(bot: Bot, task: Task, assignee: User, reminder_type: str = "upcoming"):
     try:
+        if _is_stoplist_linked_task(task):
+            logger.info("Skip assignee reminder for stoplist-linked task %s", task.id)
+            return False
+
         if not assignee or assignee.telegram_id == -1:
             logger.warning(f"Assignee for task {task.id} hasn't started bot")
             return False
@@ -99,6 +117,10 @@ async def send_assignee_reminder(bot: Bot, task: Task, assignee: User, reminder_
 
 async def send_creator_reminder(bot: Bot, task: Task):
     try:
+        if _is_stoplist_linked_task(task):
+            logger.info("Skip creator reminder for stoplist-linked task %s", task.id)
+            return False
+
         if not task.creator or task.creator.telegram_id == -1:
             logger.warning(f"Creator of task {task.id} hasn't started bot")
             return False
@@ -179,6 +201,10 @@ async def check_and_send_reminders(bot: Bot):
 
         for task in active_tasks:
             try:
+                if _is_stoplist_linked_task(task, db):
+                    logger.info("Skip reminder loop for stoplist-linked task %s", task.id)
+                    continue
+
                 if task.assignees:
                     interval_hours = get_effective_reminder_interval_hours(task)
                     if task.last_assignee_reminder_sent_at:

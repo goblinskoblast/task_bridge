@@ -113,12 +113,14 @@ class StopListMonitorCardsTest(unittest.TestCase):
         self.assertIsNotNone(incident)
         self.assertEqual(event.title, "Новый стоп-лист: Сухой Лог, Белинского 40")
         self.assertIn("Новый стоп-лист", event.body or "")
-        self.assertIn("Реакция: без реакции", event.body or "")
-        self.assertIn("Чтобы отметить статус", event.body or "")
+        self.assertNotIn("Кейс:", event.body or "")
+        self.assertNotIn("Реакция:", event.body or "")
+        self.assertNotIn("Открыт:", event.body or "")
+        self.assertNotIn("Чтобы отметить статус", event.body or "")
         self.assertEqual(len(bot.messages), 1)
         self.assertIn("Новый стоп-лист", bot.messages[0].get("text", ""))
-        self.assertIn("<b>Кейс:</b> новый", bot.messages[0].get("text", ""))
-        self.assertIn("<b>Реакция:</b> без реакции", bot.messages[0].get("text", ""))
+        self.assertNotIn("<b>Кейс:</b>", bot.messages[0].get("text", ""))
+        self.assertNotIn("<b>Реакция:</b>", bot.messages[0].get("text", ""))
 
     def test_run_stoplist_monitor_uses_ongoing_case_card_with_manager_reaction(self):
         bot = _DummyBot()
@@ -172,7 +174,7 @@ class StopListMonitorCardsTest(unittest.TestCase):
         self.assertEqual(events[1].title, "Стоп-лист продолжается: Сухой Лог, Белинского 40")
         self.assertEqual(len(bot.messages), 2)
         self.assertIn("Стоп-лист продолжается", bot.messages[1].get("text", ""))
-        self.assertIn("<b>Реакция:</b> принято", bot.messages[1].get("text", ""))
+        self.assertNotIn("<b>Реакция:</b>", bot.messages[1].get("text", ""))
         self.assertNotIn("Чтобы отметить статус", bot.messages[1].get("text", ""))
 
     def test_run_stoplist_monitor_uses_resolved_case_card_when_items_clear(self):
@@ -228,7 +230,7 @@ class StopListMonitorCardsTest(unittest.TestCase):
         self.assertEqual(events[1].title, "Стоп-лист нормализовался: Сухой Лог, Белинского 40")
         self.assertEqual(len(bot.messages), 2)
         self.assertIn("Стоп-лист нормализовался", bot.messages[1].get("text", ""))
-        self.assertIn("<b>Кейс:</b> нормализовался", bot.messages[1].get("text", ""))
+        self.assertNotIn("<b>Кейс:</b>", bot.messages[1].get("text", ""))
         self.assertNotIn("Чтобы отметить статус", bot.messages[1].get("text", ""))
 
 

@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from data_agent.stoplist_reactions import apply_stoplist_reaction
+from data_agent.stoplist_reactions import apply_stoplist_reaction, classify_stoplist_reaction
 from db.models import Base, DataAgentMonitorConfig, DataAgentMonitorEvent, SavedPoint, StopListIncident, User
 
 
@@ -80,27 +80,28 @@ class StopListReactionFlowTest(unittest.TestCase):
                 db.add(event)
                 db.flush()
 
-                incident = StopListIncident(
-                    user_id=user.id,
-                    monitor_config_id=config.id,
-                    first_event_id=event.id,
-                    last_event_id=event.id,
-                    system_name="italian_pizza",
-                    point_name=point_name,
-                    status="open",
-                    lifecycle_state="new",
-                    manager_status="unreviewed",
-                    title=f"Новый стоп-лист: {point_name}",
-                    summary_text="report",
-                    current_items_json=["Маргарита"],
-                    last_delta_json={"added": ["Маргарита"], "removed": [], "stayed": []},
-                    last_report_hash=f"hash-{point_name}",
-                    opened_at=datetime(2026, 4, 22, 12, 0, 0),
-                    first_seen_at=datetime(2026, 4, 22, 12, 0, 0),
-                    last_seen_at=datetime(2026, 4, 22, 12, 0, 0),
-                    update_count=1,
+                db.add(
+                    StopListIncident(
+                        user_id=user.id,
+                        monitor_config_id=config.id,
+                        first_event_id=event.id,
+                        last_event_id=event.id,
+                        system_name="italian_pizza",
+                        point_name=point_name,
+                        status="open",
+                        lifecycle_state="new",
+                        manager_status="unreviewed",
+                        title=f"Новый стоп-лист: {point_name}",
+                        summary_text="report",
+                        current_items_json=["Маргарита"],
+                        last_delta_json={"added": ["Маргарита"], "removed": [], "stayed": []},
+                        last_report_hash=f"hash-{point_name}",
+                        opened_at=datetime(2026, 4, 22, 12, 0, 0),
+                        first_seen_at=datetime(2026, 4, 22, 12, 0, 0),
+                        last_seen_at=datetime(2026, 4, 22, 12, 0, 0),
+                        update_count=1,
+                    )
                 )
-                db.add(incident)
 
             db.commit()
             self.user_id = user.id
@@ -144,7 +145,7 @@ class StopListReactionFlowTest(unittest.TestCase):
         self.assertEqual(incident.manager_updated_chat_id, -1001001)
         self.assertEqual(incident.manager_updated_message_id, 9001)
 
-    def test_apply_stoplist_reaction_matches_dedicated_point_chat_without_reply(self) -> None:
+    def test_apply_stoplist_reaction_ignores_dedicated_point_chat_without_reply(self) -> None:
         db = self.SessionLocal()
         try:
             result = apply_stoplist_reaction(
@@ -164,15 +165,11 @@ class StopListReactionFlowTest(unittest.TestCase):
         finally:
             db.close()
 
-        self.assertIsNotNone(result)
-        self.assertTrue(result.matched)
-        self.assertEqual(result.manager_status, "fixed")
-        self.assertEqual(result.matched_by, "point_chat")
-        self.assertIn("Перепроверю по следующему циклу", result.response_text)
-        self.assertEqual(incident.manager_status, "fixed")
-        self.assertEqual(incident.manager_updated_message_id, 9002)
+        self.assertIsNone(result)
+        self.assertEqual(incident.manager_status, "unreviewed")
+        self.assertIsNone(incident.manager_updated_message_id)
 
-    def test_apply_stoplist_reaction_matches_explicit_point_name(self) -> None:
+    def test_apply_stoplist_reaction_ignores_explicit_point_name_without_reply(self) -> None:
         db = self.SessionLocal()
         try:
             result = apply_stoplist_reaction(
@@ -197,14 +194,11 @@ class StopListReactionFlowTest(unittest.TestCase):
         finally:
             db.close()
 
-        self.assertIsNotNone(result)
-        self.assertTrue(result.matched)
-        self.assertEqual(result.manager_status, "needs_help")
-        self.assertEqual(result.matched_by, "point_name")
+        self.assertIsNone(result)
         self.assertEqual(dry_log_incident.manager_status, "unreviewed")
-        self.assertEqual(polevskoy_incident.manager_status, "needs_help")
+        self.assertEqual(polevskoy_incident.manager_status, "unreviewed")
 
-    def test_apply_stoplist_reaction_returns_clarification_when_no_incident_match(self) -> None:
+    def test_apply_stoplist_reaction_returns_clarification_when_reply_does_not_match_incident(self) -> None:
         db = self.SessionLocal()
         try:
             stale_incident = (
@@ -224,6 +218,8 @@ class StopListReactionFlowTest(unittest.TestCase):
                 text="Принято",
                 observed_at=datetime(2026, 4, 22, 12, 20, 0),
                 message_id=9004,
+                reply_to_message_id=999999,
+                reply_to_from_bot=True,
             )
             db.commit()
         finally:
@@ -232,7 +228,33 @@ class StopListReactionFlowTest(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertFalse(result.matched)
         self.assertEqual(result.manager_status, "accepted")
-        self.assertIn("Ответьте на сообщение бота", result.response_text)
+        self.assertIn("ответьте прямо на сообщение", result.response_text.lower())
+
+    def test_classify_stoplist_reaction_does_not_match_casual_text_with_poka(self) -> None:
+        self.assertIsNone(classify_stoplist_reaction("С ним не надо общаться пока, он просто отчеты кидает"))
+
+    def test_apply_stoplist_reaction_ignores_casual_text_even_in_point_chat(self) -> None:
+        db = self.SessionLocal()
+        try:
+            result = apply_stoplist_reaction(
+                db,
+                telegram_user_id=137236883,
+                chat_id=-1001002,
+                text="С ним не надо общаться пока, он просто отчеты кидает",
+                observed_at=datetime(2026, 4, 22, 14, 52, 0),
+                message_id=9100,
+            )
+            db.commit()
+            incident = (
+                db.query(StopListIncident)
+                .filter(StopListIncident.point_name == "Полевской, Ленина 11")
+                .one()
+            )
+        finally:
+            db.close()
+
+        self.assertIsNone(result)
+        self.assertEqual(incident.manager_status, "unreviewed")
 
 
 if __name__ == "__main__":
