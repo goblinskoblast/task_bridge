@@ -62,6 +62,7 @@ logger = logging.getLogger(__name__)
 _MONITOR_RETRY_STATUSES = {
     "failed",
     "error",
+    "source_unstable",
     "system_not_connected",
     "no_systems_connected",
     "system_not_found",

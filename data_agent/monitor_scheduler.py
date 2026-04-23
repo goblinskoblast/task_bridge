@@ -29,6 +29,7 @@ _scheduler = None
 _MONITOR_FAILURE_STATUSES = {
     "failed",
     "error",
+    "source_unstable",
     "system_not_connected",
     "no_systems_connected",
     "system_not_found",
@@ -130,6 +131,13 @@ def _result_has_blank_scan_evidence(result: dict | None) -> bool:
         if (isinstance(value, list) and value) or (isinstance(diagnostic_value, list) and diagnostic_value):
             return True
     return False
+
+
+def _stoplist_result_requires_retry(result: dict | None) -> bool:
+    if not isinstance(result, dict):
+        return False
+    diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), dict) else {}
+    return str(diagnostics.get("source_warning_level") or "").strip().lower() == "high"
 
 
 def _load_monitor_config(db, config: DataAgentMonitorConfig | None) -> DataAgentMonitorConfig | None:
@@ -527,6 +535,18 @@ async def _run_stoplist_monitor(
         )
         if user and user.telegram_id:
             result = point_statistics_service.enrich_stoplist_report(user.telegram_id, config.point_name, result)
+
+        if _stoplist_result_requires_retry(result):
+            diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), dict) else {}
+            result = {
+                **result,
+                "status": "source_unstable",
+                "message": "Стоп-лист требует повторной проверки источника.",
+                "diagnostics": {
+                    **diagnostics,
+                    "retry_reason": "stoplist_source_divergence",
+                },
+            }
 
         result_status = result.get("status") or "ok"
         if result_status in _MONITOR_FAILURE_STATUSES:

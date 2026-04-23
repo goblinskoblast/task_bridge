@@ -191,6 +191,37 @@ class ItalianPizzaPublicAdapter:
         )
         return overlap
 
+    def _build_source_stability_diagnostics(self, api_items: list[str], html_items: list[str] | None) -> dict:
+        if not api_items or not html_items:
+            return {}
+
+        api_set = set(api_items)
+        html_set = set(html_items)
+        overlap_count = len(api_set & html_set)
+        api_only_count = len(api_set - html_set)
+        html_only_count = len(html_set - api_set)
+        symmetric_diff_count = api_only_count + html_only_count
+        baseline = max(len(api_set), len(html_set), 1)
+        diff_ratio = symmetric_diff_count / baseline
+
+        warning_level = None
+        consensus = "confirmed"
+        if symmetric_diff_count >= 8 and diff_ratio >= 0.4:
+            warning_level = "high"
+            consensus = "divergent"
+        elif symmetric_diff_count >= 4 and diff_ratio >= 0.25:
+            warning_level = "medium"
+            consensus = "drifting"
+
+        return {
+            "source_consensus": consensus,
+            "source_warning_level": warning_level,
+            "source_overlap_count": overlap_count,
+            "source_api_only_count": api_only_count,
+            "source_html_only_count": html_only_count,
+            "source_diff_ratio": round(diff_ratio, 3),
+        }
+
     def _confirm_point_from_public_html(self, html: str, point, current_url: str) -> bool:
         normalized_html = self._normalize_text(html)
         normalized_city = self._normalize_text(point.city)
@@ -641,6 +672,7 @@ class ItalianPizzaPublicAdapter:
                 source = "public_api"
                 if html_confirmed_items is not None and reconciled_items != api_items:
                     source = "public_api_reconciled"
+                source_stability = self._build_source_stability_diagnostics(api_items, html_confirmed_items)
                 return {
                     "status": "ok",
                     "point_name": point.display_name,
@@ -657,6 +689,7 @@ class ItalianPizzaPublicAdapter:
                         source=source,
                         html_products_found=len(html_confirmed_items) if html_confirmed_items is not None else None,
                         api_products_found=len(api_items),
+                        **source_stability,
                     ),
                 }
             logger.info("Stoplist public api returned no point-specific data point=%s, fallback to html", point.display_name)

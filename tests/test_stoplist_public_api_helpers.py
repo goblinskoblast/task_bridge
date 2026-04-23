@@ -60,6 +60,29 @@ class StoplistPublicApiHelpersTest(unittest.IsolatedAsyncioTestCase):
             api_items,
         )
 
+    async def test_build_source_stability_diagnostics_marks_high_divergence(self):
+        adapter = ItalianPizzaPublicAdapter()
+
+        diagnostics = adapter._build_source_stability_diagnostics(
+            ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"],
+            ["A", "B", "K", "L", "M", "N", "O", "P", "Q", "R"],
+        )
+
+        self.assertEqual(diagnostics["source_consensus"], "divergent")
+        self.assertEqual(diagnostics["source_warning_level"], "high")
+        self.assertEqual(diagnostics["source_overlap_count"], 2)
+
+    async def test_build_source_stability_diagnostics_ignores_small_drift(self):
+        adapter = ItalianPizzaPublicAdapter()
+
+        diagnostics = adapter._build_source_stability_diagnostics(
+            ["A", "B", "C", "D", "E", "F"],
+            ["A", "B", "C", "D", "E", "F", "G", "H"],
+        )
+
+        self.assertEqual(diagnostics["source_consensus"], "confirmed")
+        self.assertIsNone(diagnostics["source_warning_level"])
+
 
 if __name__ == "__main__":
     unittest.main()

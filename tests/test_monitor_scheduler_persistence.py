@@ -978,5 +978,77 @@ class MonitorSchedulerPersistenceTest(unittest.TestCase):
         self.assertEqual(incidents[0].update_count, 2)
 
 
+    def test_run_stoplist_monitor_keeps_high_source_drift_internal(self):
+        session = self.SessionLocal()
+        try:
+            user = session.query(User).filter(User.telegram_id == 555001).first()
+            stoplist_config = DataAgentMonitorConfig(
+                user_id=user.id,
+                system_name="italian_pizza",
+                monitor_type="stoplist",
+                point_name="РЎСѓС…РѕР№ Р›РѕРі, Р‘РµР»РёРЅСЃРєРѕРіРѕ 40",
+                check_interval_minutes=180,
+                is_active=True,
+            )
+            session.add(stoplist_config)
+            session.commit()
+            session.refresh(stoplist_config)
+            detached_stoplist_config = stoplist_config
+            stoplist_config_id = stoplist_config.id
+        finally:
+            session.close()
+
+        bot = _DummyBot()
+        unstable_result = {
+            "status": "ok",
+            "report_text": "РўРѕС‡РєР°: РЎСѓС…РѕР№ Р›РѕРі, Р‘РµР»РёРЅСЃРєРѕРіРѕ 40\nРЎС‚РѕРї-Р»РёСЃС‚:\n- РњР°СЂРіР°СЂРёС‚Р°",
+            "items": ["РњР°СЂРіР°СЂРёС‚Р°"],
+            "diagnostics": {
+                "source_warning_level": "high",
+                "source_consensus": "divergent",
+                "source_diff_ratio": 0.6,
+            },
+            "alert_hash": "stoplist-unstable",
+        }
+
+        with patch.object(monitor_scheduler, "get_db_session", side_effect=self.SessionLocal):
+            with patch.object(
+                monitor_scheduler.stoplist_tool,
+                "collect_for_point",
+                new=AsyncMock(return_value=unstable_result),
+            ):
+                with patch.object(
+                    monitor_scheduler.point_statistics_service,
+                    "enrich_stoplist_report",
+                    return_value=unstable_result,
+                ):
+                    asyncio.run(monitor_scheduler._run_stoplist_monitor(bot, detached_stoplist_config))
+
+        session = self.SessionLocal()
+        try:
+            config = session.query(DataAgentMonitorConfig).filter(DataAgentMonitorConfig.id == stoplist_config_id).first()
+            events = (
+                session.query(DataAgentMonitorEvent)
+                .filter(DataAgentMonitorEvent.config_id == stoplist_config_id)
+                .order_by(DataAgentMonitorEvent.created_at.asc(), DataAgentMonitorEvent.id.asc())
+                .all()
+            )
+            incidents = (
+                session.query(StopListIncident)
+                .filter(StopListIncident.monitor_config_id == stoplist_config_id)
+                .order_by(StopListIncident.id.asc())
+                .all()
+            )
+        finally:
+            session.close()
+
+        self.assertIsNotNone(config)
+        self.assertEqual(config.last_status, "source_unstable")
+        self.assertEqual(len(bot.messages), 0)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].severity, "error")
+        self.assertEqual(len(incidents), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
