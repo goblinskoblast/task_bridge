@@ -106,8 +106,8 @@ class PriorityUserGoldenFlowsTest(unittest.TestCase):
             },
             has_history=True,
             is_saved_point=True,
-            current_age_days={"Маргарита": 4, "Пепперони": 2, "Четыре сыра": 1},
-            removed_age_days={"Карбонара": 3},
+            current_age_hours={"Маргарита": 13, "Пепперони": 2, "Четыре сыра": 1},
+            removed_age_hours={"Карбонара": 3},
         )
 
         self.assertIn("Новые в стопе", text)
@@ -117,8 +117,9 @@ class PriorityUserGoldenFlowsTest(unittest.TestCase):
         self.assertIn("1. 🔴 Маргарита", text)
         self.assertIn("2. 🟡 Пепперони", text)
         self.assertIn("1. Карбонара", text)
-        self.assertIn("в стопе 4 дня", text)
-        self.assertIn("была в стопе 3 дня", text)
+        self.assertIn("в стопе 1 день", text)
+        self.assertIn("в стопе 2 часа", text)
+        self.assertIn("была в стопе 3 часа", text)
 
     def test_priority_stoplist_request_stays_in_stoplist_scenario(self) -> None:
         decision = self.runtime._rule_based_decision(

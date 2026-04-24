@@ -48,21 +48,22 @@ class StoplistMemoryTest(unittest.TestCase):
             )
         )
 
-    def test_build_stoplist_item_history_days_tracks_current_and_removed_items(self):
+    def test_build_stoplist_item_history_tracks_current_and_removed_items(self):
         snapshots = [
             SimpleNamespace(snapshot_at=datetime(2026, 4, 18, 8, 0), stoplist_items_json=["Маргарита", "Пепперони"]),
             SimpleNamespace(snapshot_at=datetime(2026, 4, 19, 8, 0), stoplist_items_json=["Маргарита", "Пепперони"]),
         ]
 
-        history = point_statistics_service._build_stoplist_item_history_days(
+        history = point_statistics_service._build_stoplist_item_history(
             snapshots,
             ["Маргарита", "Четыре сыра"],
             as_of=datetime(2026, 4, 20, 8, 0),
         )
 
-        self.assertEqual(history["current"]["Маргарита"], 3)
-        self.assertEqual(history["current"]["Четыре сыра"], 1)
-        self.assertEqual(history["removed"]["Пепперони"], 2)
+        self.assertEqual(history["current_hours"]["Маргарита"], 48)
+        self.assertEqual(history["current_hours"]["Четыре сыра"], 1)
+        self.assertEqual(history["removed_hours"]["Пепперони"], 24)
+        self.assertEqual(history["current_days"]["Маргарита"], 2)
 
     def test_render_stoplist_report_with_history(self):
         text = point_statistics_service._render_stoplist_report(
@@ -75,15 +76,15 @@ class StoplistMemoryTest(unittest.TestCase):
             },
             has_history=True,
             is_saved_point=True,
-            current_age_days={"Маргарита": 3, "Четыре сыра": 1},
-            removed_age_days={"Пепперони": 2},
+            current_age_hours={"Маргарита": 13, "Четыре сыра": 1},
+            removed_age_hours={"Пепперони": 2},
         )
         self.assertIn("🆕 Новые в стопе: 1", text)
-        self.assertIn("1. 🟡 Четыре сыра — в стопе 1 день", text)
+        self.assertIn("1. 🟡 Четыре сыра — в стопе 1 час", text)
         self.assertIn("🟠 Уже в стопе: 1", text)
-        self.assertIn("1. 🟡 Маргарита — в стопе 3 дня", text)
+        self.assertIn("1. 🔴 Маргарита — в стопе 1 день", text)
         self.assertIn("🟢 Ушли из стопа: 1", text)
-        self.assertIn("1. Пепперони — была в стопе 2 дня", text)
+        self.assertIn("1. Пепперони — была в стопе 2 часа", text)
 
     def test_render_stoplist_report_without_history_for_saved_point(self):
         text = point_statistics_service._render_stoplist_report(
@@ -110,19 +111,25 @@ class StoplistMemoryTest(unittest.TestCase):
             },
             has_history=True,
             is_saved_point=True,
-            current_age_days={item: 4 for item in current_items[:20]} | {item: 1 for item in current_items[20:]},
-            removed_age_days={item: 2 for item in removed_items},
+            current_age_hours={item: 13 for item in current_items[:20]} | {item: 1 for item in current_items[20:]},
+            removed_age_hours={item: 2 for item in removed_items},
         )
-        self.assertIn("20. 🔴 Позиция 20 — в стопе 4 дня", text)
-        self.assertIn("7. 🟡 Позиция 27 — в стопе 1 день", text)
-        self.assertIn("3. Ушла 3 — была в стопе 2 дня", text)
+        self.assertIn("20. 🔴 Позиция 20 — в стопе 1 день", text)
+        self.assertIn("7. 🟡 Позиция 27 — в стопе 1 час", text)
+        self.assertIn("3. Ушла 3 — была в стопе 2 часа", text)
         self.assertNotIn("… и ещё", text)
 
-    def test_stoplist_age_marker_turns_red_after_three_days(self):
+    def test_stoplist_age_marker_turns_red_after_three_hours(self):
         self.assertEqual(point_statistics_service._stoplist_age_marker(1), "🟡")
         self.assertEqual(point_statistics_service._stoplist_age_marker(3), "🟡")
         self.assertEqual(point_statistics_service._stoplist_age_marker(4), "🔴")
         self.assertEqual(point_statistics_service._stoplist_age_marker(5, removed=True), "")
+
+    def test_format_stoplist_age_label_switches_from_hours_to_days_after_twelve_hours(self):
+        self.assertEqual(point_statistics_service._format_stoplist_age_label(1), "1 час")
+        self.assertEqual(point_statistics_service._format_stoplist_age_label(3), "3 часа")
+        self.assertEqual(point_statistics_service._format_stoplist_age_label(12), "1 день")
+        self.assertEqual(point_statistics_service._format_stoplist_age_label(36), "2 дня")
 
     def test_render_stoplist_report_without_saved_point(self):
         text = point_statistics_service._render_stoplist_report(
@@ -136,7 +143,7 @@ class StoplistMemoryTest(unittest.TestCase):
         self.assertIn("ℹ️ Чтобы видеть новые позиции, ушедшие позиции и дни в стопе", text)
 
 
-    def test_build_stoplist_item_history_days_resets_after_large_current_shift(self):
+    def test_build_stoplist_item_history_resets_after_large_current_shift(self):
         snapshots = [
             SimpleNamespace(
                 snapshot_at=datetime(2026, 4, 22, 8, 0),
@@ -148,18 +155,18 @@ class StoplistMemoryTest(unittest.TestCase):
             ),
         ]
 
-        history = point_statistics_service._build_stoplist_item_history_days(
+        history = point_statistics_service._build_stoplist_item_history(
             snapshots,
             ["A", "B", "I"],
             as_of=datetime(2026, 4, 23, 8, 0),
         )
 
-        self.assertEqual(history["current"]["A"], 1)
-        self.assertEqual(history["current"]["B"], 1)
-        self.assertEqual(history["current"]["I"], 1)
-        self.assertEqual(history["removed"]["C"], 1)
+        self.assertEqual(history["current_hours"]["A"], 1)
+        self.assertEqual(history["current_hours"]["B"], 1)
+        self.assertEqual(history["current_hours"]["I"], 1)
+        self.assertEqual(history["removed_hours"]["C"], 1)
 
-    def test_build_stoplist_item_history_days_resets_on_large_historical_shift(self):
+    def test_build_stoplist_item_history_resets_on_large_historical_shift(self):
         snapshots = [
             SimpleNamespace(
                 snapshot_at=datetime(2026, 4, 20, 8, 0),
@@ -175,14 +182,14 @@ class StoplistMemoryTest(unittest.TestCase):
             ),
         ]
 
-        history = point_statistics_service._build_stoplist_item_history_days(
+        history = point_statistics_service._build_stoplist_item_history(
             snapshots,
             ["A", "B", "I", "J", "K", "L"],
             as_of=datetime(2026, 4, 23, 8, 0),
         )
 
-        self.assertEqual(history["current"]["A"], 2)
-        self.assertEqual(history["current"]["I"], 2)
+        self.assertEqual(history["current_hours"]["A"], 24)
+        self.assertEqual(history["current_hours"]["I"], 24)
 
 
 if __name__ == "__main__":
