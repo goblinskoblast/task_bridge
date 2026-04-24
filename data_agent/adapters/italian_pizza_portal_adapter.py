@@ -1756,6 +1756,83 @@ class ItalianPizzaPortalAdapter:
         )
         return bool(self._STRICT_RED_ATTR_RE.search(attr_blob))
 
+    def _parse_blank_metric_value(self, value: str | None) -> float | None:
+        match = re.search(r"-?\d+(?:[.,]\d+)?", str(value or ""))
+        if not match:
+            return None
+        try:
+            return float(match.group(0).replace(",", "."))
+        except ValueError:
+            return None
+
+    def _is_blank_signal_actionable(self, signal: dict) -> bool:
+        rows = signal.get("rows") or []
+        for row in rows:
+            inferred_rule = str(row.get("inferred_rule") or "").strip().lower()
+            if inferred_rule == "accepted_gt_max":
+                return True
+
+            label = self._normalize_text(str(row.get("row_label") or ""))
+            numeric_value = self._parse_blank_metric_value(row.get("value"))
+            if numeric_value is None or numeric_value <= 0:
+                continue
+
+            if "принято" in label:
+                return True
+            if not label:
+                return True
+            if "остаток" in label:
+                continue
+            if "итого" in label and numeric_value <= 0:
+                continue
+            return True
+        return False
+
+    def _select_user_facing_blank_rows(self, rows: list[dict]) -> list[dict]:
+        selected: list[dict] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        for row in rows:
+            label = str(row.get("row_label") or "").strip()
+            normalized_label = self._normalize_text(label)
+            value = str(row.get("value") or "").strip()
+            numeric_value = self._parse_blank_metric_value(value)
+            inferred_rule = str(row.get("inferred_rule") or "").strip().lower()
+
+            include = False
+            if inferred_rule == "accepted_gt_max":
+                include = True
+            elif "остаток" in normalized_label:
+                include = False
+            elif "принято" in normalized_label:
+                include = bool(numeric_value is not None and numeric_value > 0)
+            elif "макс" in normalized_label or "максимум" in normalized_label or "лимит" in normalized_label:
+                include = bool(numeric_value is not None and numeric_value > 0)
+            elif not normalized_label:
+                include = bool(numeric_value is not None and numeric_value > 0)
+            else:
+                include = bool(numeric_value is not None and numeric_value > 0)
+
+            if not include:
+                continue
+
+            dedupe_key = (normalized_label, value, inferred_rule)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            selected.append(row)
+
+        if selected:
+            return selected
+
+        for row in rows:
+            label = str(row.get("row_label") or "").strip()
+            value = str(row.get("value") or "").strip()
+            if not label and not value:
+                continue
+            return [row]
+        return []
+
     def _filter_red_blank_signals(self, signals: list[dict]) -> list[dict]:
         filtered: list[dict] = []
         for signal in signals:
@@ -1763,8 +1840,10 @@ class ItalianPizzaPortalAdapter:
             red_rows = [row for row in rows if self._blank_row_has_red_evidence(row)]
             if not red_rows:
                 continue
+            if not self._is_blank_signal_actionable(signal):
+                continue
             cleaned_signal = dict(signal)
-            cleaned_signal["rows"] = red_rows
+            cleaned_signal["rows"] = self._select_user_facing_blank_rows(red_rows)
             filtered.append(cleaned_signal)
         return filtered
 

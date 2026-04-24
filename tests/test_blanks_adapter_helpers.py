@@ -363,6 +363,121 @@ class BlanksAdapterHelpersTest(unittest.TestCase):
         self.assertEqual(len(filtered), 1)
         self.assertEqual(len(filtered[0]["rows"]), 2)
 
+    def test_filter_red_blank_signals_keeps_only_actionable_overload_places(self):
+        filtered = self.adapter._filter_red_blank_signals(
+            [
+                {
+                    "service": "Доставка",
+                    "time_range": "16:00 - 16:15",
+                    "column": "Закуски",
+                    "rows": [
+                        {
+                            "row_label": "Макс",
+                            "value": "10",
+                            "inferred_rule": "accepted_gt_max",
+                        },
+                        {
+                            "row_label": "Принято",
+                            "value": "10",
+                            "class_name": "blank-cell red-state",
+                            "data_cy": "capacity-alert",
+                            "background_color": "rgb(255, 200, 200)",
+                            "text_color": "rgb(120, 0, 0)",
+                            "border_color": "rgb(255, 0, 0)",
+                        },
+                        {
+                            "row_label": "",
+                            "value": "10 (29)",
+                            "class_name": "blank-cell red-state",
+                            "data_cy": "capacity-alert-extra",
+                            "background_color": "rgb(255, 200, 200)",
+                            "text_color": "rgb(120, 0, 0)",
+                            "border_color": "rgb(255, 0, 0)",
+                        },
+                    ],
+                },
+                {
+                    "service": "Самовывоз",
+                    "time_range": "16:00 - 16:15",
+                    "column": "Закуски",
+                    "rows": [
+                        {
+                            "row_label": "Принято",
+                            "value": "0",
+                            "class_name": "blank-cell red-state",
+                            "data_cy": "capacity-alert",
+                            "background_color": "rgb(255, 200, 200)",
+                            "text_color": "rgb(120, 0, 0)",
+                            "border_color": "rgb(255, 0, 0)",
+                        }
+                    ],
+                },
+                {
+                    "service": "Зал",
+                    "time_range": "16:00 - 16:15",
+                    "column": "Закуски",
+                    "rows": [
+                        {
+                            "row_label": "Остаток",
+                            "value": "0",
+                            "inferred_rule": "remaining_non_positive",
+                        },
+                        {
+                            "row_label": "Принято",
+                            "value": "0",
+                        },
+                    ],
+                },
+            ]
+        )
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["service"], "Доставка")
+        self.assertEqual(filtered[0]["column"], "Закуски")
+
+    def test_filter_red_blank_signals_hides_zero_remaining_details_in_report_rows(self):
+        filtered = self.adapter._filter_red_blank_signals(
+            [
+                {
+                    "service": "Доставка",
+                    "time_range": "16:00 - 16:15",
+                    "column": "Закуски",
+                    "rows": [
+                        {
+                            "row_label": "Макс",
+                            "value": "10",
+                            "inferred_rule": "accepted_gt_max",
+                        },
+                        {
+                            "row_label": "Принято",
+                            "value": "10",
+                            "class_name": "blank-cell red-state",
+                            "data_cy": "capacity-alert",
+                            "background_color": "rgb(255, 200, 200)",
+                            "text_color": "rgb(120, 0, 0)",
+                            "border_color": "rgb(255, 0, 0)",
+                        },
+                        {
+                            "row_label": "Остаток",
+                            "value": "0",
+                            "inferred_rule": "remaining_non_positive",
+                        },
+                    ],
+                }
+            ]
+        )
+
+        report_text, has_red_flags = self.adapter._build_blank_report_from_signals(
+            point_name="Test point",
+            period_hint="за последние 1 час",
+            signals=filtered,
+        )
+
+        self.assertTrue(has_red_flags)
+        self.assertIn("Макс: 10", report_text)
+        self.assertIn("Принято: 10", report_text)
+        self.assertNotIn("Остаток: 0", report_text)
+
     def test_build_period_help_message_uses_visible_controls(self):
         message = self.adapter._build_period_help_message(
             "\u0437\u0430 \u043f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0435 6 \u0447\u0430\u0441\u043e\u0432",
