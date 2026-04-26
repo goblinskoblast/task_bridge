@@ -18,6 +18,7 @@ class StopListDigestFlowTest(unittest.TestCase):
     def setUp(self) -> None:
         self.runtime = DataAgentRuntime()
         self.service = DataAgentService()
+        self.fixed_now = datetime.now().replace(microsecond=0)
         self.engine = create_engine(
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
@@ -38,7 +39,7 @@ class StopListDigestFlowTest(unittest.TestCase):
             db.add(user)
             db.flush()
 
-            now = datetime(2026, 4, 22, 15, 0, 0)
+            now = self.fixed_now
             for idx, point_name in enumerate(
                 [
                     "Сухой Лог, Белинского 40",
@@ -150,7 +151,7 @@ class StopListDigestFlowTest(unittest.TestCase):
         snapshot = build_stoplist_digest_snapshot(
             incidents,
             days=7,
-            now=datetime(2026, 4, 22, 15, 0, 0),
+            now=self.fixed_now,
         )
         text = format_stoplist_digest_text(snapshot)
 

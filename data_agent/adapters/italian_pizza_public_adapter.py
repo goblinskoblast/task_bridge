@@ -30,6 +30,8 @@ _DISABLED_CLASS_MARKERS = {
 
 
 class ItalianPizzaPublicAdapter:
+    _SIZE_ONLY_RE = re.compile(r"^\d+[.,]?\d*\s*см\b", flags=re.IGNORECASE)
+
     def _normalize_text(self, text: str) -> str:
         normalized = re.sub(r"\s+", " ", (text or "").strip().lower())
         return normalized.replace("ё", "е")
@@ -272,11 +274,8 @@ class ItalianPizzaPublicAdapter:
             if "disabled" not in card_html.lower():
                 continue
 
-            title_match = re.search(r"<h[1-6][^>]*>(.*?)</h[1-6]>", card_html, flags=re.DOTALL | re.IGNORECASE)
-            raw_name = ""
-            if title_match:
-                raw_name = re.sub(r"<[^>]+>", " ", title_match.group(1))
-            else:
+            raw_name = re.sub(r"<[^>]+>", "\n", card_html)
+            if not raw_name.strip():
                 alt_match = re.search(r'alt="([^"]+)"', card_html, flags=re.DOTALL | re.IGNORECASE)
                 if alt_match:
                     raw_name = alt_match.group(1)
@@ -329,6 +328,7 @@ class ItalianPizzaPublicAdapter:
     def _clean_product_name(self, raw: str) -> str:
         lines = [line.strip() for line in (raw or "").splitlines() if line.strip()]
         filtered: list[str] = []
+        size_suffix: str | None = None
         for line in lines:
             lowered = line.lower()
             if lowered in _CATEGORY_STOPWORDS:
@@ -337,7 +337,13 @@ class ItalianPizzaPublicAdapter:
                 continue
             if re.fullmatch(r"[\d\s.,/-]+", line):
                 continue
-            if re.fullmatch(r"\d+[.,]?\d*\s*(г|кг|мл|л|см)\b", lowered):
+            if self._SIZE_ONLY_RE.fullmatch(lowered):
+                normalized_size = re.sub(r"\s*см\b", " см", line, flags=re.IGNORECASE)
+                normalized_size = re.sub(r"\s+", " ", normalized_size).strip()
+                if normalized_size and size_suffix is None:
+                    size_suffix = normalized_size
+                continue
+            if re.fullmatch(r"\d+[.,]?\d*\s*(г|кг|мл|л)\b", lowered):
                 continue
             if any(marker in lowered for marker in ["₽", "руб", "доставка", "войти", "контакты", "заказать"]):
                 continue
@@ -356,6 +362,8 @@ class ItalianPizzaPublicAdapter:
             return ""
         if any(lowered.startswith(prefix) for prefix in ["заказ по телефону", "франшиза", "акции"]):
             return ""
+        if size_suffix and not self._SIZE_ONLY_RE.search(lowered):
+            candidate = f"{candidate} {size_suffix}"
         return candidate
 
     async def _dismiss_common_overlays(self, page) -> bool:
@@ -601,11 +609,11 @@ class ItalianPizzaPublicAdapter:
                     continue
                 card = locator.first
                 title = await self._extract_card_title(card)
-                if title:
-                    return title
                 text = (await card.inner_text()).strip()
                 if text and len(text) > 2:
                     return text
+                if title:
+                    return title
             except Exception:
                 continue
         return ""
@@ -626,6 +634,10 @@ class ItalianPizzaPublicAdapter:
                     continue
                 card_text = await self._extract_card_text(btn)
                 if not card_text:
+                    continue
+                candidate = self._clean_product_name(card_text)
+                if candidate and candidate not in results:
+                    results.append(candidate)
                     continue
                 for raw_line in card_text.splitlines():
                     candidate = self._clean_product_name(raw_line)
