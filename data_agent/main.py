@@ -30,7 +30,7 @@ logging.basicConfig(
 app = FastAPI(title="TaskBridge DataAgent", version="0.1.0")
 
 
-def verify_internal_api_access(request: Request) -> None:
+async def verify_internal_api_access(request: Request) -> None:
     if not INTERNAL_API_TOKEN:
         return
 
